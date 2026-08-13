@@ -3,10 +3,11 @@
 /**
  * 秘密情報の混入検査。
  *
- * 検査するのは次の 3 点:
+ * 検査するのは次の 4 点:
  *  1. `.env` 系ファイルが追跡対象に含まれていないか
- *  2. `.env.example` に「値」が書かれていないか（変数名と説明のみが許される）
- *  3. ソース中に秘密情報らしき代入が直書きされていないか
+ *  2. アップロードされた画像の保存先が追跡対象に含まれていないか
+ *  3. `.env.example` に「値」が書かれていないか（変数名と説明のみが許される）
+ *  4. ソース中に秘密情報らしき代入が直書きされていないか
  *
  * これは本格的な秘密スキャナの代替ではない（ツール選定は UD-901 で未決定）。
  * ここでは「このリポジトリで最も起きやすい混入経路」だけを塞ぐ。
@@ -35,7 +36,16 @@ function listTrackedFiles() {
 
 const violations = [];
 
-// --- 1. .env 系ファイルの混入 -------------------------------------------------
+/**
+ * アップロードされた画像の保存先（`MEDIA_STORAGE_DIR`）。
+ *
+ * ⚠️ **利用者が送ったデータをリポジトリへ入れない。**
+ * `.gitignore` へ書くだけでは、設定を足し忘れた保存先が素通りする。
+ * 実際に E2E が保存した画像を一度取り込んでしまったため、検査で止める。
+ */
+const MEDIA_DIRS = ['.media', '.e2e-media'];
+
+// --- 1〜2. .env 系・鍵・アップロード物の混入 ----------------------------------
 const tracked = listTrackedFiles();
 if (tracked !== null) {
   for (const file of tracked) {
@@ -49,10 +59,15 @@ if (tracked !== null) {
     if (/\.(pem|key|p12|keystore)$/.test(basename)) {
       violations.push(`[鍵混入] ${file} が追跡されています。鍵ファイルをコミットしないこと。`);
     }
+    if (file.split('/').some((segment) => MEDIA_DIRS.includes(segment))) {
+      violations.push(
+        `[アップロード物混入] ${file} が追跡されています。保存された画像をコミットしないこと。`,
+      );
+    }
   }
 }
 
-// --- 2. .env.example に値が書かれていないか -----------------------------------
+// --- 3. .env.example に値が書かれていないか -----------------------------------
 const examplePath = join(projectRoot, '.env.example');
 if (!existsSync(examplePath)) {
   violations.push('[不足] .env.example が存在しません。必要な環境変数を文書化すること。');
@@ -77,7 +92,7 @@ if (!existsSync(examplePath)) {
   });
 }
 
-// --- 3. ソース中の直書き秘密 --------------------------------------------------
+// --- 4. ソース中の直書き秘密 --------------------------------------------------
 const SECRET_PATTERNS = [
   { name: 'AWS アクセスキー', re: /\bAKIA[0-9A-Z]{16}\b/ },
   { name: 'GitHub トークン', re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/ },

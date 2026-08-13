@@ -26,7 +26,10 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tests/**", "vitest.config.*", "package.json"]
+      "inputs": ["src/**", "tests/**", "vitest.config.*", "package.json"],
+      // ⚠️ Turborepo 2 は既定で環境変数を絞り込む。ここに書かない変数はテストへ届かない。
+      // 結合テストの接続先を書き忘れると、DB のテストが黙って飛ぶ。
+      "env": ["DATABASE_URL", "TEST_DATABASE_URL", "REQUIRE_INTEGRATION_TESTS"]
     },
     "test:watch": {
       "cache": false,

@@ -13,16 +13,21 @@ export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
  * 結合テストを実行できるか。
  *
  * ⚠️ **黙ってスキップさせない。**
- * `REQUIRE_INTEGRATION_TESTS=1` が立っているとき（CI）に接続先が無ければ、
- * スキップではなく失敗させる。設定漏れで検査が素通りすると、
+ * 接続先が無いときにスキップで済ませると、検査が素通りしたことに気づけず、
  * 「制約は効いているはず」という誤った安心を生む。
+ *
+ * ⚠️ **判定を `REQUIRE_INTEGRATION_TESTS` だけに委ねない。**
+ * この変数自体が実行環境に届かないことがある——実際に Turborepo 2 の
+ * 環境変数の絞り込みで届かず、「必須にしたつもりの検査」が CI で
+ * 丸ごと飛んでいた。合図が届かなければ、合図を頼りにした番人は何もしない。
+ * そこで `CI` でも要求されているものとして扱い、片方が欠けても止まるようにする。
  */
 export function integrationTestsAvailable(): boolean {
-  const required = process.env.REQUIRE_INTEGRATION_TESTS === '1';
+  const required = process.env.REQUIRE_INTEGRATION_TESTS === '1' || process.env.CI === 'true';
   if (TEST_DATABASE_URL === undefined || TEST_DATABASE_URL === '') {
     if (required) {
       throw new Error(
-        'REQUIRE_INTEGRATION_TESTS=1 ですが TEST_DATABASE_URL が設定されていません。結合テストを黙って飛ばさないため、失敗させます。',
+        '結合テストが必須の環境（REQUIRE_INTEGRATION_TESTS=1 または CI）ですが TEST_DATABASE_URL が設定されていません。黙って飛ばさないため、失敗させます。',
       );
     }
     return false;
