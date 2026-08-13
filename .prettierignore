@@ -5,3 +5,7 @@ coverage
 generated
 .turbo
 pnpm-lock.yaml
+
+# Next.js が build のたびに再生成するため、整形対象から外す。
+# 整形すると build が書き戻し、CI の format:check と競合して不安定になる。
+apps/web/next-env.d.ts
