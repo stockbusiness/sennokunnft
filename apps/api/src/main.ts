@@ -13,10 +13,17 @@ import {
   createPrismaClient,
   PrismaAccountRepository,
   PrismaArtworkRepository,
+  PrismaAuditLogRepository,
   PrismaListingRepository,
   type PrismaClient,
 } from '@sengoku/database';
-import { DevTokenVerifier, SystemClock, UuidGenerator } from '@sengoku/integrations';
+import {
+  DevTokenVerifier,
+  LocalFileStorage,
+  SystemClock,
+  UuidGenerator,
+  generateStorageKey,
+} from '@sengoku/integrations';
 import { AppModule } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
 import { NestStructuredLogger } from './common/nest-logger';
@@ -90,6 +97,10 @@ async function bootstrap(): Promise<void> {
       tokenVerifier,
       clock: new SystemClock(),
       ids: new UuidGenerator(),
+      // ✅ 本番ストレージへは接続しない。保存先は UD-508 で未決定。
+      storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
+      audit: new PrismaAuditLogRepository(prisma),
+      generateStorageKey,
     }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。
     // 後から有効化すると取りこぼしに気付きにくいため、最初から有効にしておく。

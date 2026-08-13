@@ -3,12 +3,12 @@ import { EmptyState, PageHeader, PriceTag, StatusBadge } from '@sengoku/ui';
 import { fetchArtworkDetail } from '../../../src/api-client';
 import { SITE_COPY } from '../../../src/site';
 
-/** 購入できない理由を、利用者向けの言い回しに直す。 */
-const UNAVAILABLE_LABEL: Record<string, string> = {
-  listing_not_active: 'ただいま販売しておりません',
-  not_started: '販売開始前です',
+/** 表示状態を、利用者向けの言い回しに直す。 */
+const DISPLAY_STATE_LABEL: Record<string, string> = {
+  scheduled: '販売開始前です',
   ended: '販売は終了しました',
   sold_out: '完売しました',
+  not_available: 'ただいま販売しておりません',
 };
 
 export default async function ArtworkDetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -51,11 +51,7 @@ export default async function ArtworkDetailPage({ params }: { params: Promise<{ 
         <p>{SITE_COPY.purchaseComingSoon}</p>
       ) : (
         <StatusBadge
-          label={
-            artwork.unavailableReason === null
-              ? 'ただいまお求めいただけません'
-              : (UNAVAILABLE_LABEL[artwork.unavailableReason] ?? 'ただいまお求めいただけません')
-          }
+          label={DISPLAY_STATE_LABEL[artwork.displayState] ?? 'ただいまお求めいただけません'}
           tone="warning"
         />
       )}

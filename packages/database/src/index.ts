@@ -14,6 +14,7 @@
  *    マイグレーションの生成・適用、本番DBへの接続は行わない。
  */
 export { PrismaAccountRepository } from './repositories/account.repository';
+export { PrismaAuditLogRepository } from './repositories/audit.repository';
 export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';

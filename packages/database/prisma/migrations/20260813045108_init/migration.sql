@@ -8,7 +8,7 @@ CREATE TYPE "AccountStatus" AS ENUM ('active', 'suspended');
 CREATE TYPE "ArtworkStatus" AS ENUM ('draft', 'published', 'archived');
 
 -- CreateEnum
-CREATE TYPE "ListingStatus" AS ENUM ('draft', 'active', 'paused', 'closed');
+CREATE TYPE "ListingStatus" AS ENUM ('draft', 'scheduled', 'active', 'suspended', 'ended');
 
 -- CreateEnum
 CREATE TYPE "OrderStatus" AS ENUM ('pending', 'paid', 'failed', 'expired', 'refunded');
@@ -50,6 +50,8 @@ CREATE TABLE "artworks" (
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL DEFAULT '',
     "image_key" TEXT,
+    "image_content_type" TEXT,
+    "image_byte_size" INTEGER,
     "max_supply" INTEGER NOT NULL,
     "reserved_count" INTEGER NOT NULL DEFAULT 0,
     "issued_count" INTEGER NOT NULL DEFAULT 0,
@@ -70,6 +72,7 @@ CREATE TABLE "listings" (
     "status" "ListingStatus" NOT NULL DEFAULT 'draft',
     "starts_at" TIMESTAMPTZ(6),
     "ends_at" TIMESTAMPTZ(6),
+    "display_order" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
@@ -239,6 +242,9 @@ CREATE INDEX "listings_artwork_id_idx" ON "listings"("artwork_id");
 CREATE INDEX "listings_status_starts_at_ends_at_idx" ON "listings"("status", "starts_at", "ends_at");
 
 -- CreateIndex
+CREATE INDEX "listings_display_order_idx" ON "listings"("display_order");
+
+-- CreateIndex
 CREATE INDEX "orders_status_reserved_until_idx" ON "orders"("status", "reserved_until");
 
 -- CreateIndex
@@ -353,52 +359,99 @@ ALTER TABLE "nft_tokens" ADD CONSTRAINT "nft_tokens_mint_job_id_fkey" FOREIGN KE
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_actor_account_id_fkey" FOREIGN KEY ("actor_account_id") REFERENCES "accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- ============================================================================
--- CHECK 制約（手書き）
+-- CHECK 制約・部分ユニーク索引・トリガ（手書き）
 -- ----------------------------------------------------------------------------
--- Prisma のスキーマ言語では CHECK 制約を表現できないため、ここに手で書く。
+-- Prisma のスキーマ言語では表現できないため、ここに手で書く。
 -- schema.prisma を変更してマイグレーションを再生成しても、
 -- この節は自動では復元されない。**削除しないこと。**
 --
 -- これらはアプリのバグがあっても不正なデータを物理的に作れなくするための
--- 最終防壁である。とくに artworks の CHECK は、行ロックの実装を誤っても
--- オーバーセルを成立させないための最後の砦（DATABASE_DESIGN.md §3.2）。
+-- 最終防壁である（DATABASE_DESIGN.md §3-4）。
 -- ============================================================================
 
--- 作品: 発行上限と在庫カウンタ
-ALTER TABLE "artworks" ADD CONSTRAINT "artworks_max_supply_positive" CHECK ("max_supply" > 0);
+-- --- 作品: 発行上限と在庫カウンタ -------------------------------------------
+ALTER TABLE "artworks" ADD CONSTRAINT "artworks_max_supply_positive" CHECK ("max_supply" >= 1);
 ALTER TABLE "artworks" ADD CONSTRAINT "artworks_reserved_count_non_negative" CHECK ("reserved_count" >= 0);
 ALTER TABLE "artworks" ADD CONSTRAINT "artworks_issued_count_non_negative" CHECK ("issued_count" >= 0);
--- ★ オーバーセルの最終防壁
+-- ★ オーバーセルの最終防壁。行ロックの実装を誤ってもここで止まる。
 ALTER TABLE "artworks" ADD CONSTRAINT "artworks_supply_within_max" CHECK ("reserved_count" + "issued_count" <= "max_supply");
+-- 画像は「キー・MIME・サイズ」が揃うか、まったく無いかのどちらか。
+-- 中途半端な状態を許すと、表示側が毎回 null チェックの組み合わせを考える羽目になる。
+ALTER TABLE "artworks" ADD CONSTRAINT "artworks_image_fields_consistent" CHECK (
+  ("image_key" IS NULL AND "image_content_type" IS NULL AND "image_byte_size" IS NULL)
+  OR ("image_key" IS NOT NULL AND "image_content_type" IS NOT NULL AND "image_byte_size" IS NOT NULL)
+);
+ALTER TABLE "artworks" ADD CONSTRAINT "artworks_image_size_positive" CHECK ("image_byte_size" IS NULL OR "image_byte_size" > 0);
 
--- 出品: 価格と数量上限
-ALTER TABLE "listings" ADD CONSTRAINT "listings_price_non_negative" CHECK ("price_amount" >= 0);
+-- --- 出品 -------------------------------------------------------------------
+-- 価格は 0 より大きい。無償配布は販売とは別の導線として扱う。
+ALTER TABLE "listings" ADD CONSTRAINT "listings_price_positive" CHECK ("price_amount" > 0);
 ALTER TABLE "listings" ADD CONSTRAINT "listings_max_quantity_positive" CHECK ("max_quantity_per_order" >= 1);
--- 販売期間が逆転していないこと
+-- 終了日時は開始日時より後。
 ALTER TABLE "listings" ADD CONSTRAINT "listings_period_ordered" CHECK ("starts_at" IS NULL OR "ends_at" IS NULL OR "starts_at" < "ends_at");
+-- 「予約」なのに開始日時が無い状態を作らせない。
+-- ドメイン側は「scheduled かつ開始日時を過ぎている＝販売中」と扱うので、
+-- 開始日時が無い scheduled があると判定が曖昧になる。
+ALTER TABLE "listings" ADD CONSTRAINT "listings_scheduled_requires_start" CHECK (
+  "status" <> 'scheduled' OR "starts_at" IS NOT NULL
+);
 
--- 注文
+-- ★ 同一作品に、有効な出品を同時に複数作らせない。
+--   販売中と販売予定を「有効」とみなす。価格改定は
+--   「停止（suspended）→ 編集 → 再開」の手順で行う。
+CREATE UNIQUE INDEX "listings_one_effective_per_artwork"
+  ON "listings" ("artwork_id")
+  WHERE "status" IN ('active', 'scheduled');
+
+-- ★ 公開済みの作品にしか有効な出品を作らせない。
+--   作品と出品は別テーブルなので CHECK では表現できず、トリガで担保する。
+--   （カタログに出ていないものが購入できる経路を塞ぐ）
+CREATE OR REPLACE FUNCTION "listings_require_published_artwork"() RETURNS TRIGGER AS $$
+DECLARE
+  artwork_status TEXT;
+BEGIN
+  IF NEW."status" IN ('active', 'scheduled') THEN
+    SELECT "status"::TEXT INTO artwork_status FROM "artworks" WHERE "id" = NEW."artwork_id";
+    IF artwork_status IS DISTINCT FROM 'published' THEN
+      RAISE EXCEPTION 'listings_require_published_artwork: artwork % is not published', NEW."artwork_id"
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "listings_require_published_artwork_trigger"
+  BEFORE INSERT OR UPDATE ON "listings"
+  FOR EACH ROW EXECUTE FUNCTION "listings_require_published_artwork"();
+
+-- 注記: 作品を後から archived にしても、既存の出品はそのまま残る。
+--       公開APIが作品の状態で絞り込むため露出はしない。
+--       出品を止めたい場合は出品側も ended にする運用とする。
+
+-- --- 注文 -------------------------------------------------------------------
 ALTER TABLE "orders" ADD CONSTRAINT "orders_total_non_negative" CHECK ("total_amount" >= 0);
 
--- 注文明細
+-- --- 注文明細 ---------------------------------------------------------------
 ALTER TABLE "order_lines" ADD CONSTRAINT "order_lines_quantity_positive" CHECK ("quantity" >= 1);
 ALTER TABLE "order_lines" ADD CONSTRAINT "order_lines_unit_price_non_negative" CHECK ("unit_price_amount" >= 0);
 
--- 決済: 返金額が支払額を超えないこと
+-- --- 決済 -------------------------------------------------------------------
 ALTER TABLE "payments" ADD CONSTRAINT "payments_amount_non_negative" CHECK ("amount" >= 0);
 ALTER TABLE "payments" ADD CONSTRAINT "payments_refund_non_negative" CHECK ("amount_refunded" >= 0);
 ALTER TABLE "payments" ADD CONSTRAINT "payments_refund_within_amount" CHECK ("amount_refunded" <= "amount");
 
--- 受取権: シリアル番号は 1 以上
+-- --- 受取権 -----------------------------------------------------------------
 ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_serial_no_positive" CHECK ("serial_no" >= 1);
--- claimed のときは受取者と受取日時が必ず埋まっていること（状態と実データの乖離を防ぐ）
+-- claimed のときは受取者と受取日時が必ず埋まっていること。
+-- 状態列と実データが食い違うと、監査でも復旧でも判断できなくなる。
 ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_claimed_fields_present" CHECK (
   "status" <> 'claimed' OR ("claimed_by_account_id" IS NOT NULL AND "claimed_at" IS NOT NULL)
 );
 
--- 発行ジョブ: 試行回数
+-- --- 発行ジョブ -------------------------------------------------------------
 ALTER TABLE "mint_jobs" ADD CONSTRAINT "mint_jobs_attempt_count_non_negative" CHECK ("attempt_count" >= 0);
 ALTER TABLE "mint_jobs" ADD CONSTRAINT "mint_jobs_max_attempts_positive" CHECK ("max_attempts" >= 1);
 
--- Outbox: 試行回数
+-- --- Outbox -----------------------------------------------------------------
 ALTER TABLE "outbox_events" ADD CONSTRAINT "outbox_events_attempt_count_non_negative" CHECK ("attempt_count" >= 0);

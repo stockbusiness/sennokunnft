@@ -6,6 +6,7 @@ import {
   integrationTestsAvailable,
   resetDatabase,
   violatesConstraint,
+  violatesUniqueConstraint,
 } from '../helpers/database';
 
 /**
@@ -45,6 +46,8 @@ async function seedArtwork(overrides: Record<string, unknown> = {}): Promise<str
       title: 'テスト作品',
       maxSupply: 10,
       imageKey: 'images/test.png',
+      imageContentType: 'image/png',
+      imageByteSize: 1024,
       status: 'published',
       ...overrides,
     },
@@ -116,15 +119,7 @@ suite('出品の CHECK 制約', () => {
       prisma.listing.create({
         data: { artworkId, priceAmount: -1, priceCurrency: 'JPY' },
       }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_price_non_negative'));
-  });
-
-  it('0 円の出品は作れる（無償配布の余地を残している）', async () => {
-    const artworkId = await seedArtwork();
-    const listing = await prisma.listing.create({
-      data: { artworkId, priceAmount: 0, priceCurrency: 'JPY' },
-    });
-    expect(listing.priceAmount).toBe(0);
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_price_positive'));
   });
 
   it('販売期間が逆転していれば拒否する', async () => {
@@ -159,7 +154,7 @@ suite('一意制約', () => {
     });
     await expect(
       prisma.artwork.create({ data: { slug: 'duplicate', title: 'B', maxSupply: 1 } }),
-    ).rejects.toSatisfy((error) => error instanceof Error);
+    ).rejects.toSatisfy(violatesUniqueConstraint);
   });
 });
 
@@ -261,7 +256,7 @@ suite('受取権の CHECK 制約', () => {
       },
     });
     const listing = await prisma.listing.create({
-      data: { artworkId, priceAmount: 0, priceCurrency: 'JPY' },
+      data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY' },
     });
     const line = await prisma.orderLine.create({
       data: {
@@ -287,5 +282,136 @@ suite('受取権の CHECK 制約', () => {
         },
       }),
     ).rejects.toSatisfy((error) => violatesConstraint(error, 'entitlements_serial_no_positive'));
+  });
+});
+
+suite('出品の新しい制約（Phase 2）', () => {
+  it('0 円の出品を拒否する', async () => {
+    // 無償配布は「販売」とは別の導線として扱う。
+    const artworkId = await seedArtwork();
+    await expect(
+      prisma.listing.create({ data: { artworkId, priceAmount: 0, priceCurrency: 'JPY' } }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_price_positive'));
+  });
+
+  it('1 円の出品は作れる（境界）', async () => {
+    const artworkId = await seedArtwork();
+    const listing = await prisma.listing.create({
+      data: { artworkId, priceAmount: 1, priceCurrency: 'JPY' },
+    });
+    expect(listing.priceAmount).toBe(1);
+  });
+
+  it('公開されていない作品に有効な出品を作れない（トリガ）', async () => {
+    // 作品と出品は別テーブルなので CHECK では表現できず、トリガで担保している。
+    const artworkId = await seedArtwork({ status: 'draft' });
+    await expect(
+      prisma.listing.create({
+        data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'active' },
+      }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_require_published_artwork'));
+  });
+
+  it('非公開作品にも有効な出品を作れない', async () => {
+    const artworkId = await seedArtwork({ status: 'archived' });
+    await expect(
+      prisma.listing.create({
+        data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'active' },
+      }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_require_published_artwork'));
+  });
+
+  it('下書きの出品なら未公開の作品にも作れる（準備は先にできる）', async () => {
+    const artworkId = await seedArtwork({ status: 'draft' });
+    const listing = await prisma.listing.create({
+      data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'draft' },
+    });
+    expect(listing.status).toBe('draft');
+  });
+
+  it('同一作品に有効な出品を 2 件作れない（部分ユニーク索引）', async () => {
+    const artworkId = await seedArtwork();
+    await prisma.listing.create({
+      data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'active' },
+    });
+    await expect(
+      prisma.listing.create({
+        data: { artworkId, priceAmount: 2000, priceCurrency: 'JPY', status: 'active' },
+      }),
+    ).rejects.toSatisfy(violatesUniqueConstraint);
+  });
+
+  it('販売予定も「有効」として数える', async () => {
+    const artworkId = await seedArtwork();
+    await prisma.listing.create({
+      data: {
+        artworkId,
+        priceAmount: 1000,
+        priceCurrency: 'JPY',
+        status: 'scheduled',
+        startsAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+    await expect(
+      prisma.listing.create({
+        data: { artworkId, priceAmount: 2000, priceCurrency: 'JPY', status: 'active' },
+      }),
+    ).rejects.toSatisfy(violatesUniqueConstraint);
+  });
+
+  it('下書き・終了済みは何件でも作れる（履歴として残す）', async () => {
+    const artworkId = await seedArtwork();
+    await prisma.listing.create({
+      data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'draft' },
+    });
+    await prisma.listing.create({
+      data: { artworkId, priceAmount: 2000, priceCurrency: 'JPY', status: 'ended' },
+    });
+    await prisma.listing.create({
+      data: { artworkId, priceAmount: 3000, priceCurrency: 'JPY', status: 'ended' },
+    });
+    expect(await prisma.listing.count({ where: { artworkId } })).toBe(3);
+  });
+
+  it('開始日時のない販売予定を拒否する', async () => {
+    // 「scheduled かつ開始日時を過ぎている＝販売中」と扱うので、
+    // 開始日時が無いと判定が曖昧になる。
+    const artworkId = await seedArtwork();
+    await expect(
+      prisma.listing.create({
+        data: { artworkId, priceAmount: 1000, priceCurrency: 'JPY', status: 'scheduled' },
+      }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'listings_scheduled_requires_start'));
+  });
+});
+
+suite('作品の画像メタデータ', () => {
+  it('キーだけあってサイズが無い状態を拒否する', async () => {
+    // 中途半端な状態を許すと、表示側が null の組み合わせを毎回考えることになる。
+    await expect(
+      seedArtwork({ imageKey: 'artworks/x.png', imageContentType: null, imageByteSize: null }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'artworks_image_fields_consistent'));
+  });
+
+  it('3 つとも揃っていれば作れる', async () => {
+    const id = await seedArtwork({
+      imageKey: 'artworks/x.png',
+      imageContentType: 'image/png',
+      imageByteSize: 2048,
+    });
+    const row = await prisma.artwork.findUniqueOrThrow({ where: { id } });
+    expect(row.imageByteSize).toBe(2048);
+  });
+
+  it('3 つとも無い状態も作れる（画像は後から登録する）', async () => {
+    const id = await seedArtwork({ imageKey: null, imageContentType: null, imageByteSize: null });
+    const row = await prisma.artwork.findUniqueOrThrow({ where: { id } });
+    expect(row.imageKey).toBeNull();
+  });
+
+  it('サイズ 0 の画像を拒否する', async () => {
+    await expect(
+      seedArtwork({ imageKey: 'a.png', imageContentType: 'image/png', imageByteSize: 0 }),
+    ).rejects.toSatisfy((error) => violatesConstraint(error, 'artworks_image_size_positive'));
   });
 });

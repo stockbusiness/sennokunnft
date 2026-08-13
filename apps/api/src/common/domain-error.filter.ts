@@ -31,6 +31,9 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   MINT_ALREADY_EXISTS: HttpStatus.CONFLICT,
   MINT_ATTEMPTS_EXHAUSTED: HttpStatus.CONFLICT,
   IDEMPOTENCY_CONFLICT: HttpStatus.CONFLICT,
+  IMAGE_INVALID: HttpStatus.BAD_REQUEST,
+  IMAGE_TOO_LARGE: HttpStatus.PAYLOAD_TOO_LARGE,
+  IMAGE_UNSUPPORTED_TYPE: HttpStatus.UNSUPPORTED_MEDIA_TYPE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -54,6 +57,9 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   MINT_ALREADY_EXISTS: 'すでに発行済みです。',
   MINT_ATTEMPTS_EXHAUSTED: '発行処理が完了しませんでした。運営までお問い合わせください。',
   IDEMPOTENCY_CONFLICT: '同じ操作が別の内容で送信されました。もう一度お試しください。',
+  IMAGE_INVALID: '画像ファイルとして読み取れませんでした。',
+  IMAGE_TOO_LARGE: '画像のサイズが大きすぎます。',
+  IMAGE_UNSUPPORTED_TYPE: 'この形式の画像は登録できません。JPEG・PNG・WebP をご利用ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

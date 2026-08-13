@@ -15,6 +15,8 @@ export function toArtwork(row: ArtworkRow): Artwork {
     title: row.title,
     description: row.description,
     imageKey: row.imageKey,
+    imageContentType: row.imageContentType,
+    imageByteSize: row.imageByteSize,
     maxSupply: row.maxSupply,
     reservedCount: row.reservedCount,
     issuedCount: row.issuedCount,
@@ -31,6 +33,7 @@ export function toListing(row: ListingRow): Listing {
     status: row.status,
     startsAt: row.startsAt,
     endsAt: row.endsAt,
+    displayOrder: row.displayOrder,
   };
 }
 

@@ -87,18 +87,30 @@ export const artworkStateMachine = createStateMachine(artworkTable);
 /**
  * 出品の状態（DATABASE_DESIGN.md §3.3）。
  *
- * `closed` は終端。販売を終えた出品を再開させないのは、
- * 「終了しました」と表示したものが後から復活すると購入者の信頼を損ねるため。
- * 再開したい場合は新しい出品を作る（価格や期間の履歴も残る）。
+ * - `draft`     … 作成直後。まだ誰にも見えない
+ * - `scheduled` … 販売開始を予約した。開始日時が来たら購入可能になる
+ * - `active`    … 販売中
+ * - `suspended` … 一時停止。編集して再開できる
+ * - `ended`     … 販売終了。**終端**
+ *
+ * `ended` を終端にしているのは、「終了しました」と表示したものが
+ * 後から復活すると購入者の信頼を損ねるため。
+ * 再度売るなら新しい出品を作る（価格や期間の履歴も残る）。
+ *
+ * ⚠️ `scheduled` と `active` の**表示上の**切り替わりは、状態列ではなく
+ * 販売開始日時と現在時刻の比較で決まる（`resolveDisplayState`）。
+ * 開始時刻に列を書き換えるバッチを前提にすると、
+ * バッチが遅れただけで売れなくなる。
  */
-export const LISTING_STATUSES = ['draft', 'active', 'paused', 'closed'] as const;
+export const LISTING_STATUSES = ['draft', 'scheduled', 'active', 'suspended', 'ended'] as const;
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
 const listingTable: TransitionTable<ListingStatus> = {
-  draft: ['active', 'closed'],
-  active: ['paused', 'closed'],
-  paused: ['active', 'closed'],
-  closed: [],
+  draft: ['scheduled', 'active', 'ended'],
+  scheduled: ['active', 'suspended', 'ended'],
+  active: ['suspended', 'ended'],
+  suspended: ['active', 'scheduled', 'ended'],
+  ended: [],
 };
 
 export const listingStateMachine = createStateMachine(listingTable);

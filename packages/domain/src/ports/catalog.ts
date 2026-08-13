@@ -34,6 +34,8 @@ export interface ArtworkRepository {
 
 export interface ListingRepository {
   findById(id: string): Promise<Listing | null>;
+  /** 状態を問わず一覧する（運営用）。表示順→新しい順。 */
+  listAll(query: PageQuery): Promise<Page<Listing>>;
   /** 指定作品の出品を新しい順に返す。 */
   listByArtwork(artworkId: string): Promise<readonly Listing[]>;
   /** 公開カタログの詳細表示に使う、いま販売中の出品。 */

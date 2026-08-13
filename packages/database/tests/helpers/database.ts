@@ -66,3 +66,20 @@ export function pgErrorCode(error: unknown): string | undefined {
 export function violatesConstraint(error: unknown, constraintName: string): boolean {
   return error instanceof Error && error.message.includes(constraintName);
 }
+
+/**
+ * 一意制約違反かどうか。
+ *
+ * ⚠️ Prisma は一意制約違反を独自のメッセージ（P2002）に変換するため、
+ * CHECK 制約のように制約名で判定できない。
+ * 制約名を確かめたい場合は `$queryRawUnsafe` で生の SQL を使う。
+ */
+export function violatesUniqueConstraint(error: unknown): boolean {
+  const code = pgErrorCode(error);
+  if (code === 'P2002' || code === '23505') {
+    return true;
+  }
+  return (
+    error instanceof Error && /Unique constraint failed|duplicate key value/i.test(error.message)
+  );
+}

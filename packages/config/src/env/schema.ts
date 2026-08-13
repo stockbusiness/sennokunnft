@@ -75,6 +75,10 @@ const apiEnvObject = baseEnvObject.extend({
   MINT_PROVIDER: z.enum(['fake']).default('fake'),
   MINT_IDEMPOTENCY_SECRET: z.string().min(1).optional(),
   CLAIM_BASE_URL: z.url().default('http://localhost:3000/claims'),
+  /** 画像の保存先ディレクトリ。本番ストレージは未決定（UD-508）。 */
+  MEDIA_STORAGE_DIR: z.string().min(1).default('./.media'),
+  /** 画像の表示URLの前置き。保存するのはキーで、URLは実行時に解決する。 */
+  MEDIA_PUBLIC_PREFIX: z.string().min(1).default('/media'),
 });
 
 const workerEnvObject = baseEnvObject.extend({
@@ -86,7 +90,15 @@ const workerEnvObject = baseEnvObject.extend({
 
 const webEnvObject = baseEnvObject.extend({
   WEB_API_BASE_URL: z.url().default('http://localhost:3001'),
-  NEXT_PUBLIC_SITE_NAME: z.string().min(1).default('Sengoku NFT Marketplace'),
+  NEXT_PUBLIC_SITE_NAME: z.string().min(1).default('千ノ国NFTマーケット'),
+  /**
+   * 管理画面がAPIを呼ぶときの資格情報。
+   *
+   * ⚠️ **サーバー側でのみ読む。** `NEXT_PUBLIC_` を付けていないので
+   * ブラウザのバンドルには入らない。
+   * 認証プロバイダへ本接続しない Phase 2 の暫定手段（UD-801）。
+   */
+  ADMIN_DEV_TOKEN: z.string().min(8).optional(),
 });
 
 export const baseEnvSchema = z.preprocess(stripEmptyValues, baseEnvObject);

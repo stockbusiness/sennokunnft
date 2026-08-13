@@ -23,6 +23,9 @@ export const DOMAIN_ERROR_CODES = [
   'MINT_ALREADY_EXISTS',
   'MINT_ATTEMPTS_EXHAUSTED',
   'IDEMPOTENCY_CONFLICT',
+  'IMAGE_INVALID',
+  'IMAGE_TOO_LARGE',
+  'IMAGE_UNSUPPORTED_TYPE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

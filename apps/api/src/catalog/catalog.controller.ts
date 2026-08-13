@@ -3,6 +3,8 @@ import {
   artworkListQuerySchema,
   type ArtworkDetail,
   type ArtworkListResponse,
+  type PublicListing,
+  type PublicListingListResponse,
 } from '@sengoku/contracts';
 import { Public } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
@@ -35,5 +37,31 @@ export class CatalogController {
       throw new NotFoundException();
     }
     return artwork;
+  }
+}
+
+/**
+ * 公開向けの出品。作品と同じく、公開済みのものだけを返す。
+ */
+@Controller('api/v1/listings')
+export class PublicListingController {
+  constructor(private readonly catalog: CatalogService) {}
+
+  @Get()
+  @Public()
+  list(@Query() rawQuery: unknown): Promise<PublicListingListResponse> {
+    const query = parseOrThrow(artworkListQuerySchema, rawQuery);
+    return this.catalog.listPublicListings({ limit: query.limit, cursor: query.cursor });
+  }
+
+  @Get(':id')
+  @Public()
+  async detail(@Param('id') id: string): Promise<PublicListing> {
+    const listing = await this.catalog.findPublicListing(id);
+    if (listing === null) {
+      // 非公開作品の出品・下書きの出品もここに来る。存在を区別しない。
+      throw new NotFoundException();
+    }
+    return listing;
   }
 }

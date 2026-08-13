@@ -32,3 +32,5 @@ export {
   type DevTokenClaims,
   type DevTokenVerifierOptions,
 } from './dev-token-verifier';
+
+export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';

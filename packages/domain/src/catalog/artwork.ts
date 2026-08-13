@@ -15,6 +15,9 @@ export interface Artwork extends SupplyCounters {
   readonly title: string;
   readonly description: string;
   readonly imageKey: string | null;
+  /** サーバー側で中身を検査して判定した MIME タイプ。 */
+  readonly imageContentType: string | null;
+  readonly imageByteSize: number | null;
   readonly status: ArtworkStatus;
 }
 
@@ -79,6 +82,8 @@ export function createArtworkDraft(input: CreateArtworkInput): Result<Artwork, D
     title: input.title.trim(),
     description: input.description ?? '',
     imageKey: input.imageKey ?? null,
+    imageContentType: null,
+    imageByteSize: null,
     maxSupply: input.maxSupply,
     reservedCount: 0,
     issuedCount: 0,
@@ -89,7 +94,6 @@ export function createArtworkDraft(input: CreateArtworkInput): Result<Artwork, D
 export interface UpdateArtworkInput {
   readonly title?: string;
   readonly description?: string;
-  readonly imageKey?: string | null;
   readonly maxSupply?: number;
 }
 
@@ -145,7 +149,6 @@ export function updateArtwork(
     ...artwork,
     title: input.title === undefined ? artwork.title : input.title.trim(),
     description: input.description ?? artwork.description,
-    imageKey: input.imageKey === undefined ? artwork.imageKey : input.imageKey,
     maxSupply: input.maxSupply ?? artwork.maxSupply,
   });
 }

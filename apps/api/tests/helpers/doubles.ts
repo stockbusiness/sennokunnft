@@ -2,6 +2,8 @@ import type { AccountLookupPort, AccountRecord, Role, TokenVerifierPort } from '
 import type {
   Artwork,
   ArtworkRepository,
+  AuditEntry,
+  AuditLogPort,
   ClockPort,
   IdGeneratorPort,
   Listing,
@@ -9,6 +11,7 @@ import type {
   Page,
   PageQuery,
 } from '@sengoku/domain';
+import { InMemoryStorage } from '@sengoku/integrations';
 import type { AppDependencies } from '../../src/app.module';
 
 /**
@@ -87,13 +90,25 @@ export class InMemoryListingRepository implements ListingRepository {
     return Promise.resolve(this.items.get(id) ?? null);
   }
 
+  listAll(query: PageQuery): Promise<Page<Listing>> {
+    const all = [...this.items.values()];
+    const start = query.cursor === undefined ? 0 : Number.parseInt(query.cursor, 10);
+    const page = all.slice(start, start + query.limit);
+    const nextIndex = start + query.limit;
+    return Promise.resolve({
+      items: page,
+      nextCursor: nextIndex < all.length ? String(nextIndex) : null,
+    });
+  }
+
   listByArtwork(artworkId: string): Promise<readonly Listing[]> {
     return Promise.resolve([...this.items.values()].filter((item) => item.artworkId === artworkId));
   }
 
   findActiveByArtwork(artworkId: string): Promise<Listing | null> {
     const found = [...this.items.values()].find(
-      (item) => item.artworkId === artworkId && item.status === 'active',
+      (item) =>
+        item.artworkId === artworkId && (item.status === 'active' || item.status === 'scheduled'),
     );
     return Promise.resolve(found ?? null);
   }
@@ -157,10 +172,26 @@ export class SequentialIds implements IdGeneratorPort {
   }
 }
 
+/** 監査記録をメモリに貯める。記録されたかをテストで確認するために使う。 */
+export class InMemoryAuditLog implements AuditLogPort {
+  readonly entries: AuditEntry[] = [];
+
+  record(entry: AuditEntry): Promise<void> {
+    this.entries.push(entry);
+    return Promise.resolve();
+  }
+
+  actions(): string[] {
+    return this.entries.map((entry) => entry.action);
+  }
+}
+
 export interface TestHarness extends AppDependencies {
   readonly artworks: InMemoryArtworkRepository;
   readonly listings: InMemoryListingRepository;
   readonly accounts: InMemoryAccountRepository;
+  readonly storage: InMemoryStorage;
+  readonly audit: InMemoryAuditLog;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -178,8 +209,15 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     tokenVerifier,
     clock: new FixedClock(TEST_NOW),
     ids: new SequentialIds(),
+    storage: new InMemoryStorage(),
+    audit: new InMemoryAuditLog(),
+    // テストでは決定論的なキーにする。実装は CSPRNG を使う。
+    generateStorageKey: (prefix, extension) =>
+      `${prefix}/test/${String(keyCounter++)}.${extension}`,
   };
 }
+
+let keyCounter = 1;
 
 export function sampleArtwork(overrides: Partial<Artwork> = {}): Artwork {
   return {
@@ -188,6 +226,8 @@ export function sampleArtwork(overrides: Partial<Artwork> = {}): Artwork {
     title: 'サンプル作品',
     description: '説明文',
     imageKey: 'images/sample.png',
+    imageContentType: 'image/png',
+    imageByteSize: 2048,
     maxSupply: 10,
     reservedCount: 0,
     issuedCount: 0,
@@ -205,6 +245,7 @@ export function sampleListing(overrides: Partial<Listing> = {}): Listing {
     status: 'active',
     startsAt: null,
     endsAt: null,
+    displayOrder: 0,
     ...overrides,
   };
 }

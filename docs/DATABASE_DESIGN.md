@@ -102,7 +102,16 @@
 | `starts_at` / `ends_at`     | TIMESTAMPTZ | NULL                             | 販売期間                                 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                          |
 
-- INDEX `(artwork_id)`, `(status, starts_at, ends_at)`
+- INDEX `(artwork_id)`, `(status, starts_at, ends_at)`, `(display_order)`
+- **`UNIQUE (artwork_id) WHERE status IN ('active','scheduled')`** — 同一作品に有効な出品は 1 件
+- **トリガ `listings_require_published_artwork`** — 公開済みの作品にしか有効な出品を作らせない
+  （作品と出品は別テーブルなので CHECK では表現できない）
+- CHECK `price_amount > 0` — 0 円の出品は作れない。無償配布は販売とは別の導線として扱う
+- CHECK `status <> 'scheduled' OR starts_at IS NOT NULL`
+
+> ⚠️ 作品を後から `archived` にしても、既存の出品はそのまま残る。
+> 公開APIが作品の状態で絞り込むため露出はしないが、
+> 出品を止めたい場合は出品側も `ended` にする運用とする。
 
 🟡 **仮決定:** `max_quantity_per_order` の既定値は 1。
 理由: 1枚単位の受取権が主概念であり、まとめ買いは MVP の必須要件ではないため保守的に始める。

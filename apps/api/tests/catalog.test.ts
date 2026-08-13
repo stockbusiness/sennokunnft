@@ -3,7 +3,11 @@ import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { artworkDetailSchema, artworkListResponseSchema } from '@sengoku/contracts';
+import {
+  artworkDetailSchema,
+  artworkListResponseSchema,
+  publicListingListResponseSchema,
+} from '@sengoku/contracts';
 import { createDevToken, DevTokenVerifier } from '@sengoku/integrations';
 import type { Role } from '@sengoku/auth';
 import { AppModule } from '../src/app.module';
@@ -320,7 +324,7 @@ describe('管理API 出品の操作', () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/admin/listings/l-1/activate')
       .set('Authorization', `Bearer ${asOperator()}`)
-      .expect(201);
+      .expect(200);
 
     expect(response.body.status).toBe('active');
   });
@@ -372,5 +376,336 @@ describe('管理API 出品の操作', () => {
     expect(body).not.toContain('at ');
     expect(body).not.toContain('.ts:');
     expect(response.body.error.code).toBeTruthy();
+  });
+});
+
+describe('公開出品API GET /api/v1/listings', () => {
+  it('認証なしで販売中の出品を取得できる', async () => {
+    harness.artworks.seed(sampleArtwork());
+    harness.listings.seed(sampleListing());
+
+    const response = await request(app.getHttpServer()).get('/api/v1/listings').expect(200);
+
+    expect(publicListingListResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0].displayState).toBe('on_sale');
+  });
+
+  it('未公開作品の出品は返さない', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1', status: 'draft' }));
+    harness.listings.seed(sampleListing({ id: 'l-1', artworkId: 'a-1', status: 'active' }));
+
+    const response = await request(app.getHttpServer()).get('/api/v1/listings').expect(200);
+    expect(response.body.items).toHaveLength(0);
+  });
+
+  it('下書きの出品は返さない', async () => {
+    harness.artworks.seed(sampleArtwork());
+    harness.listings.seed(sampleListing({ status: 'draft' }));
+
+    const response = await request(app.getHttpServer()).get('/api/v1/listings').expect(200);
+    expect(response.body.items).toHaveLength(0);
+  });
+
+  it('販売予定は scheduled として返す', async () => {
+    harness.artworks.seed(sampleArtwork());
+    harness.listings.seed(
+      sampleListing({ status: 'scheduled', startsAt: new Date(TEST_NOW.getTime() + 86_400_000) }),
+    );
+
+    const response = await request(app.getHttpServer()).get('/api/v1/listings').expect(200);
+    expect(response.body.items[0].displayState).toBe('scheduled');
+  });
+});
+
+describe('公開出品API GET /api/v1/listings/:id', () => {
+  it('販売中の出品を取得できる', async () => {
+    harness.artworks.seed(sampleArtwork());
+    harness.listings.seed(sampleListing({ id: 'l-1' }));
+
+    const response = await request(app.getHttpServer()).get('/api/v1/listings/l-1').expect(200);
+    expect(response.body.artworkSlug).toBe('sample-artwork');
+  });
+
+  it('存在しない出品は 404', async () => {
+    await request(app.getHttpServer()).get('/api/v1/listings/missing').expect(404);
+  });
+
+  it('未公開作品の出品も 404（存在を漏らさない）', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1', status: 'draft' }));
+    harness.listings.seed(sampleListing({ id: 'l-1', artworkId: 'a-1', status: 'active' }));
+    await request(app.getHttpServer()).get('/api/v1/listings/l-1').expect(404);
+  });
+
+  it('終了した出品も 404', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    harness.listings.seed(sampleListing({ id: 'l-1', artworkId: 'a-1', status: 'ended' }));
+    await request(app.getHttpServer()).get('/api/v1/listings/l-1').expect(404);
+  });
+});
+
+describe('管理API 出品一覧 GET /api/v1/admin/listings', () => {
+  it('operator は全状態の出品を見られる', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    harness.listings.seed(sampleListing({ id: 'l-1', artworkId: 'a-1', status: 'draft' }));
+    harness.listings.seed(sampleListing({ id: 'l-2', artworkId: 'a-1', status: 'ended' }));
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/listings')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .expect(200);
+
+    expect(response.body.items).toHaveLength(2);
+  });
+
+  it('buyer は出品一覧を見られない', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/listings')
+      .set('Authorization', `Bearer ${actorToken('buyer')}`)
+      .expect(403);
+  });
+
+  it('作品で絞り込める', async () => {
+    harness.artworks.seed(sampleArtwork({ id: '00000000-0000-4000-8000-00000000000a' }));
+    harness.artworks.seed(sampleArtwork({ id: '00000000-0000-4000-8000-00000000000b', slug: 'b' }));
+    harness.listings.seed(
+      sampleListing({ id: 'l-1', artworkId: '00000000-0000-4000-8000-00000000000a' }),
+    );
+    harness.listings.seed(
+      sampleListing({ id: 'l-2', artworkId: '00000000-0000-4000-8000-00000000000b' }),
+    );
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/listings?artworkId=00000000-0000-4000-8000-00000000000a')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .expect(200);
+
+    expect(response.body.items).toHaveLength(1);
+  });
+});
+
+describe('画像アップロード POST /api/v1/admin/artworks/:id/image', () => {
+  const PNG = (() => {
+    const bytes = Buffer.alloc(1024);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+    return bytes;
+  })();
+
+  function upload(id: string, body: Buffer, contentType: string) {
+    return request(app.getHttpServer())
+      .post(`/api/v1/admin/artworks/${id}/image`)
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .set('Content-Type', contentType)
+      .send(body);
+  }
+
+  it('PNG を受け付け、ランダムなキーで保存する', async () => {
+    harness.artworks.seed(
+      sampleArtwork({ id: 'a-1', imageKey: null, imageContentType: null, imageByteSize: null }),
+    );
+
+    const response = await upload('a-1', PNG, 'image/png').expect(200);
+
+    expect(response.body.contentType).toBe('image/png');
+    // 利用者が送ったファイル名は使わない。
+    expect(response.body.imageKey).toMatch(/^artworks\//);
+    expect(harness.storage.has(response.body.imageKey)).toBe(true);
+  });
+
+  it('SVG を拒否する（415）', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'.padEnd(200, ' '));
+    const response = await upload('a-1', svg, 'image/svg+xml').expect(415);
+    expect(response.body.error.code).toBe('IMAGE_UNSUPPORTED_TYPE');
+  });
+
+  it('拡張子を偽装したファイルを拒否する', async () => {
+    // Content-Type は image/png だが中身は HTML。
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    const html = Buffer.from('<html></html>'.padEnd(200, ' '));
+    await upload('a-1', html, 'image/png').expect(415);
+  });
+
+  it('サイズ超過を拒否する（413）', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    const huge = Buffer.alloc(6 * 1024 * 1024);
+    Buffer.from([0xff, 0xd8, 0xff]).copy(huge);
+    const response = await upload('a-1', huge, 'image/jpeg').expect(413);
+    expect(response.body.error.code).toBe('IMAGE_TOO_LARGE');
+  });
+
+  it('buyer はアップロードできない', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-1' }));
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks/a-1/image')
+      .set('Authorization', `Bearer ${actorToken('buyer')}`)
+      .set('Content-Type', 'image/png')
+      .send(PNG)
+      .expect(403);
+  });
+
+  it('存在しない作品への登録は 404', async () => {
+    await upload('missing', PNG, 'image/png').expect(404);
+  });
+
+  it('置換すると監査記録が残り、旧オブジェクトが消える', async () => {
+    harness.artworks.seed(
+      sampleArtwork({ id: 'a-1', imageKey: null, imageContentType: null, imageByteSize: null }),
+    );
+
+    const first = await upload('a-1', PNG, 'image/png').expect(200);
+    const second = await upload('a-1', PNG, 'image/png').expect(200);
+
+    expect(second.body.imageKey).not.toBe(first.body.imageKey);
+    expect(harness.storage.has(first.body.imageKey)).toBe(false);
+    expect(harness.audit.actions()).toContain('artwork.image.attach');
+    expect(harness.audit.actions()).toContain('artwork.image.replace');
+  });
+
+  it('監査記録にファイルの中身を残さない', async () => {
+    harness.artworks.seed(
+      sampleArtwork({ id: 'a-1', imageKey: null, imageContentType: null, imageByteSize: null }),
+    );
+    await upload('a-1', PNG, 'image/png').expect(200);
+    const raw = JSON.stringify(harness.audit.entries);
+    expect(raw).not.toContain('PNG');
+    expect(raw.length).toBeLessThan(2000);
+  });
+});
+
+describe('HTML の保存を拒否する（XSS 対策）', () => {
+  it('タイトルにタグを含む登録を拒否する', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .send({ slug: 'x-art', title: '<script>alert(1)</script>', maxSupply: 5 })
+      .expect(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('説明文にタグを含む登録を拒否する', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .send({
+        slug: 'x-art',
+        title: '作品',
+        description: '<img src=x onerror=alert(1)>',
+        maxSupply: 5,
+      })
+      .expect(400);
+  });
+
+  it('HTML エンティティを含む説明文を拒否する', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .send({ slug: 'x-art', title: '作品', description: '&lt;script&gt;', maxSupply: 5 })
+      .expect(400);
+  });
+
+  it('javascript: URL を含む説明文を拒否する', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .send({ slug: 'x-art', title: '作品', description: 'javascript:alert(1)', maxSupply: 5 })
+      .expect(400);
+  });
+
+  it('通常の日本語の説明文は受け付ける', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .send({
+        slug: 'ok-art',
+        title: '戦国絵巻',
+        description: '千ノ国の物語を描いた作品です。\n改行も使えます。',
+        maxSupply: 5,
+      })
+      .expect(201);
+  });
+});
+
+describe('冪等キー（API_DESIGN §3）', () => {
+  it('同じキー・同じ内容の再送は 1 件しか作らない', async () => {
+    const token = actorToken('operator');
+    const key = '01J8Z7Q4XXXXXXXXXXXXXXXXXX';
+    const body = { slug: 'idem-art', title: '作品', maxSupply: 5 };
+
+    const first = await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .send(body)
+      .expect(201);
+
+    const second = await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .send(body)
+      .expect(201);
+
+    expect(second.body.id).toBe(first.body.id);
+
+    const list = await request(app.getHttpServer())
+      .get('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(list.body.items).toHaveLength(1);
+  });
+
+  it('同じキーで内容が違えば 409', async () => {
+    const token = actorToken('operator');
+    const key = '01J8Z7Q4XXXXXXXXXXXXXXXXXX';
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .send({ slug: 'first-art', title: '作品', maxSupply: 5 })
+      .expect(201);
+
+    const conflict = await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .send({ slug: 'second-art', title: '別作品', maxSupply: 9 })
+      .expect(409);
+
+    expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('短すぎる冪等キーを拒否する', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .set('Idempotency-Key', 'abc')
+      .send({ slug: 'x-art', title: '作品', maxSupply: 5 })
+      .expect(400);
+  });
+
+  it('他人のキーを当てても他人の結果は返らない', async () => {
+    // キーはアクターごとに区切る。区切らないと他人の応答を読み出せる。
+    const key = '01J8Z7Q4XXXXXXXXXXXXXXXXXX';
+    const operatorToken = actorToken('operator', 'op-a');
+    harness.accounts.seed('op-b', 'operator');
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .set('Idempotency-Key', key)
+      .send({ slug: 'owned-art', title: '作品', maxSupply: 5 })
+      .expect(201);
+
+    // 別アクターが同じキーで別内容を送る → 前回の結果は返らず、新規作成になる。
+    const other = await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks')
+      .set('Authorization', `Bearer ${tokenFor('op-b')}`)
+      .set('Idempotency-Key', key)
+      .send({ slug: 'other-art', title: '別作品', maxSupply: 7 })
+      .expect(201);
+
+    expect(other.body.slug).toBe('other-art');
   });
 });

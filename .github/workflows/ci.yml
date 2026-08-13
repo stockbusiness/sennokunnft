@@ -85,9 +85,30 @@ jobs:
         run: pnpm db:generate
 
   e2e:
-    name: e2e (smoke)
+    name: e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # 通しシナリオ（登録 → 公開 → 出品 → 閲覧）は実 API と実 DB に対して行う。
+    # ここをモックにすると「画面は動くが実際には繋がっていない」を見逃す。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sennokunnft_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sennokunnft_e2e
+
     steps:
       - uses: actions/checkout@v4
 
@@ -103,6 +124,12 @@ jobs:
 
       - name: build
         run: pnpm build
+
+      # 通しシナリオが使う運営アカウントを用意する。
+      - name: prepare database
+        run: |
+          pnpm db:migrate:deploy
+          pnpm db:seed
 
       - name: install browser
         run: pnpm --filter @sengoku/web run e2e:install
