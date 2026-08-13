@@ -82,8 +82,9 @@ describe('解決の受け入れ（§22.1 新規・既存）', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('重複の可能性は消さずに残す', () => {
-    // identity_match_status が ok でないとき、同一人物が重複した可能性がある。
+  it('名寄せ候補が残っていたら RESOLVED にしない', () => {
+    // identity_match_status が ok でない＝同一人物が重複した可能性がある。
+    // 確定していない人物あてに受取先を決めさせない。
     const result = applyResolution(
       link(),
       resolution(CU_A, { identityMatchStatus: 'unverified_candidate_not_auto_merged' }),
@@ -91,8 +92,43 @@ describe('解決の受け入れ（§22.1 新規・既存）', () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.status).toBe('RESOLVED');
+    expect(result.value.status).toBe('CONFLICT');
+    expect(result.value.linkedAt).toBeNull();
+    // 理由は残す。運用で中身を確認できるようにするため。
     expect(result.value.lastError).toContain('unverified_candidate_not_auto_merged');
+    // ID も残す。確認するときの手がかりになる。
+    expect(result.value.commonUserId).toBe(CU_A);
+  });
+
+  it('名寄せ候補が残っていたら Claim に使えない', () => {
+    const result = applyResolution(
+      link(),
+      resolution(CU_A, { identityMatchStatus: 'unverified_candidate_not_auto_merged' }),
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isUsableForClaim(result.value)).toBe(false);
+  });
+
+  it('名寄せ候補が残っていたら再試行もしない', () => {
+    // 相手の状態が変わらないかぎり同じ結果になる。人の確認を待つ。
+    const result = applyResolution(
+      link(),
+      resolution(CU_A, { identityMatchStatus: 'unverified_candidate_not_auto_merged' }),
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isDueForAttempt(result.value, new Date('2027-01-01T00:00:00.000Z'))).toBe(false);
+  });
+
+  it('ok なら余計な記録を残さない', () => {
+    const result = applyResolution(link(), resolution(CU_A), NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe('RESOLVED');
+    expect(result.value.lastError).toBeNull();
   });
 });
 

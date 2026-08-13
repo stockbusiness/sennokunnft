@@ -22,7 +22,14 @@ export const COMMON_USER_STATUSES = [
   'PENDING',
   /** 解決済み。`commonUserId` が入っている。 */
   'RESOLVED',
-  /** 既存の値と異なる値が返った。**人が確認するまで動かさない。** */
+  /**
+   * 人が確認するまで動かさない状態。次のいずれか。
+   *  - 既存の値と異なる値が返った
+   *  - 本システムが検証していない属性で一致した
+   *  - 名寄せ候補が残っている（同一人物が重複した可能性）
+   *
+   * 理由は `lastError` で区別する。
+   */
   'CONFLICT',
   /** 再試行の上限を超えた。人手での対応が要る。 */
   'ERROR',
@@ -93,7 +100,10 @@ export interface CommonUserLink {
 export interface CommonUserResolution {
   readonly commonUserId: string;
   readonly matchedBy: MatchedBy;
-  /** `unverified_candidate_not_auto_merged` なら重複の可能性がある。 */
+  /**
+   * `ok` 以外は**同一人物が重複した可能性がある**という意味。
+   * 例: `unverified_candidate_not_auto_merged`
+   */
   readonly identityMatchStatus: string;
 }
 
@@ -184,16 +194,35 @@ export function applyResolution(
     });
   }
 
+  if (resolution.identityMatchStatus !== 'ok') {
+    // ⚠️ **名寄せ候補が残っている＝同一人物が重複した可能性がある。**
+    //
+    // 代理店システムは、未検証のメール・電話・ウォレットが一致しても
+    // 自動統合せず、この状態を返す。つまり「この人物が本当に一人なのか、
+    // まだ確定していない」という意味になる。
+    //
+    // 記録だけ残して RESOLVED へ進めると、確定していない人物あてに
+    // 受取先が決まってしまう。Claim は取り返しがつかないので、
+    // 曖昧なまま通さず、人の確認を待つ。
+    //
+    // ID そのものは保存する。運用で中身を確認するときの手がかりになる。
+    return ok({
+      ...link,
+      commonUserId: resolution.commonUserId,
+      status: 'CONFLICT',
+      linkedAt: null,
+      lastError: `identity_match_status=${resolution.identityMatchStatus}`,
+      attemptCount: link.attemptCount + 1,
+      nextAttemptAt: null,
+    });
+  }
+
   return ok({
     ...link,
     commonUserId: resolution.commonUserId,
     status: 'RESOLVED',
     linkedAt: now,
-    lastError:
-      resolution.identityMatchStatus === 'ok'
-        ? null
-        : // 重複の可能性は消さずに残す。運用で気付けるようにするため。
-          `identity_match_status=${resolution.identityMatchStatus}`,
+    lastError: null,
     attemptCount: link.attemptCount + 1,
     nextAttemptAt: null,
   });

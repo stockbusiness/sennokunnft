@@ -96,8 +96,14 @@
 どちらも同じ `common_user_id` へ解決されうる。
 UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 
-⚠️ **`CONFLICT` の行を自動で直さない。** 既存と異なる値が返ったときは、
-既存の値を残したまま止める。上書きすると受取先が黙って別人に変わる。
+⚠️ **`CONFLICT` の行を自動で直さない。** 上書きすると受取先が黙って別人に変わる。
+`CONFLICT` になる理由は 3 つあり、`common_user_last_error` で区別する。
+
+| 理由                                   | `last_error` の例                                |
+| -------------------------------------- | ------------------------------------------------ |
+| 既存と異なる値が返った                 | `resolved id differs from the stored id`         |
+| 本システムが検証していない属性で一致   | `unacceptable match: identity:email`             |
+| 名寄せ候補が残っている（重複の可能性） | `identity_match_status=unverified_candidate_...` |
 
 ---
 
