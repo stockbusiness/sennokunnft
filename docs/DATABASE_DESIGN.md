@@ -12,16 +12,16 @@
 
 🟡 **仮決定:**
 
-| 原則 | 内容 | 根拠 |
-| --- | --- | --- |
-| 主キー | アプリ生成の **UUID v7**（`id UUID PRIMARY KEY`） | 時系列で概ね単調増加しインデックス断片化が小さい。連番と違い件数を推測されない |
-| スナップショット | 注文時点の名称・価格を注文側に複写し、マスタ参照で表示しない | マスタ変更が過去の取引記録を書き換えないため |
-| 金額 | `INTEGER`（最小通貨単位）＋ `currency CHAR(3)` | ✅ 浮動小数点禁止 |
-| 日時 | `TIMESTAMPTZ`。保存はUTC、表示時にJST変換 | タイムゾーン起因の不整合を排除 |
-| 論理削除 | 原則使わない。状態列（`status`）で表現する | 「削除済みだが参照される」曖昧さを避ける |
-| 秘密値 | 平文で保存しない。ハッシュ（`*_hash`）のみ保存 | ✅ セキュリティ要件 |
-| 外部ID | `provider` + `provider_ref` の組で保持し、主キーにしない | 決済事業者・チェーンの差し替え余地を残す |
-| 一意制約 | 冪等性は**アプリのif文ではなくDBのUNIQUE制約**で担保する | 競合状態でも破れないため |
+| 原則             | 内容                                                         | 根拠                                                                           |
+| ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| 主キー           | アプリ生成の **UUID v7**（`id UUID PRIMARY KEY`）            | 時系列で概ね単調増加しインデックス断片化が小さい。連番と違い件数を推測されない |
+| スナップショット | 注文時点の名称・価格を注文側に複写し、マスタ参照で表示しない | マスタ変更が過去の取引記録を書き換えないため                                   |
+| 金額             | `INTEGER`（最小通貨単位）＋ `currency CHAR(3)`               | ✅ 浮動小数点禁止                                                              |
+| 日時             | `TIMESTAMPTZ`。保存はUTC、表示時にJST変換                    | タイムゾーン起因の不整合を排除                                                 |
+| 論理削除         | 原則使わない。状態列（`status`）で表現する                   | 「削除済みだが参照される」曖昧さを避ける                                       |
+| 秘密値           | 平文で保存しない。ハッシュ（`*_hash`）のみ保存               | ✅ セキュリティ要件                                                            |
+| 外部ID           | `provider` + `provider_ref` の組で保持し、主キーにしない     | 決済事業者・チェーンの差し替え余地を残す                                       |
+| 一意制約         | 冪等性は**アプリのif文ではなくDBのUNIQUE制約**で担保する     | 競合状態でも破れないため                                                       |
 
 ---
 
@@ -49,16 +49,16 @@
 
 ### 3.1 `accounts` — アカウント
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | 内部ID |
-| `auth_provider` | TEXT | NOT NULL | 認証プロバイダ識別子（例: `supabase`） |
-| `auth_subject` | TEXT | NOT NULL | プロバイダ側のユーザーID（Supabase の `sub`） |
-| `email_hash` | TEXT | NULL | 照合用のメールハッシュ。**平文メールは保持しない**（🟡 `UD-503`） |
-| `display_name` | TEXT | NULL | 表示名 |
-| `role` | TEXT | NOT NULL DEFAULT `'buyer'` | `buyer` / `operator` / `auditor` |
-| `status` | TEXT | NOT NULL DEFAULT `'active'` | `active` / `suspended` |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                        | 説明                                                              |
+| --------------------------- | ----------- | --------------------------- | ----------------------------------------------------------------- |
+| `id`                        | UUID        | PK                          | 内部ID                                                            |
+| `auth_provider`             | TEXT        | NOT NULL                    | 認証プロバイダ識別子（例: `supabase`）                            |
+| `auth_subject`              | TEXT        | NOT NULL                    | プロバイダ側のユーザーID（Supabase の `sub`）                     |
+| `email_hash`                | TEXT        | NULL                        | 照合用のメールハッシュ。**平文メールは保持しない**（🟡 `UD-503`） |
+| `display_name`              | TEXT        | NULL                        | 表示名                                                            |
+| `role`                      | TEXT        | NOT NULL DEFAULT `'buyer'`  | `buyer` / `operator` / `auditor`                                  |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'active'` | `active` / `suspended`                                            |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                    |                                                                   |
 
 - `UNIQUE (auth_provider, auth_subject)`
 
@@ -70,18 +70,18 @@
 
 ### 3.2 `artworks` — 作品
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `slug` | TEXT | NOT NULL, UNIQUE | URL用識別子 |
-| `title` | TEXT | NOT NULL | |
-| `description` | TEXT | NOT NULL DEFAULT `''` | |
-| `image_key` | TEXT | NULL | ストレージ上のキー。公開URLは実行時に解決 |
-| `max_supply` | INTEGER | NOT NULL, CHECK `> 0` | 発行上限 |
-| `reserved_count` | INTEGER | NOT NULL DEFAULT 0, CHECK `>= 0` | 仮引当数 |
-| `issued_count` | INTEGER | NOT NULL DEFAULT 0, CHECK `>= 0` | 受取権発行済み数 |
-| `status` | TEXT | NOT NULL DEFAULT `'draft'` | `draft` / `published` / `archived` |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                             | 説明                                      |
+| --------------------------- | ----------- | -------------------------------- | ----------------------------------------- |
+| `id`                        | UUID        | PK                               |                                           |
+| `slug`                      | TEXT        | NOT NULL, UNIQUE                 | URL用識別子                               |
+| `title`                     | TEXT        | NOT NULL                         |                                           |
+| `description`               | TEXT        | NOT NULL DEFAULT `''`            |                                           |
+| `image_key`                 | TEXT        | NULL                             | ストレージ上のキー。公開URLは実行時に解決 |
+| `max_supply`                | INTEGER     | NOT NULL, CHECK `> 0`            | 発行上限                                  |
+| `reserved_count`            | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0` | 仮引当数                                  |
+| `issued_count`              | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0` | 受取権発行済み数                          |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'draft'`       | `draft` / `published` / `archived`        |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                           |
 
 - **CHECK `reserved_count + issued_count <= max_supply`**（オーバーセル防止の最終防壁）
 - INDEX `(status)`
@@ -91,16 +91,16 @@
 
 ### 3.3 `listings` — 出品
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `artwork_id` | UUID | NOT NULL, FK → `artworks.id` | |
-| `price_amount` | INTEGER | NOT NULL, CHECK `>= 0` | 最小通貨単位 |
-| `price_currency` | CHAR(3) | NOT NULL | ISO 4217 |
-| `max_quantity_per_order` | INTEGER | NOT NULL DEFAULT 1, CHECK `>= 1` | |
-| `status` | TEXT | NOT NULL DEFAULT `'draft'` | `draft` / `active` / `paused` / `closed` |
-| `starts_at` / `ends_at` | TIMESTAMPTZ | NULL | 販売期間 |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                             | 説明                                     |
+| --------------------------- | ----------- | -------------------------------- | ---------------------------------------- |
+| `id`                        | UUID        | PK                               |                                          |
+| `artwork_id`                | UUID        | NOT NULL, FK → `artworks.id`     |                                          |
+| `price_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`           | 最小通貨単位                             |
+| `price_currency`            | CHAR(3)     | NOT NULL                         | ISO 4217                                 |
+| `max_quantity_per_order`    | INTEGER     | NOT NULL DEFAULT 1, CHECK `>= 1` |                                          |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'draft'`       | `draft` / `active` / `paused` / `closed` |
+| `starts_at` / `ends_at`     | TIMESTAMPTZ | NULL                             | 販売期間                                 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                          |
 
 - INDEX `(artwork_id)`, `(status, starts_at, ends_at)`
 
@@ -109,17 +109,17 @@
 
 ### 3.4 `orders` — 注文
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `account_id` | UUID | NOT NULL, FK → `accounts.id` | 購入者 |
-| `status` | TEXT | NOT NULL | `pending` / `paid` / `failed` / `expired` / `refunded` |
-| `total_amount` | INTEGER | NOT NULL, CHECK `>= 0` | 明細合計のスナップショット |
-| `total_currency` | CHAR(3) | NOT NULL | |
-| `idempotency_key` | TEXT | NOT NULL | 注文作成の冪等キー |
-| `reserved_until` | TIMESTAMPTZ | NULL | 仮引当の期限 |
-| `paid_at` | TIMESTAMPTZ | NULL | |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                         | 説明                                                   |
+| --------------------------- | ----------- | ---------------------------- | ------------------------------------------------------ |
+| `id`                        | UUID        | PK                           |                                                        |
+| `account_id`                | UUID        | NOT NULL, FK → `accounts.id` | 購入者                                                 |
+| `status`                    | TEXT        | NOT NULL                     | `pending` / `paid` / `failed` / `expired` / `refunded` |
+| `total_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`       | 明細合計のスナップショット                             |
+| `total_currency`            | CHAR(3)     | NOT NULL                     |                                                        |
+| `idempotency_key`           | TEXT        | NOT NULL                     | 注文作成の冪等キー                                     |
+| `reserved_until`            | TIMESTAMPTZ | NULL                         | 仮引当の期限                                           |
+| `paid_at`                   | TIMESTAMPTZ | NULL                         |                                                        |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                     |                                                        |
 
 - `UNIQUE (account_id, idempotency_key)` — 同一利用者の二重注文を防ぐ
 - INDEX `(status, reserved_until)` — 期限切れ回収ワーカー用
@@ -133,51 +133,51 @@
 
 ### 3.5 `order_lines` — 注文明細
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `order_id` | UUID | NOT NULL, FK → `orders.id` | |
-| `listing_id` | UUID | NOT NULL, FK → `listings.id` | 参照用 |
-| `artwork_id` | UUID | NOT NULL, FK → `artworks.id` | 参照用 |
-| `artwork_title_snapshot` | TEXT | NOT NULL | **注文時点の作品名** |
-| `unit_price_amount` | INTEGER | NOT NULL | **注文時点の単価** |
-| `unit_price_currency` | CHAR(3) | NOT NULL | |
-| `quantity` | INTEGER | NOT NULL, CHECK `>= 1` | |
-| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                       | 型          | 制約                         | 説明                 |
+| ------------------------ | ----------- | ---------------------------- | -------------------- |
+| `id`                     | UUID        | PK                           |                      |
+| `order_id`               | UUID        | NOT NULL, FK → `orders.id`   |                      |
+| `listing_id`             | UUID        | NOT NULL, FK → `listings.id` | 参照用               |
+| `artwork_id`             | UUID        | NOT NULL, FK → `artworks.id` | 参照用               |
+| `artwork_title_snapshot` | TEXT        | NOT NULL                     | **注文時点の作品名** |
+| `unit_price_amount`      | INTEGER     | NOT NULL                     | **注文時点の単価**   |
+| `unit_price_currency`    | CHAR(3)     | NOT NULL                     |                      |
+| `quantity`               | INTEGER     | NOT NULL, CHECK `>= 1`       |                      |
+| `created_at`             | TIMESTAMPTZ | NOT NULL                     |                      |
 
 - INDEX `(order_id)`
 
 ### 3.6 `payments` — 決済
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `order_id` | UUID | NOT NULL, FK → `orders.id` | |
-| `provider` | TEXT | NOT NULL | 決済事業者識別子 |
-| `provider_session_ref` | TEXT | NULL | 決済セッション参照 |
-| `provider_payment_ref` | TEXT | NULL | 支払参照 |
-| `status` | TEXT | NOT NULL | `pending` / `succeeded` / `failed` / `refunded` / `partially_refunded` |
-| `amount` | INTEGER | NOT NULL | |
-| `currency` | CHAR(3) | NOT NULL | |
-| `amount_refunded` | INTEGER | NOT NULL DEFAULT 0, CHECK `>= 0` | |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                             | 説明                                                                   |
+| --------------------------- | ----------- | -------------------------------- | ---------------------------------------------------------------------- |
+| `id`                        | UUID        | PK                               |                                                                        |
+| `order_id`                  | UUID        | NOT NULL, FK → `orders.id`       |                                                                        |
+| `provider`                  | TEXT        | NOT NULL                         | 決済事業者識別子                                                       |
+| `provider_session_ref`      | TEXT        | NULL                             | 決済セッション参照                                                     |
+| `provider_payment_ref`      | TEXT        | NULL                             | 支払参照                                                               |
+| `status`                    | TEXT        | NOT NULL                         | `pending` / `succeeded` / `failed` / `refunded` / `partially_refunded` |
+| `amount`                    | INTEGER     | NOT NULL                         |                                                                        |
+| `currency`                  | CHAR(3)     | NOT NULL                         |                                                                        |
+| `amount_refunded`           | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0` |                                                                        |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                                                        |
 
 - `UNIQUE (provider, provider_payment_ref)` （NULL は複数可）
 - INDEX `(order_id)`
 
 ### 3.7 `webhook_events` — 外部Webhook受信記録（冪等性の要）
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `provider` | TEXT | NOT NULL | 送信元システム |
-| `event_id` | TEXT | NOT NULL | 送信元が採番したイベントID |
-| `event_type` | TEXT | NOT NULL | |
-| `received_at` | TIMESTAMPTZ | NOT NULL | |
-| `processed_at` | TIMESTAMPTZ | NULL | 処理完了時刻 |
-| `status` | TEXT | NOT NULL | `received` / `processed` / `ignored` / `failed` |
-| `payload_digest` | TEXT | NOT NULL | 本文のSHA-256。**本文自体は保存しない**（🟡） |
-| `error_summary` | TEXT | NULL | 失敗理由の要約（秘匿値を含めない） |
+| 列               | 型          | 制約     | 説明                                            |
+| ---------------- | ----------- | -------- | ----------------------------------------------- |
+| `id`             | UUID        | PK       |                                                 |
+| `provider`       | TEXT        | NOT NULL | 送信元システム                                  |
+| `event_id`       | TEXT        | NOT NULL | 送信元が採番したイベントID                      |
+| `event_type`     | TEXT        | NOT NULL |                                                 |
+| `received_at`    | TIMESTAMPTZ | NOT NULL |                                                 |
+| `processed_at`   | TIMESTAMPTZ | NULL     | 処理完了時刻                                    |
+| `status`         | TEXT        | NOT NULL | `received` / `processed` / `ignored` / `failed` |
+| `payload_digest` | TEXT        | NOT NULL | 本文のSHA-256。**本文自体は保存しない**（🟡）   |
+| `error_summary`  | TEXT        | NULL     | 失敗理由の要約（秘匿値を含めない）              |
 
 - **`UNIQUE (provider, event_id)`** ← ✅ 二重処理防止の中核
 
@@ -186,6 +186,7 @@
 調査は決済事業者側のダッシュボードで行う。
 
 > **処理順序（必ずこの順）:**
+>
 > 1. 署名検証（失敗 → 400、記録しない）
 > 2. `webhook_events` へ INSERT。**一意制約違反 = 既受信 → 即 200 を返して終了**
 > 3. 業務処理
@@ -193,20 +194,20 @@
 
 ### 3.8 `entitlements` — 受取権（中核）
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `order_id` | UUID | NOT NULL, FK → `orders.id` | |
-| `order_line_id` | UUID | NOT NULL, FK → `order_lines.id` | |
-| `artwork_id` | UUID | NOT NULL, FK → `artworks.id` | |
-| `account_id` | UUID | NOT NULL, FK → `accounts.id` | **購入者**（Claim照合の基準） |
-| `serial_no` | INTEGER | NOT NULL, CHECK `>= 1` | 作品内の連番 |
-| `claim_token_hash` | TEXT | NOT NULL | Claimトークンのハッシュ |
-| `status` | TEXT | NOT NULL DEFAULT `'issued'` | `issued` / `claimed` / `expired` / `revoked` |
-| `expires_at` | TIMESTAMPTZ | NULL | Claim 期限 |
-| `claimed_by_account_id` | UUID | NULL, FK → `accounts.id` | 実際にClaimしたアカウント |
-| `claimed_at` | TIMESTAMPTZ | NULL | |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                            | 説明                                         |
+| --------------------------- | ----------- | ------------------------------- | -------------------------------------------- |
+| `id`                        | UUID        | PK                              |                                              |
+| `order_id`                  | UUID        | NOT NULL, FK → `orders.id`      |                                              |
+| `order_line_id`             | UUID        | NOT NULL, FK → `order_lines.id` |                                              |
+| `artwork_id`                | UUID        | NOT NULL, FK → `artworks.id`    |                                              |
+| `account_id`                | UUID        | NOT NULL, FK → `accounts.id`    | **購入者**（Claim照合の基準）                |
+| `serial_no`                 | INTEGER     | NOT NULL, CHECK `>= 1`          | 作品内の連番                                 |
+| `claim_token_hash`          | TEXT        | NOT NULL                        | Claimトークンのハッシュ                      |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'issued'`     | `issued` / `claimed` / `expired` / `revoked` |
+| `expires_at`                | TIMESTAMPTZ | NULL                            | Claim 期限                                   |
+| `claimed_by_account_id`     | UUID        | NULL, FK → `accounts.id`        | 実際にClaimしたアカウント                    |
+| `claimed_at`                | TIMESTAMPTZ | NULL                            |                                              |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                        |                                              |
 
 - **`UNIQUE (artwork_id, serial_no)`** — 同一作品内でシリアル重複なし
 - **`UNIQUE (claim_token_hash)`** — トークン衝突を検出
@@ -230,19 +231,19 @@ UPDATE entitlements
 
 ### 3.9 `mint_jobs` — 発行ジョブ
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `entitlement_id` | UUID | NOT NULL, **UNIQUE**, FK → `entitlements.id` | ✅ 1受取権1ジョブ |
-| `status` | TEXT | NOT NULL DEFAULT `'queued'` | `queued` / `processing` / `succeeded` / `failed` / `cancelled` |
-| `attempt_count` | INTEGER | NOT NULL DEFAULT 0, CHECK `>= 0` | |
-| `max_attempts` | INTEGER | NOT NULL DEFAULT 5 | |
-| `next_attempt_at` | TIMESTAMPTZ | NOT NULL | バックオフ後の実行予定時刻 |
-| `locked_at` | TIMESTAMPTZ | NULL | `processing` 開始時刻（スタック検出用） |
-| `idempotency_key` | TEXT | NOT NULL, UNIQUE | 外部Mint APIへ渡す冪等キー |
-| `last_error_code` | TEXT | NULL | 秘匿値を含めない |
-| `note` | TEXT | NULL | 運用注記（INV-M4） |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                          | 型          | 制約                                         | 説明                                                           |
+| --------------------------- | ----------- | -------------------------------------------- | -------------------------------------------------------------- |
+| `id`                        | UUID        | PK                                           |                                                                |
+| `entitlement_id`            | UUID        | NOT NULL, **UNIQUE**, FK → `entitlements.id` | ✅ 1受取権1ジョブ                                              |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'queued'`                  | `queued` / `processing` / `succeeded` / `failed` / `cancelled` |
+| `attempt_count`             | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0`             |                                                                |
+| `max_attempts`              | INTEGER     | NOT NULL DEFAULT 5                           |                                                                |
+| `next_attempt_at`           | TIMESTAMPTZ | NOT NULL                                     | バックオフ後の実行予定時刻                                     |
+| `locked_at`                 | TIMESTAMPTZ | NULL                                         | `processing` 開始時刻（スタック検出用）                        |
+| `idempotency_key`           | TEXT        | NOT NULL, UNIQUE                             | 外部Mint APIへ渡す冪等キー                                     |
+| `last_error_code`           | TEXT        | NULL                                         | 秘匿値を含めない                                               |
+| `note`                      | TEXT        | NULL                                         | 運用注記（INV-M4）                                             |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                                     |                                                                |
 
 - INDEX `(status, next_attempt_at)` — ワーカーの取得クエリ用
 
@@ -266,19 +267,19 @@ RETURNING *;
 
 ### 3.10 `nft_tokens` — 発行済みトークン
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `entitlement_id` | UUID | NOT NULL, **UNIQUE**, FK → `entitlements.id` | ✅ INV-E3 |
-| `mint_job_id` | UUID | NOT NULL, FK → `mint_jobs.id` | |
-| `chain_ref` | TEXT | NOT NULL | チェーン識別子（**値は未確定** `UD-501`） |
-| `contract_ref` | TEXT | NOT NULL | コントラクト識別子（**値は未確定**） |
-| `token_ref` | TEXT | NOT NULL | トークン識別子 |
-| `tx_ref` | TEXT | NULL | トランザクション参照 |
-| `owner_ref` | TEXT | NOT NULL | 所有者参照（**カストディ方式未確定** `UD-502`） |
-| `metadata_uri` | TEXT | NULL | |
-| `minted_at` | TIMESTAMPTZ | NOT NULL | |
-| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| 列               | 型          | 制約                                         | 説明                                            |
+| ---------------- | ----------- | -------------------------------------------- | ----------------------------------------------- |
+| `id`             | UUID        | PK                                           |                                                 |
+| `entitlement_id` | UUID        | NOT NULL, **UNIQUE**, FK → `entitlements.id` | ✅ INV-E3                                       |
+| `mint_job_id`    | UUID        | NOT NULL, FK → `mint_jobs.id`                |                                                 |
+| `chain_ref`      | TEXT        | NOT NULL                                     | チェーン識別子（**値は未確定** `UD-501`）       |
+| `contract_ref`   | TEXT        | NOT NULL                                     | コントラクト識別子（**値は未確定**）            |
+| `token_ref`      | TEXT        | NOT NULL                                     | トークン識別子                                  |
+| `tx_ref`         | TEXT        | NULL                                         | トランザクション参照                            |
+| `owner_ref`      | TEXT        | NOT NULL                                     | 所有者参照（**カストディ方式未確定** `UD-502`） |
+| `metadata_uri`   | TEXT        | NULL                                         |                                                 |
+| `minted_at`      | TIMESTAMPTZ | NOT NULL                                     |                                                 |
+| `created_at`     | TIMESTAMPTZ | NOT NULL                                     |                                                 |
 
 - `UNIQUE (chain_ref, contract_ref, token_ref)`
 - INDEX `(owner_ref)`
@@ -289,18 +290,18 @@ RETURNING *;
 
 ### 3.11 `outbox_events` — ドメインイベント発行キュー
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `event_name` | TEXT | NOT NULL | 例: `order.paid` |
-| `event_version` | INTEGER | NOT NULL DEFAULT 1 | |
-| `aggregate_type` | TEXT | NOT NULL | |
-| `aggregate_id` | UUID | NOT NULL | |
-| `payload` | JSONB | NOT NULL | **個人情報を含めない** |
-| `occurred_at` | TIMESTAMPTZ | NOT NULL | |
-| `published_at` | TIMESTAMPTZ | NULL | |
-| `status` | TEXT | NOT NULL DEFAULT `'pending'` | `pending` / `published` / `failed` |
-| `attempt_count` | INTEGER | NOT NULL DEFAULT 0 | |
+| 列               | 型          | 制約                         | 説明                               |
+| ---------------- | ----------- | ---------------------------- | ---------------------------------- |
+| `id`             | UUID        | PK                           |                                    |
+| `event_name`     | TEXT        | NOT NULL                     | 例: `order.paid`                   |
+| `event_version`  | INTEGER     | NOT NULL DEFAULT 1           |                                    |
+| `aggregate_type` | TEXT        | NOT NULL                     |                                    |
+| `aggregate_id`   | UUID        | NOT NULL                     |                                    |
+| `payload`        | JSONB       | NOT NULL                     | **個人情報を含めない**             |
+| `occurred_at`    | TIMESTAMPTZ | NOT NULL                     |                                    |
+| `published_at`   | TIMESTAMPTZ | NULL                         |                                    |
+| `status`         | TEXT        | NOT NULL DEFAULT `'pending'` | `pending` / `published` / `failed` |
+| `attempt_count`  | INTEGER     | NOT NULL DEFAULT 0           |                                    |
 
 - INDEX `(status, occurred_at)`
 
@@ -310,15 +311,15 @@ RETURNING *;
 
 ### 3.12 `audit_logs` — 監査証跡
 
-| 列 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `id` | UUID | PK | |
-| `actor_account_id` | UUID | NULL, FK → `accounts.id` | NULL はシステム操作 |
-| `action` | TEXT | NOT NULL | 例: `artwork.publish` |
-| `target_type` | TEXT | NOT NULL | |
-| `target_id` | UUID | NULL | |
-| `summary` | JSONB | NOT NULL | 変更前後の**業務値のみ**。秘匿値を含めない |
-| `occurred_at` | TIMESTAMPTZ | NOT NULL | |
+| 列                 | 型          | 制約                     | 説明                                       |
+| ------------------ | ----------- | ------------------------ | ------------------------------------------ |
+| `id`               | UUID        | PK                       |                                            |
+| `actor_account_id` | UUID        | NULL, FK → `accounts.id` | NULL はシステム操作                        |
+| `action`           | TEXT        | NOT NULL                 | 例: `artwork.publish`                      |
+| `target_type`      | TEXT        | NOT NULL                 |                                            |
+| `target_id`        | UUID        | NULL                     |                                            |
+| `summary`          | JSONB       | NOT NULL                 | 変更前後の**業務値のみ**。秘匿値を含めない |
+| `occurred_at`      | TIMESTAMPTZ | NOT NULL                 |                                            |
 
 - INDEX `(target_type, target_id, occurred_at DESC)`, `(actor_account_id, occurred_at DESC)`
 
@@ -326,16 +327,16 @@ RETURNING *;
 
 ## 4. 冪等性を担保する制約の一覧
 
-| # | 制約 | 防ぐ事故 |
-| --- | --- | --- |
-| 1 | `webhook_events UNIQUE(provider, event_id)` | 同一Webhookの二重処理 |
-| 2 | `orders UNIQUE(account_id, idempotency_key)` | 二重注文 |
-| 3 | `entitlements UNIQUE(artwork_id, serial_no)` | シリアル重複発行 |
-| 4 | `mint_jobs UNIQUE(entitlement_id)` | 1受取権に対する複数ジョブ |
-| 5 | `mint_jobs UNIQUE(idempotency_key)` | 外部への重複依頼 |
-| 6 | `nft_tokens UNIQUE(entitlement_id)` | **1受取権からの複数Mint**（✅ 必須要件） |
-| 7 | `nft_tokens UNIQUE(chain_ref, contract_ref, token_ref)` | 同一トークンの二重登録 |
-| 8 | `artworks CHECK(reserved + issued <= max_supply)` | オーバーセル |
+| #   | 制約                                                    | 防ぐ事故                                 |
+| --- | ------------------------------------------------------- | ---------------------------------------- |
+| 1   | `webhook_events UNIQUE(provider, event_id)`             | 同一Webhookの二重処理                    |
+| 2   | `orders UNIQUE(account_id, idempotency_key)`            | 二重注文                                 |
+| 3   | `entitlements UNIQUE(artwork_id, serial_no)`            | シリアル重複発行                         |
+| 4   | `mint_jobs UNIQUE(entitlement_id)`                      | 1受取権に対する複数ジョブ                |
+| 5   | `mint_jobs UNIQUE(idempotency_key)`                     | 外部への重複依頼                         |
+| 6   | `nft_tokens UNIQUE(entitlement_id)`                     | **1受取権からの複数Mint**（✅ 必須要件） |
+| 7   | `nft_tokens UNIQUE(chain_ref, contract_ref, token_ref)` | 同一トークンの二重登録                   |
+| 8   | `artworks CHECK(reserved + issued <= max_supply)`       | オーバーセル                             |
 
 ✅ **事実:** 「1つの受取権から複数Mintできない設計」は **#4 と #6 の UNIQUE 制約**で
 物理的に担保される。アプリのロジックだけに依存しない。
@@ -357,10 +358,10 @@ RETURNING *;
 
 ## 6. 本文書の未決定事項
 
-| ID | 概要 |
-| --- | --- |
+| ID     | 概要                                   |
+| ------ | -------------------------------------- |
 | UD-503 | メールアドレスを本システムで保持するか |
-| UD-504 | ゲスト購入（未ログイン購入）の可否 |
-| UD-505 | Claim の有効期限 |
+| UD-504 | ゲスト購入（未ログイン購入）の可否     |
+| UD-505 | Claim の有効期限                       |
 
 （`UD-501` `UD-502` は [BLOCKCHAIN_DECISION_RECORD.md](./BLOCKCHAIN_DECISION_RECORD.md) 由来）

@@ -8,17 +8,17 @@
 
 🟡 **仮決定:** コード上の識別子は英語、UI表示は日本語とし、対応を次で固定する。
 
-| コード上の名前 | 日本語（内部） | UI表記 | 定義 |
-| --- | --- | --- | --- |
-| `Artwork` | 作品 | デジタル作品 | 販売対象となる著作物。1件の作品が複数枚発行されうる |
-| `Listing` | 出品 | 販売 | 作品を特定価格・特定期間で販売可能にした単位 |
-| `Order` | 注文 | ご注文 | 購入者が出品に対して行った購入意思と、その決済状態 |
-| `Payment` | 決済 | お支払い | 外部決済事業者における1回の支払い |
-| `Entitlement` | 受取権 | 受取り権利 | **1枚のトークンを受け取る権利**。注文の数量ぶん個別に存在する |
-| `Claim` | 受取 | 受取り | 受取権を行使して自分のものにする行為 |
-| `MintJob` | 発行ジョブ | （非表示） | Claim 済み受取権に対しトークンを発行する非同期処理 |
-| `NftToken` | トークン | デジタル所有証明 | Mint 済みのオンチェーン資産への参照 |
-| `Account` | アカウント | アカウント | 認証済み利用者。Supabase Auth のユーザーに1:1で対応 |
+| コード上の名前 | 日本語（内部） | UI表記           | 定義                                                          |
+| -------------- | -------------- | ---------------- | ------------------------------------------------------------- |
+| `Artwork`      | 作品           | デジタル作品     | 販売対象となる著作物。1件の作品が複数枚発行されうる           |
+| `Listing`      | 出品           | 販売             | 作品を特定価格・特定期間で販売可能にした単位                  |
+| `Order`        | 注文           | ご注文           | 購入者が出品に対して行った購入意思と、その決済状態            |
+| `Payment`      | 決済           | お支払い         | 外部決済事業者における1回の支払い                             |
+| `Entitlement`  | 受取権         | 受取り権利       | **1枚のトークンを受け取る権利**。注文の数量ぶん個別に存在する |
+| `Claim`        | 受取           | 受取り           | 受取権を行使して自分のものにする行為                          |
+| `MintJob`      | 発行ジョブ     | （非表示）       | Claim 済み受取権に対しトークンを発行する非同期処理            |
+| `NftToken`     | トークン       | デジタル所有証明 | Mint 済みのオンチェーン資産への参照                           |
+| `Account`      | アカウント     | アカウント       | 認証済み利用者。Supabase Auth のユーザーに1:1で対応           |
 
 > **`Entitlement` が本ドメインの中核概念。**
 > 「注文が数量Nを持つ」のではなく「注文がN個の受取権を生む」とモデル化する。
@@ -31,15 +31,15 @@
 
 🟡 **仮決定:** 集約（トランザクション整合性の単位）を次のとおり定める。
 
-| 集約ルート | 含むエンティティ | 整合性の責務 |
-| --- | --- | --- |
-| `Artwork` | `Artwork` | 発行上限（`maxSupply`）を超える引当を許さない |
-| `Listing` | `Listing` | 価格・公開状態。在庫カウンタの更新 |
-| `Order` | `Order`, `OrderLine`, `Payment` | 金額整合、決済状態遷移の一意性 |
-| `Entitlement` | `Entitlement` | 受取権の状態遷移が1回だけ起きること |
-| `MintJob` | `MintJob` | 実行の排他取得と再試行回数 |
-| `NftToken` | `NftToken` | 受取権に対して高々1つ存在すること |
-| `Account` | `Account` | 外部認証IDとの対応 |
+| 集約ルート    | 含むエンティティ                | 整合性の責務                                  |
+| ------------- | ------------------------------- | --------------------------------------------- |
+| `Artwork`     | `Artwork`                       | 発行上限（`maxSupply`）を超える引当を許さない |
+| `Listing`     | `Listing`                       | 価格・公開状態。在庫カウンタの更新            |
+| `Order`       | `Order`, `OrderLine`, `Payment` | 金額整合、決済状態遷移の一意性                |
+| `Entitlement` | `Entitlement`                   | 受取権の状態遷移が1回だけ起きること           |
+| `MintJob`     | `MintJob`                       | 実行の排他取得と再試行回数                    |
+| `NftToken`    | `NftToken`                      | 受取権に対して高々1つ存在すること             |
+| `Account`     | `Account`                       | 外部認証IDとの対応                            |
 
 集約をまたぐ更新は**ドメインイベント経由**で行う（[EVENT_CATALOG.md](./EVENT_CATALOG.md)）。
 ただし「同一DBトランザクション内で書く」ことは許す（Outbox パターン）。
@@ -48,14 +48,14 @@
 
 ## 3. 値オブジェクト
 
-| 名前 | 定義 | 不変条件 |
-| --- | --- | --- |
-| `Money` | `{ amountMinor: number, currency: CurrencyCode }` | `amountMinor` は**整数**かつ `>= 0`。演算は同一通貨間のみ |
-| `Quantity` | 正の整数 | `1 <= q <= MAX_QUANTITY_PER_ORDER` |
-| `SerialNumber` | 作品内の連番 | `1 <= n <= artwork.maxSupply`、作品内で一意 |
-| `ClaimToken` | Claim URL に埋め込む秘密 | 十分な乱数長。**DBには平文を保存しない**（ハッシュのみ） |
-| `IdempotencyKey` | 冪等キー | クライアント指定またはサーバー生成。スコープ内で一意 |
-| `ExternalRef` | 外部システムの識別子 | `{ system, id }`。生の外部IDをドメインの主キーにしない |
+| 名前             | 定義                                              | 不変条件                                                  |
+| ---------------- | ------------------------------------------------- | --------------------------------------------------------- |
+| `Money`          | `{ amountMinor: number, currency: CurrencyCode }` | `amountMinor` は**整数**かつ `>= 0`。演算は同一通貨間のみ |
+| `Quantity`       | 正の整数                                          | `1 <= q <= MAX_QUANTITY_PER_ORDER`                        |
+| `SerialNumber`   | 作品内の連番                                      | `1 <= n <= artwork.maxSupply`、作品内で一意               |
+| `ClaimToken`     | Claim URL に埋め込む秘密                          | 十分な乱数長。**DBには平文を保存しない**（ハッシュのみ）  |
+| `IdempotencyKey` | 冪等キー                                          | クライアント指定またはサーバー生成。スコープ内で一意      |
+| `ExternalRef`    | 外部システムの識別子                              | `{ system, id }`。生の外部IDをドメインの主キーにしない    |
 
 ✅ **事実:** 金額は整数で保持し、浮動小数点演算を行わない。
 
@@ -90,13 +90,13 @@ JPY は minor unit = 1円（小数0桁）なので、日本円運用では `amou
    └──────────┘
 ```
 
-| 遷移 | 契機 | 不変条件 |
-| --- | --- | --- |
-| `→ PENDING` | 注文作成API | 在庫の仮引当に成功していること |
-| `PENDING → PAID` | 決済Webhook（署名検証済み） | **同一イベントの再受信で二重遷移しない** |
-| `PENDING → FAILED` | 決済失敗Webhook | 仮引当を解放する |
-| `PENDING → EXPIRED` | 有効期限超過（ワーカー） | 仮引当を解放する |
-| `PAID → REFUNDED` | 全額返金Webhook | 未Claimの受取権を `REVOKED` にする |
+| 遷移                | 契機                        | 不変条件                                 |
+| ------------------- | --------------------------- | ---------------------------------------- |
+| `→ PENDING`         | 注文作成API                 | 在庫の仮引当に成功していること           |
+| `PENDING → PAID`    | 決済Webhook（署名検証済み） | **同一イベントの再受信で二重遷移しない** |
+| `PENDING → FAILED`  | 決済失敗Webhook             | 仮引当を解放する                         |
+| `PENDING → EXPIRED` | 有効期限超過（ワーカー）    | 仮引当を解放する                         |
+| `PAID → REFUNDED`   | 全額返金Webhook             | 未Claimの受取権を `REVOKED` にする       |
 
 ✅ **事実:** 決済確定は **Webhook のみ**で判定する。
 成功画面への到達を決済完了とみなす処理を書かない。
@@ -186,11 +186,11 @@ JPY は minor unit = 1円（小数0桁）なので、日本円運用では `amou
 販売可能数 = artwork.max_supply - artwork.reserved_count - artwork.issued_count
 ```
 
-| 契機 | 操作 |
-| --- | --- |
-| 注文作成 | 行ロックの上で販売可能数を検証し、`reserved_count += quantity` |
-| 決済確定 | `reserved_count -= quantity`, `issued_count += quantity`、受取権を quantity 件作成 |
-| 失敗・期限切れ | `reserved_count -= quantity` |
+| 契機           | 操作                                                                               |
+| -------------- | ---------------------------------------------------------------------------------- |
+| 注文作成       | 行ロックの上で販売可能数を検証し、`reserved_count += quantity`                     |
+| 決済確定       | `reserved_count -= quantity`, `issued_count += quantity`、受取権を quantity 件作成 |
+| 失敗・期限切れ | `reserved_count -= quantity`                                                       |
 
 **不変条件 INV-S1:** `reserved_count >= 0` かつ `issued_count >= 0` かつ
 `reserved_count + issued_count <= max_supply`。DBの CHECK 制約で担保する。
@@ -204,16 +204,16 @@ JPY は minor unit = 1円（小数0桁）なので、日本円運用では `amou
 
 `packages/domain` は次の interface のみを定義し、実装を持たない。
 
-| ポート | 役割 | 実装場所 |
-| --- | --- | --- |
-| `ArtworkRepository` / `ListingRepository` / `OrderRepository` / `EntitlementRepository` / `MintJobRepository` | 永続化 | `packages/database` |
-| `PaymentGatewayPort` | 決済セッション作成、Webhook 署名検証、返金参照 | `packages/integrations` |
-| `MintingPort` | トークン発行の依頼と結果取得 | `packages/integrations` |
-| `MetadataStoragePort` | メタデータ・画像の保存と公開URL取得 | `packages/integrations` |
-| `ClaimTokenPort` | Claim トークンの生成と検証（ハッシュ化） | `packages/integrations` |
-| `ClockPort` | 現在時刻（テスト可能性のため） | `packages/integrations` |
-| `IdGeneratorPort` | 識別子生成 | `packages/integrations` |
-| `EventPublisherPort` | ドメインイベントの発行（Outbox書き込み） | `packages/database` |
+| ポート                                                                                                        | 役割                                           | 実装場所                |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------- |
+| `ArtworkRepository` / `ListingRepository` / `OrderRepository` / `EntitlementRepository` / `MintJobRepository` | 永続化                                         | `packages/database`     |
+| `PaymentGatewayPort`                                                                                          | 決済セッション作成、Webhook 署名検証、返金参照 | `packages/integrations` |
+| `MintingPort`                                                                                                 | トークン発行の依頼と結果取得                   | `packages/integrations` |
+| `MetadataStoragePort`                                                                                         | メタデータ・画像の保存と公開URL取得            | `packages/integrations` |
+| `ClaimTokenPort`                                                                                              | Claim トークンの生成と検証（ハッシュ化）       | `packages/integrations` |
+| `ClockPort`                                                                                                   | 現在時刻（テスト可能性のため）                 | `packages/integrations` |
+| `IdGeneratorPort`                                                                                             | 識別子生成                                     | `packages/integrations` |
+| `EventPublisherPort`                                                                                          | ドメインイベントの発行（Outbox書き込み）       | `packages/database`     |
 
 ✅ **事実:** Phase 1 では上記ポートの **interface と Fake 実装のみ**を用意し、
 実サービスには接続しない。
@@ -226,18 +226,18 @@ JPY は minor unit = 1円（小数0桁）なので、日本円運用では `amou
 理由: 「在庫切れ」「Claim済み」は例外ではなく正常な業務結果であり、
 呼び出し側に網羅的な分岐を型で強制できるため。
 
-| エラーコード | 意味 |
-| --- | --- |
-| `ARTWORK_NOT_AVAILABLE` | 作品が非公開または存在しない |
-| `LISTING_NOT_ACTIVE` | 出品が販売中でない |
-| `INSUFFICIENT_SUPPLY` | 販売可能数が不足 |
-| `INVALID_QUANTITY` | 数量が範囲外 |
-| `ORDER_NOT_PENDING` | 注文が支払待ちでない |
-| `ENTITLEMENT_NOT_CLAIMABLE` | 受取権が `ISSUED` でない |
-| `ENTITLEMENT_OWNER_MISMATCH` | Claim実行者が購入者と一致しない |
-| `CLAIM_TOKEN_INVALID` | Claim トークンが不正または期限切れ |
-| `MINT_ALREADY_EXISTS` | 既にトークンが発行済み |
-| `IDEMPOTENCY_CONFLICT` | 同一冪等キーで異なる内容の要求 |
+| エラーコード                 | 意味                               |
+| ---------------------------- | ---------------------------------- |
+| `ARTWORK_NOT_AVAILABLE`      | 作品が非公開または存在しない       |
+| `LISTING_NOT_ACTIVE`         | 出品が販売中でない                 |
+| `INSUFFICIENT_SUPPLY`        | 販売可能数が不足                   |
+| `INVALID_QUANTITY`           | 数量が範囲外                       |
+| `ORDER_NOT_PENDING`          | 注文が支払待ちでない               |
+| `ENTITLEMENT_NOT_CLAIMABLE`  | 受取権が `ISSUED` でない           |
+| `ENTITLEMENT_OWNER_MISMATCH` | Claim実行者が購入者と一致しない    |
+| `CLAIM_TOKEN_INVALID`        | Claim トークンが不正または期限切れ |
+| `MINT_ALREADY_EXISTS`        | 既にトークンが発行済み             |
+| `IDEMPOTENCY_CONFLICT`       | 同一冪等キーで異なる内容の要求     |
 
 HTTP へのマッピングは [API_DESIGN.md](./API_DESIGN.md) 参照。
 
@@ -245,9 +245,9 @@ HTTP へのマッピングは [API_DESIGN.md](./API_DESIGN.md) 参照。
 
 ## 8. 本文書の未決定事項
 
-| ID | 概要 |
-| --- | --- |
+| ID     | 概要                                              |
+| ------ | ------------------------------------------------- |
 | UD-401 | 取扱通貨と税の扱い（内税/外税・税率・インボイス） |
-| UD-402 | Mint 最終失敗時の顧客対応ポリシー |
+| UD-402 | Mint 最終失敗時の顧客対応ポリシー                 |
 
 （`UD-104` 返金ポリシーは [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md) 由来）

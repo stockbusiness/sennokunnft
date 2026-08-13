@@ -1,0 +1,257 @@
+# 千ノ国NFTマーケット
+
+千ノ国プロジェクト向けの NFT 一次販売マーケット。
+
+**現在の状態: Phase 0（要件・アーキテクチャ設計）と Phase 1（Monorepo 開発基盤）が完了。**
+NFT 販売・決済・Claim・ブロックチェーン Mint は**まだ実装されていない**。
+
+---
+
+## 1. これは何か / まだ何ではないか
+
+| 実装済み                                     | 未実装                       |
+| -------------------------------------------- | ---------------------------- |
+| モノレポ基盤（pnpm + Turborepo）             | 作品登録・出品・カタログ画面 |
+| ドメイン層（状態遷移・不変条件・ポート定義） | 決済連携                     |
+| 認可判定（権限マトリクス）                   | Claim フロー                 |
+| 環境変数の型検証、構造化ログ                 | ブロックチェーン Mint        |
+| Prisma スキーマ                              | マイグレーション適用         |
+| API ヘルスチェック、Worker の器              | 業務エンドポイント           |
+| テスト基盤（Vitest / Playwright）、CI        | —                            |
+
+> ⚠️ **ブロックチェーン仕様は何も決まっていない。**
+> チェーン・カストディ・トークン規格・鍵管理はいずれも未決定であり、
+> 本コードは**それらを推測で確定していない**。
+> 詳細は [docs/BLOCKCHAIN_DECISION_RECORD.md](./docs/BLOCKCHAIN_DECISION_RECORD.md)。
+
+> ⚠️ **外部サービスへ接続しない。**
+> 決済・発行プロバイダは `fake` 実装のみで、`fake` 以外を設定すると**起動を拒否する**。
+
+---
+
+## 2. 開発環境の構築
+
+### 2.1 前提
+
+| ツール     | バージョン    | 備考                                           |
+| ---------- | ------------- | ---------------------------------------------- |
+| Node.js    | 22.12 以上    | `.nvmrc` で固定。`nvm use` で切り替えられる    |
+| pnpm       | 9.15.4        | `corepack enable pnpm` で有効化できる          |
+| PostgreSQL | 16 系（任意） | Phase 1 の検査には**不要**。Phase 2 以降で使う |
+
+```bash
+# Node のバージョンを合わせる
+nvm use
+
+# pnpm を有効化する（同梱の Corepack を使う場合）
+corepack enable pnpm
+```
+
+### 2.2 セットアップ
+
+```bash
+# 1. 依存を導入する
+pnpm install
+
+# 2. 環境変数のテンプレートをコピーする
+cp .env.example .env
+
+# 3. .env を編集する
+#    Phase 1 で必須なのは DATABASE_URL のみ（接続はしないが、値の存在を検証する）
+#    例: DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sengoku_nft
+
+# 4. Prisma Client を生成する（DB への接続は不要）
+pnpm db:generate
+
+# 5. すべての検査を実行する
+pnpm verify
+```
+
+> `.env` はコミットされない。`.env.example` には**変数名と説明のみ**を書く。
+> 値を書き込むと `pnpm check:secrets` が失敗する。
+
+### 2.3 各プロセスの起動
+
+3 つのプロセスは**それぞれ独立に**起動できる。
+
+```bash
+# 画面（http://localhost:3000）
+pnpm dev:web
+
+# API（http://localhost:3001）
+pnpm dev:api
+
+# 非同期ワーカー（常駐）
+pnpm dev:worker
+```
+
+ワーカーは 1 回だけ実行して終了させることもできる。
+デプロイ先が常駐プロセスを許すか未決定（UD-302）のため、
+cron 起動の環境でも動くようにしてある。
+
+```bash
+pnpm --filter @sengoku/worker run build
+pnpm --filter @sengoku/worker run start:once
+```
+
+### 2.4 動作確認
+
+```bash
+# API のヘルスチェック
+curl http://localhost:3001/healthz
+# => {"status":"ok","service":"api","version":"0.1.0","uptimeSec":0}
+
+curl http://localhost:3001/readyz
+# => {"status":"ok","service":"api","checks":[]}
+```
+
+---
+
+## 3. よく使うコマンド
+
+| コマンド             | 内容                                                                             |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `pnpm verify`        | **CI と同じ検査を全部**（秘密検査 → 依存検査 → lint → typecheck → test → build） |
+| `pnpm lint`          | ESLint                                                                           |
+| `pnpm typecheck`     | 型検査（`tsc --noEmit`）                                                         |
+| `pnpm test`          | 単体テスト（Vitest）                                                             |
+| `pnpm build`         | 全パッケージ・全アプリのビルド                                                   |
+| `pnpm e2e`           | E2E スモーク（Playwright。事前に `pnpm build` が必要）                           |
+| `pnpm check:deps`    | 依存の循環・層越えの検査                                                         |
+| `pnpm check:secrets` | 秘密情報の混入検査                                                               |
+| `pnpm db:generate`   | Prisma Client の生成                                                             |
+| `pnpm format`        | Prettier で整形                                                                  |
+
+> CI にしか無い検査は作っていない。CI が実行するのは `pnpm verify` と
+> `pnpm format:check`、`pnpm db:generate`、E2E のみで、すべて手元で同じように動く。
+
+### E2E をローカルで動かすとき
+
+```bash
+pnpm build
+pnpm --filter @sengoku/web run e2e:install   # 初回のみブラウザを取得
+pnpm e2e
+```
+
+ブラウザが既に配置されている実行環境では、バージョン不一致で起動できないことがある。
+その場合は実行ファイルを直接指定する。
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium pnpm e2e
+```
+
+---
+
+## 4. パッケージ構成と責務
+
+依存は**内向きのみ**。`domain` は他のどのパッケージにも依存しない。
+この向きは `pnpm check:deps` が機械的に検査する（循環だけでなく層越えも検出する）。
+
+```
+config ──────┬──────────────────────────────┐
+             │                              │
+validation ──┼──▶ domain ──┬──▶ contracts ──┤
+             │             │                │
+observability┤             ├──▶ database ───┤
+             │             ├──▶ auth ───────┤
+             │             └──▶ integrations┤
+             │                              │
+ui ──────────┴──────────────────────────────┤
+                                            ▼
+                              apps/web, apps/api, apps/worker
+```
+
+### アプリケーション
+
+| パッケージ    | 責務                                   | 責務ではないもの                  |
+| ------------- | -------------------------------------- | --------------------------------- |
+| `apps/web`    | 画面、ルーティング、BFF                | 業務判断（`domain` に依存しない） |
+| `apps/api`    | HTTP 境界、認可の適用、DTO 変換        | 業務規則そのもの                  |
+| `apps/worker` | 非同期ジョブ、再試行、スケジューリング | HTTP                              |
+
+### 共有パッケージ
+
+| パッケージ               | 責務                                                                        | 責務ではないもの                         |
+| ------------------------ | --------------------------------------------------------------------------- | ---------------------------------------- |
+| `packages/config`        | 環境変数スキーマと型検証、共通 tsconfig / ESLint / Prettier、検査スクリプト | 業務ロジック                             |
+| `packages/validation`    | zod ベースの共通検証部品                                                    | 業務規則（「在庫があるか」は判定しない） |
+| `packages/domain`        | 集約・状態遷移・不変条件・**ポート定義**                                    | フレームワーク、DB、HTTP、外部SDK        |
+| `packages/contracts`     | API DTO とイベントのスキーマ・バージョン                                    | 業務判断、通信の実行                     |
+| `packages/database`      | Prisma スキーマ、Client 生成、リポジトリ実装                                | 業務判断、HTTP                           |
+| `packages/auth`          | トークン検証ポート、ロール、**認可判定の純粋関数**                          | 資格情報の管理（Supabase Auth の責務）   |
+| `packages/integrations`  | 外部サービスのアダプタ（**Phase 1 は Fake のみ**）                          | 業務判断、HTTP ルーティング              |
+| `packages/observability` | 構造化ログ、相関ID、秘匿値の自動マスキング                                  | 業務知識                                 |
+| `packages/ui`            | 状態を持たない React 部品                                                   | API 呼び出し、業務判断、認可             |
+
+> ⚠️ **`packages/contracts` は「スマートコントラクト」ではない。**
+> システム間の契約（API DTO・イベントスキーマ）を置く場所である。
+
+---
+
+## 5. 設計の中心にあるもの
+
+この設計で最も重視しているのは、**取り返しのつかない事故を構造で防ぐ**こと。
+
+### 5.1 「1つの受取権から複数 Mint できない」を 4 層で担保する
+
+数量 N の注文は、N 個の**受取権（Entitlement）**を生む。
+受取権 1 個から発行されるトークンは高々 1 つ。これを次の 4 層で守る。
+
+| 層  | 手段                                                                           |
+| --- | ------------------------------------------------------------------------------ |
+| 1   | `mint_jobs` の `UNIQUE(entitlement_id)` — ジョブが 1 つしか作られない          |
+| 2   | `FOR UPDATE SKIP LOCKED` + 条件付き UPDATE — 同じジョブを 2 ワーカーが掴まない |
+| 3   | `nft_tokens` の `UNIQUE(entitlement_id)` — 万一 2 回実行されても記録は 1 件    |
+| 4   | 受取権IDから導出する決定論的な冪等キー — 外部 API 側でも重複を弾ける           |
+
+**アプリの `if` 文には依存していない。** 競合状態では読み取り後の判定は破れるが、
+DB の制約は破れないため。
+
+### 5.2 決済確定は Webhook のみ
+
+成功画面への到達を決済完了とみなす経路は存在しない。
+状態遷移表（`packages/domain/src/state/machines.ts`）に、
+その遷移自体を書いていない。
+
+### 5.3 秘匿値は仕組みでマスクする
+
+ログは全行が `redact()` を通る。キー名のパターンで判定し、入れ子も配列も再帰的に伏せる。
+「開発時だけ詳細ログ」という抜け道を作っていないのは、
+環境差で設定ミスが本番に適用されるのを防ぐため。
+
+### 5.4 未決定を推測で埋めない
+
+チェーン関連の識別子は、DB でもイベント契約でも**不透明な文字列**にしてある。
+EVM のアドレス形式などに型を固定すると、決定前に選択肢を狭めてしまう。
+
+---
+
+## 6. ドキュメント
+
+設計文書は [`docs/`](./docs/) にある。索引は [docs/README.md](./docs/README.md)。
+
+各文書は記述を **✅事実 / 🟡仮決定 / ❓未決定** の 3 分類で明示的に分けている。
+**未決定事項（41 件）のマスタ一覧**は
+[docs/IMPLEMENTATION_ROADMAP.md](./docs/IMPLEMENTATION_ROADMAP.md) の「未決定事項レジスタ」。
+
+とくに先に読むとよいもの:
+
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 依存の向きとパッケージ責務
+- [DOMAIN_MODEL.md](./docs/DOMAIN_MODEL.md) — 受取権を中核に据えたモデル
+- [LAZY_MINT_FLOW.md](./docs/LAZY_MINT_FLOW.md) — 購入から発行までの詳細と失敗時の挙動
+- [BLOCKCHAIN_DECISION_RECORD.md](./docs/BLOCKCHAIN_DECISION_RECORD.md) — **未決定の記録**
+
+---
+
+## 7. リポジトリの配置について
+
+本プロジェクトは新規リポジトリ `team478a/sengoku-nft-marketplace` を対象として
+指示されたが、実装セッションから当該 organization へアクセスできなかったため、
+既存リポジトリ内の**独立したサブツリー**として作成している。
+
+- 既存システム（Sengoku Market）のファイルは**1 件も変更していない**
+- ルートの `package.json` / `tsconfig.json` / 既存 CI とは分離しており、相互に影響しない
+- `git subtree split` でそのまま新リポジトリへ移送できる
+
+移送手順は
+[docs/OPERATIONS_AND_ROLLBACK.md](./docs/OPERATIONS_AND_ROLLBACK.md) 「リポジトリ移送」を参照。
