@@ -30,6 +30,15 @@ export interface ArtworkRepository {
   create(artwork: Artwork): Promise<Artwork>;
   /** 在庫カウンタ以外の属性を更新する。カウンタは在庫操作専用の経路で扱う。 */
   update(artwork: Artwork): Promise<Artwork>;
+  /**
+   * 作品を非公開にし、渡された出品を終了する。**両方を 1 トランザクションで書く。**
+   *
+   * 出品テーブルへの書き込みを含むため、一見この責務はここに無い。
+   * それでも分けないのは、2 つの書き込みのあいだで落ちたときに
+   * 「非公開なのに販売中の出品がある」状態が残るためで、
+   * この 2 つは分割できない 1 つの操作として扱う。
+   */
+  archiveWithListings(artwork: Artwork, endedListings: readonly Listing[]): Promise<Artwork>;
 }
 
 export interface ListingRepository {

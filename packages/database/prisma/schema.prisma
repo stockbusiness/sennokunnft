@@ -53,6 +53,7 @@ model Account {
   entitlements         Entitlement[]        @relation("EntitlementPurchaser")
   claimedEntitlements  Entitlement[]        @relation("EntitlementClaimer")
   auditLogs            AuditLog[]
+  idempotencyKeys      IdempotencyKey[]
 
   @@unique([authProvider, authSubject])
   @@map("accounts")
@@ -436,4 +437,37 @@ model AuditLog {
   @@index([targetType, targetId, occurredAt])
   @@index([actorAccountId, occurredAt])
   @@map("audit_logs")
+}
+
+/// 冪等キー。同じ操作が 2 回実行されないようにする。
+///
+/// ⚠️ **保存先をプロセス内メモリにしない。**
+/// メモリだと台数を増やした瞬間に効かなくなり、しかも
+/// 「効いていない」ことが見た目には分からない。
+/// 取り返しのつかない操作（注文・決済）を扱う前に DB へ移す。
+///
+/// ⚠️ **「探してから書く」のではなく「先に占有する」。**
+/// 探す→無い→処理する、の順だと、同時に来た 2 本が両方とも
+/// 「無い」を見て両方処理してしまう。UNIQUE 制約で先に場所を取り、
+/// 取れた 1 本だけが処理する。
+model IdempotencyKey {
+  id             String    @id @default(uuid()) @db.Uuid
+  /// キーはアクターごとに区切る。区切らないと他人のキーを当てて応答を読める。
+  actorAccountId String    @map("actor_account_id") @db.Uuid
+  key            String
+  /// リクエスト内容のハッシュ。値そのものは保持しない。
+  requestDigest  String    @map("request_digest")
+  /// in_progress … 占有だけした状態 / completed … 応答を記録済み
+  status         String
+  statusCode     Int?      @map("status_code")
+  responseBody   Json?     @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+
+  actor Account @relation(fields: [actorAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([actorAccountId, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
 }

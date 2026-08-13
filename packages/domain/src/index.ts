@@ -70,6 +70,8 @@ export {
   type UpdateArtworkInput,
 } from './catalog/artwork';
 
+export { archiveArtworkAndEndListings, type ArchivedCatalogEntry } from './catalog/archive';
+
 export {
   createListing,
   updateListing,
@@ -125,6 +127,13 @@ export {
 } from './media/image';
 
 export type { Page, PageQuery, ArtworkRepository, ListingRepository } from './ports/catalog';
+export type {
+  IdempotencyState,
+  IdempotencyRecord,
+  IdempotencyClaimInput,
+  IdempotencyClaimResult,
+  IdempotencyStore,
+} from './ports/idempotency';
 
 export type {
   ClockPort,

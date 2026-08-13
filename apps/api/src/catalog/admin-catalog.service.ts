@@ -11,7 +11,7 @@ import type {
 } from '@sengoku/contracts';
 import {
   activateListing,
-  archiveArtwork,
+  archiveArtworkAndEndListings,
   availableSupply,
   createArtworkDraft,
   createListing,
@@ -118,16 +118,29 @@ export class AdminCatalogService {
     return this.toAdminArtwork(saved);
   }
 
+  /**
+   * 作品を非公開にする。**有効な出品も一緒に終了する。**
+   *
+   * 出品を残したまま非公開にすると「非公開なのに販売中の出品がある」状態になる。
+   * 以前はこれを運用手順で埋める前提にしていたが、手順は忘れられるため、
+   * ここで必ず一緒に終了させる。DB 側のトリガが最終的な保証になっている。
+   */
   async archiveArtwork(id: string, actorId: string): Promise<AdminArtwork> {
     const artwork = await this.loadArtwork(id);
-    const archived = unwrapDomain(archiveArtwork(artwork));
-    const saved = await this.artworks.update(archived);
+    const listings = await this.listings.listByArtwork(artwork.id);
+    const result = unwrapDomain(archiveArtworkAndEndListings(artwork, listings));
+    const saved = await this.artworks.archiveWithListings(result.artwork, result.endedListings);
     await this.audit.record({
       actorAccountId: actorId,
       action: 'artwork.archive',
       targetType: 'artwork',
       targetId: saved.id,
-      summary: { slug: saved.slug },
+      // 巻き込みで終了した出品は監査ログに残す。
+      // 「知らないうちに販売が止まっていた」を後から追えるようにするため。
+      summary: {
+        slug: saved.slug,
+        endedListingIds: result.endedListings.map((listing) => listing.id),
+      },
     });
     return this.toAdminArtwork(saved);
   }

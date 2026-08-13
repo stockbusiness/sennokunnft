@@ -6,6 +6,10 @@ import type {
   AuditLogPort,
   ClockPort,
   IdGeneratorPort,
+  IdempotencyClaimInput,
+  IdempotencyClaimResult,
+  IdempotencyState,
+  IdempotencyStore,
   Listing,
   ListingRepository,
   Page,
@@ -27,6 +31,9 @@ export class InMemoryArtworkRepository implements ArtworkRepository {
   private readonly items = new Map<string, Artwork>();
   /** 挿入順を保持する（キーセットページングの代わり）。 */
   private readonly order: string[] = [];
+
+  /** 非公開化のときに出品も書き換えるため、出品側の保管庫を借りる。 */
+  constructor(private readonly listings: InMemoryListingRepository) {}
 
   seed(artwork: Artwork): Artwork {
     this.items.set(artwork.id, artwork);
@@ -60,6 +67,19 @@ export class InMemoryArtworkRepository implements ArtworkRepository {
   update(artwork: Artwork): Promise<Artwork> {
     this.items.set(artwork.id, artwork);
     return Promise.resolve(artwork);
+  }
+
+  /**
+   * 実装は 1 トランザクションで書く。ここでは順に書くだけだが、
+   * **出品側も必ず書く**ことが重要で、書かないと
+   * 「作品だけ非公開になった」状態をテストが素通りさせてしまう。
+   */
+  async archiveWithListings(artwork: Artwork, endedListings: readonly Listing[]): Promise<Artwork> {
+    for (const listing of endedListings) {
+      await this.listings.update(listing);
+    }
+    this.items.set(artwork.id, artwork);
+    return artwork;
   }
 
   private paginate(query: PageQuery, predicate: (item: Artwork) => boolean): Page<Artwork> {
@@ -199,12 +219,100 @@ export const TEST_ISSUER = 'https://auth.test';
 export const TEST_AUDIENCE = 'sennokunnft-test';
 export const TEST_NOW = new Date('2026-06-01T00:00:00.000Z');
 
+/**
+ * 冪等キーの保管庫（テスト用）。
+ *
+ * 実装は DB の一意制約で占有を決める。ここでは Map だが、
+ * **「占有できたのは 1 本だけ」という性質は同じにしてある。**
+ * ここを「探して無ければ書く」にすると、テストだけが通って
+ * 本番の競合を見逃す。
+ */
+export class InMemoryIdempotencyStore implements IdempotencyStore {
+  private readonly rows = new Map<
+    string,
+    {
+      requestDigest: string;
+      state: IdempotencyState;
+      statusCode: number | null;
+      responseBody: unknown;
+      expiresAt: Date;
+    }
+  >();
+
+  private compositeKey(actorAccountId: string, key: string): string {
+    return `${actorAccountId} ${key}`;
+  }
+
+  claim(input: IdempotencyClaimInput): Promise<IdempotencyClaimResult> {
+    const id = this.compositeKey(input.actorAccountId, input.key);
+    const existing = this.rows.get(id);
+
+    // 期限切れは未使用として扱う。
+    if (existing !== undefined && existing.expiresAt.getTime() <= input.now.getTime()) {
+      this.rows.delete(id);
+    }
+
+    if (this.rows.has(id)) {
+      const row = this.rows.get(id);
+      return Promise.resolve({
+        claimed: false,
+        existing:
+          row === undefined
+            ? null
+            : {
+                requestDigest: row.requestDigest,
+                state: row.state,
+                statusCode: row.statusCode,
+                responseBody: row.responseBody,
+              },
+      });
+    }
+
+    this.rows.set(id, {
+      requestDigest: input.requestDigest,
+      state: 'in_progress',
+      statusCode: null,
+      responseBody: null,
+      expiresAt: input.expiresAt,
+    });
+    return Promise.resolve({ claimed: true, existing: null });
+  }
+
+  complete(input: {
+    actorAccountId: string;
+    key: string;
+    statusCode: number;
+    responseBody: unknown;
+  }): Promise<void> {
+    const id = this.compositeKey(input.actorAccountId, input.key);
+    const row = this.rows.get(id);
+    if (row !== undefined) {
+      row.state = 'completed';
+      row.statusCode = input.statusCode;
+      row.responseBody = input.responseBody;
+    }
+    return Promise.resolve();
+  }
+
+  release(actorAccountId: string, key: string): Promise<void> {
+    const id = this.compositeKey(actorAccountId, key);
+    const row = this.rows.get(id);
+    // 完了済みは消さない。正しい応答として残すべきもの。
+    if (row !== undefined && row.state === 'in_progress') {
+      this.rows.delete(id);
+    }
+    return Promise.resolve();
+  }
+}
+
 export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
+  const listings = new InMemoryListingRepository();
   return {
     version: '0.1.0',
     probes: [],
-    artworks: new InMemoryArtworkRepository(),
-    listings: new InMemoryListingRepository(),
+    artworks: new InMemoryArtworkRepository(listings),
+    listings,
+    idempotency: new InMemoryIdempotencyStore(),
     accounts: new InMemoryAccountRepository(),
     tokenVerifier,
     clock: new FixedClock(TEST_NOW),

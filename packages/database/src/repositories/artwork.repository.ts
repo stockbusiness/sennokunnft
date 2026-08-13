@@ -1,4 +1,4 @@
-import type { Artwork, ArtworkRepository, Page, PageQuery } from '@sengoku/domain';
+import type { Artwork, ArtworkRepository, Listing, Page, PageQuery } from '@sengoku/domain';
 import type { PrismaClient } from '../../generated/client';
 import { decodeCursor, encodeCursor, toArtwork } from './mappers';
 
@@ -70,6 +70,29 @@ export class PrismaArtworkRepository implements ArtworkRepository {
       },
     });
     return toArtwork(row);
+  }
+
+  /**
+   * 作品を非公開にし、有効な出品を終了する。**1 トランザクションで行う。**
+   *
+   * ⚠️ **出品を先に終了させてから作品を更新する。順序に意味がある。**
+   * 作品側のトリガは「非公開なら有効な出品が無いこと」を確かめるため、
+   * 逆順にすると自分自身の更新でトリガに弾かれる。
+   */
+  async archiveWithListings(artwork: Artwork, endedListings: readonly Listing[]): Promise<Artwork> {
+    return this.prisma.$transaction(async (tx) => {
+      for (const listing of endedListings) {
+        await tx.listing.update({
+          where: { id: listing.id },
+          data: { status: listing.status },
+        });
+      }
+      const row = await tx.artwork.update({
+        where: { id: artwork.id },
+        data: { status: artwork.status },
+      });
+      return toArtwork(row);
+    });
   }
 
   /** キーセットページング。新しい順に返す。 */

@@ -9,6 +9,7 @@ import express from 'express';
 import type { AccountLookupPort, TokenVerifierPort } from '@sengoku/auth';
 import type {
   ArtworkRepository,
+  IdempotencyStore,
   AuditLogPort,
   ClockPort,
   IdGeneratorPort,
@@ -39,6 +40,7 @@ export interface AppDependencies {
   readonly artworks: ArtworkRepository;
   readonly listings: ListingRepository;
   readonly accounts: AccountLookupPort;
+  readonly idempotency: IdempotencyStore;
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
@@ -119,7 +121,7 @@ export class AppModule implements NestModule {
         },
         {
           provide: IdempotencyService,
-          useFactory: () => new IdempotencyService(),
+          useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
         },
         {
           // ✅ 認可はガードで一括保護する。ルート個別にチェックを書かない。
