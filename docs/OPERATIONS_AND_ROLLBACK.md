@@ -210,6 +210,7 @@ Phase 0-1 の実装は、本リポジトリが用意される前は既存リポ�
 | 5   | ビルド                         | `pnpm build`                     | ✅ 12 タスク成功（web は Next.js の本番ビルドまで）       |
 | 6   | 依存グラフ検査                 | `pnpm check:deps`                | ✅ 循環なし・層越えなし                                   |
 | 7   | 秘密情報検査                   | `pnpm check:secrets`             | ✅ `.env` 混入なし / `.env.example` に値なし / 直書きなし |
+| 7b  | 未決定事項レジスタ検査         | `pnpm check:docs`                | ✅ 45件、重複・未登録・件数不一致なし                     |
 | 8   | Prisma Client 生成             | `pnpm db:generate`               | ✅ `DATABASE_URL` 未設定でも生成できることを確認          |
 | 9   | api 起動＋ヘルスチェック       | `curl /healthz` `curl /readyz`   | ✅ ともに 200。応答本文は契約スキーマに適合               |
 | 10  | api のグレースフル停止         | `kill -TERM`                     | ✅ 終了コード 0、停止ログを出力                           |

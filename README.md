@@ -118,6 +118,7 @@ curl http://localhost:3001/readyz
 | `pnpm build`         | 全パッケージ・全アプリのビルド                                                   |
 | `pnpm e2e`           | E2E スモーク（Playwright。事前に `pnpm build` が必要）                           |
 | `pnpm check:deps`    | 依存の循環・層越えの検査                                                         |
+| `pnpm check:docs`    | 未決定事項レジスタの整合性検査（件数・重複・未登録ID）                           |
 | `pnpm check:secrets` | 秘密情報の混入検査                                                               |
 | `pnpm db:generate`   | Prisma Client の生成                                                             |
 | `pnpm format`        | Prettier で整形                                                                  |
@@ -231,7 +232,7 @@ EVM のアドレス形式などに型を固定すると、決定前に選択肢�
 設計文書は [`docs/`](./docs/) にある。索引は [docs/README.md](./docs/README.md)。
 
 各文書は記述を **✅事実 / 🟡仮決定 / ❓未決定** の 3 分類で明示的に分けている。
-**未決定事項（41 件）のマスタ一覧**は
+**未決定事項（45 件）のマスタ一覧**は
 [docs/IMPLEMENTATION_ROADMAP.md](./docs/IMPLEMENTATION_ROADMAP.md) の「未決定事項レジスタ」。
 
 とくに先に読むとよいもの:

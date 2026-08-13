@@ -316,6 +316,12 @@ enum MintJobStatus {
 ///
 /// entitlementId の UNIQUE により、1つの受取権に対してジョブは 1 件しか作れない。
 /// これが「1つの受取権から複数Mintできない」ことを担保する4層のうちの1つ。
+///
+/// ⚠️ **発行先チェーンの列を意図的に置いていない。**
+///    マルチチェーン対応の要否が未決定（UD-512）で、チェーン選定（UD-501）と
+///    同時に判断する。本テーブルに本番データが入るのは Phase 5 以降なので、
+///    決定後に列を足しても安く済む（既存行の埋め戻しも自明）。
+///    記録側の nft_tokens には chainRef があり、そちらは単一チェーン運用でも保持する。
 model MintJob {
   id             String        @id @default(uuid()) @db.Uuid
   entitlementId  String        @unique @map("entitlement_id") @db.Uuid

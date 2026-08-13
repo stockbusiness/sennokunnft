@@ -16,13 +16,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:deps": "node packages/config/scripts/check-deps.mjs",
+    "check:docs": "node packages/config/scripts/check-docs.mjs",
     "check:secrets": "node packages/config/scripts/check-secrets.mjs",
     "db:generate": "pnpm --filter @sengoku/database run generate",
     "e2e": "pnpm --filter @sengoku/web run e2e",
     "dev:web": "pnpm --filter @sengoku/web run dev",
     "dev:api": "pnpm --filter @sengoku/api run dev",
     "dev:worker": "pnpm --filter @sengoku/worker run dev",
-    "verify": "pnpm check:secrets && pnpm check:deps && turbo run lint typecheck test build"
+    "verify": "pnpm check:secrets && pnpm check:deps && pnpm check:docs && turbo run lint typecheck test build"
   },
   "devDependencies": {
     "@types/node": "22.20.0",
