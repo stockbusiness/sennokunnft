@@ -42,5 +42,7 @@ export {
   UnsafeEnvironmentError,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
+  assertCommonUserLinkingConfig,
   type IntegrationTargets,
+  type CommonUserLinkingTargets,
 } from './env/guards';

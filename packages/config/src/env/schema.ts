@@ -85,6 +85,31 @@ const workerEnvObject = baseEnvObject.extend({
   DATABASE_URL: z.string().min(1),
   WORKER_BATCH_SIZE: integerFromEnv(1, 1000, 10),
   WORKER_POLL_INTERVAL_MS: integerFromEnv(100, 3_600_000, 5000),
+
+  /**
+   * 共通顧客HUB（代理店システム）への連携。
+   *
+   * ⚠️ **既定は OFF。** 指示書 §16 のとおり、機能フラグはすべて既定で無効にする。
+   * ON にしただけでは動かず、接続先と鍵が揃っていることを起動時に確かめる。
+   */
+  COMMON_USER_LINKING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** 例: https://sengoku-ai.com（末尾スラッシュなし） */
+  COMMON_USER_API_BASE_URL: z.string().url().optional(),
+  /** 相手が発行した受信用APIキー。**リポジトリに入れない。** */
+  COMMON_USER_API_KEY: z.string().min(8).optional(),
+  /** 相手側で本システムを識別する固定値。 */
+  COMMON_USER_SYSTEM_KEY: z.string().min(1).default('sennokuni-nft-market'),
+  /**
+   * 1 巡で処理する件数の上限。
+   *
+   * ⚠️ 上限が無いと、相手の復旧直後に溜まった全件を一気に送りつけ、
+   * 復旧しかけた相手をもう一度落とす。
+   */
+  COMMON_USER_LINK_BATCH_SIZE: integerFromEnv(1, 500, 25),
+
   MINT_PROVIDER: z.enum(['fake']).default('fake'),
 });
 

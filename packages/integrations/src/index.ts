@@ -34,3 +34,9 @@ export {
 } from './dev-token-verifier';
 
 export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';
+
+export {
+  AgencyCommonUserDirectory,
+  FakeCommonUserDirectory,
+  type AgencyCommonUserOptions,
+} from './agency-common-user';

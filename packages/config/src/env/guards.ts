@@ -22,6 +22,36 @@ export interface IntegrationTargets {
   readonly DATABASE_URL?: string;
 }
 
+export interface CommonUserLinkingTargets {
+  readonly COMMON_USER_LINKING_ENABLED: boolean;
+  readonly COMMON_USER_API_BASE_URL?: string | undefined;
+  readonly COMMON_USER_API_KEY?: string | undefined;
+}
+
+/**
+ * 共通顧客HUB連携の設定が揃っているか。
+ *
+ * ⚠️ **有効なのに接続先や鍵が無い状態で起動させない。**
+ * 起動してしまうと、解決が毎回失敗して全アカウントが PENDING に積み上がる。
+ * しかも購入は続けられるので、**壊れていることに誰も気付かないまま進む。**
+ * 気付けない失敗は、止まる失敗より重い。
+ */
+export function assertCommonUserLinkingConfig(env: CommonUserLinkingTargets): void {
+  if (!env.COMMON_USER_LINKING_ENABLED) {
+    return;
+  }
+  const reasons: string[] = [];
+  if (env.COMMON_USER_API_BASE_URL === undefined || env.COMMON_USER_API_BASE_URL === '') {
+    reasons.push('COMMON_USER_API_BASE_URL: 連携が有効なのに接続先が設定されていない');
+  }
+  if (env.COMMON_USER_API_KEY === undefined || env.COMMON_USER_API_KEY === '') {
+    reasons.push('COMMON_USER_API_KEY: 連携が有効なのに API キーが設定されていない');
+  }
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
 /** 接続先がローカル環境かどうかを、URL の host 部分だけを見て判定する。 */
 function isLocalHost(connectionUrl: string): boolean {
   // 接続文字列には資格情報が含まれるため、パースに失敗しても内容をログに出さない。
