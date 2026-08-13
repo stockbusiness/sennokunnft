@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+coverage/
+generated/
+.turbo/
+*.tsbuildinfo
+
+# 環境変数（.env.example のみ追跡する）
+.env
+.env.*
+!.env.example
+
+# 秘密情報になりうるファイル
+*.pem
+*.key
+*.p12
+*.keystore
+secrets/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+*.log
+.DS_Store
