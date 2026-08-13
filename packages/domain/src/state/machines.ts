@@ -64,3 +64,41 @@ const mintJobTable: TransitionTable<MintJobStatus> = {
 };
 
 export const mintJobStateMachine = createStateMachine(mintJobTable);
+
+/**
+ * 作品の状態（DATABASE_DESIGN.md §3.2）。
+ *
+ * `archived` から `published` へ戻せるようにしてある。
+ * 一時的に販売を止めて再開する運用は普通にありうるため。
+ * 一方 `published` から `draft` へは戻さない。
+ * 公開済みの作品を下書きに戻すと、参照していた出品や注文の前提が崩れる。
+ */
+export const ARTWORK_STATUSES = ['draft', 'published', 'archived'] as const;
+export type ArtworkStatus = (typeof ARTWORK_STATUSES)[number];
+
+const artworkTable: TransitionTable<ArtworkStatus> = {
+  draft: ['published', 'archived'],
+  published: ['archived'],
+  archived: ['published'],
+};
+
+export const artworkStateMachine = createStateMachine(artworkTable);
+
+/**
+ * 出品の状態（DATABASE_DESIGN.md §3.3）。
+ *
+ * `closed` は終端。販売を終えた出品を再開させないのは、
+ * 「終了しました」と表示したものが後から復活すると購入者の信頼を損ねるため。
+ * 再開したい場合は新しい出品を作る（価格や期間の履歴も残る）。
+ */
+export const LISTING_STATUSES = ['draft', 'active', 'paused', 'closed'] as const;
+export type ListingStatus = (typeof LISTING_STATUSES)[number];
+
+const listingTable: TransitionTable<ListingStatus> = {
+  draft: ['active', 'closed'],
+  active: ['paused', 'closed'],
+  paused: ['active', 'closed'],
+  closed: [],
+};
+
+export const listingStateMachine = createStateMachine(listingTable);

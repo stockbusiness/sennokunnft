@@ -11,10 +11,12 @@
  *  - 認可判定（画面の出し分けは UX のためであり、セキュリティ境界ではない）
  */
 export {
+  ArtworkCard,
   PageHeader,
   PriceTag,
   StatusBadge,
   EmptyState,
+  type ArtworkCardProps,
   type PageHeaderProps,
   type PriceTagProps,
   type StatusBadgeProps,

@@ -11,9 +11,15 @@ export const SITE_COPY = {
   /** UD-101 が決まるまでの暫定名。 */
   fallbackSiteName: 'デジタル作品マーケット',
   tagline: 'デジタル作品をお求めいただけます',
-  phaseNotice: '現在は開発基盤の構築段階です。作品の販売・お受け取りの機能は準備中です。',
+  phaseNotice: 'ただいま作品のご紹介のみ公開しています。お申し込み機能は準備中です。',
   emptyCatalogTitle: '販売中の作品はまだありません',
   emptyCatalogHint: '販売が始まりましたらこちらに表示されます。',
+  catalogUnavailableTitle: 'ただいま作品を表示できません',
+  catalogUnavailableHint: 'しばらくしてからもう一度お試しください。',
+  notFoundTitle: 'お探しの作品は見つかりませんでした',
+  notFoundHint: '販売が終了しているか、URL が変更された可能性があります。',
+  backToCatalog: '作品一覧へ戻る',
+  purchaseComingSoon: 'お申し込み機能は準備中です。',
 } as const;
 
 /**

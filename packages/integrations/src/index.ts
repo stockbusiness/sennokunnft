@@ -25,3 +25,10 @@ export {
 export { FakeMintingAdapter } from './fake-minting';
 
 export { FakePaymentGateway, signWebhookPayload, WEBHOOK_TOLERANCE_MS } from './fake-payment';
+
+export {
+  DevTokenVerifier,
+  createDevToken,
+  type DevTokenClaims,
+  type DevTokenVerifierOptions,
+} from './dev-token-verifier';

@@ -18,6 +18,7 @@ export interface IntegrationTargets {
   readonly LOG_LEVEL: LogLevel;
   readonly PAYMENT_PROVIDER?: string;
   readonly MINT_PROVIDER?: string;
+  readonly AUTH_PROVIDER?: string;
   readonly DATABASE_URL?: string;
 }
 
@@ -71,6 +72,10 @@ export function assertProductionSafety(env: IntegrationTargets): void {
   }
   if (env.DATABASE_URL !== undefined && isLocalHost(env.DATABASE_URL)) {
     reasons.push('DATABASE_URL: 本番環境なのに接続先がローカルホストを指している');
+  }
+  if (env.AUTH_PROVIDER === 'dev') {
+    // 開発用の検証は誰でもトークンを作れる。本番で有効になれば認証が無いに等しい。
+    reasons.push('AUTH_PROVIDER: 本番で開発用のトークン検証（dev）は使用できない');
   }
   if (reasons.length > 0) {
     throw new UnsafeEnvironmentError(reasons);

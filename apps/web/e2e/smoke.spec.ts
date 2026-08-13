@@ -36,3 +36,31 @@ test('web のヘルスチェックが応答する', async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ status: 'ok', service: 'web' });
 });
+
+/**
+ * API に繋がらないときの挙動。
+ *
+ * CI では API を起動していないので、ここが実際に通る経路になる。
+ * 一覧が出せないことと、サイト全体が壊れることは別で、
+ * 後者にしてしまうと復旧までの体感被害が大きい。
+ */
+test('API が利用できなくてもトップページが壊れない', async ({ page }) => {
+  const response = await page.goto('/');
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // 例外画面ではなく、案内が出ていること。
+  await expect(page.getByRole('status')).toBeVisible();
+});
+
+/**
+ * API が落ちているときに「存在しない」と断定しない。
+ *
+ * 404 は「その作品は無い」という主張であり、
+ * 実際には API に問い合わせられなかっただけかもしれない。
+ * 一時的な障害を恒久的な不在として伝えると、利用者は諦めてしまう。
+ */
+test('API が利用できないとき、作品詳細を 404 と断定しない', async ({ page }) => {
+  const response = await page.goto('/artworks/some-artwork');
+  expect(response?.status()).not.toBe(404);
+  await expect(page.getByRole('status')).toBeVisible();
+});

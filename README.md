@@ -2,22 +2,28 @@
 
 千ノ国プロジェクト向けの NFT 一次販売マーケット。
 
-**現在の状態: Phase 0（要件・アーキテクチャ設計）と Phase 1（Monorepo 開発基盤）が完了。**
-NFT 販売・決済・Claim・ブロックチェーン Mint は**まだ実装されていない**。
+**現在の状態: Phase 0（設計）・Phase 1（開発基盤）・Phase 2（カタログ）が完了。**
+決済・Claim・ブロックチェーン Mint は**まだ実装されていない**。
 
 ---
 
 ## 1. これは何か / まだ何ではないか
 
-| 実装済み                                     | 未実装                       |
-| -------------------------------------------- | ---------------------------- |
-| モノレポ基盤（pnpm + Turborepo）             | 作品登録・出品・カタログ画面 |
-| ドメイン層（状態遷移・不変条件・ポート定義） | 決済連携                     |
-| 認可判定（権限マトリクス）                   | Claim フロー                 |
-| 環境変数の型検証、構造化ログ                 | ブロックチェーン Mint        |
-| Prisma スキーマ                              | マイグレーション適用         |
-| API ヘルスチェック、Worker の器              | 業務エンドポイント           |
-| テスト基盤（Vitest / Playwright）、CI        | —                            |
+| 実装済み                                              | 未実装                   |
+| ----------------------------------------------------- | ------------------------ |
+| モノレポ基盤（pnpm + Turborepo）                      | 決済連携                 |
+| ドメイン層（状態遷移・不変条件・ポート定義）          | 注文・受取権の発行       |
+| **作品の登録・公開、出品の作成・販売開始（管理API）** | Claim フロー             |
+| **公開カタログ API と画面（一覧・詳細）**             | ブロックチェーン Mint    |
+| **マイグレーション（CHECK 制約 18 個）**              | 管理画面（UI）※ Phase 4  |
+| **認可ガード（既定 deny）と権限マトリクス**           | 本番の認証連携 ※ Phase 4 |
+| 環境変数の型検証、構造化ログ                          | —                        |
+| API ヘルスチェック、Worker の器                       | —                        |
+| テスト基盤（Vitest / Playwright）、CI                 | —                        |
+
+> 管理画面（UI）を作っていないのは、運営のログイン経路が Phase 4 だから。
+> いま画面だけ作ると擬似ログインを画面側に置くことになり、本番へ持ち込む事故の元になる。
+> 管理 API は実装済みで、テストからも手元からも操作できる。
 
 > ⚠️ **ブロックチェーン仕様は何も決まっていない。**
 > チェーン・カストディ・トークン規格・鍵管理はいずれも未決定であり、
@@ -33,11 +39,11 @@ NFT 販売・決済・Claim・ブロックチェーン Mint は**まだ実装さ
 
 ### 2.1 前提
 
-| ツール     | バージョン    | 備考                                           |
-| ---------- | ------------- | ---------------------------------------------- |
-| Node.js    | 22.12 以上    | `.nvmrc` で固定。`nvm use` で切り替えられる    |
-| pnpm       | 9.15.4        | `corepack enable pnpm` で有効化できる          |
-| PostgreSQL | 16 系（任意） | Phase 1 の検査には**不要**。Phase 2 以降で使う |
+| ツール     | バージョン | 備考                                                       |
+| ---------- | ---------- | ---------------------------------------------------------- |
+| Node.js    | 22.12 以上 | `.nvmrc` で固定。`nvm use` で切り替えられる                |
+| pnpm       | 9.15.4     | `corepack enable pnpm` で有効化できる                      |
+| PostgreSQL | 16 系      | 結合テストとローカル実行に必要（無くても単体テストは動く） |
 
 ```bash
 # Node のバージョンを合わせる
@@ -63,9 +69,23 @@ cp .env.example .env
 # 4. Prisma Client を生成する（DB への接続は不要）
 pnpm db:generate
 
-# 5. すべての検査を実行する
+# 5. スキーマを DB に適用する（PostgreSQL がある場合）
+pnpm db:migrate:deploy
+
+# 6. すべての検査を実行する
 pnpm verify
 ```
+
+結合テストを動かすには `TEST_DATABASE_URL` を設定する。
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sennokunnft_test pnpm test
+```
+
+未設定なら結合テストはスキップされる。
+ただし CI では `REQUIRE_INTEGRATION_TESTS=1` を立てており、
+**設定漏れは「スキップ」ではなく「失敗」になる**。黙って飛ばすと
+「制約は効いているはず」という誤った安心を生むため。
 
 > `.env` はコミットされない。`.env.example` には**変数名と説明のみ**を書く。
 > 値を書き込むと `pnpm check:secrets` が失敗する。
@@ -109,19 +129,21 @@ curl http://localhost:3001/readyz
 
 ## 3. よく使うコマンド
 
-| コマンド             | 内容                                                                             |
-| -------------------- | -------------------------------------------------------------------------------- |
-| `pnpm verify`        | **CI と同じ検査を全部**（秘密検査 → 依存検査 → lint → typecheck → test → build） |
-| `pnpm lint`          | ESLint                                                                           |
-| `pnpm typecheck`     | 型検査（`tsc --noEmit`）                                                         |
-| `pnpm test`          | 単体テスト（Vitest）                                                             |
-| `pnpm build`         | 全パッケージ・全アプリのビルド                                                   |
-| `pnpm e2e`           | E2E スモーク（Playwright。事前に `pnpm build` が必要）                           |
-| `pnpm check:deps`    | 依存の循環・層越えの検査                                                         |
-| `pnpm check:docs`    | 未決定事項レジスタの整合性検査（件数・重複・未登録ID）                           |
-| `pnpm check:secrets` | 秘密情報の混入検査                                                               |
-| `pnpm db:generate`   | Prisma Client の生成                                                             |
-| `pnpm format`        | Prettier で整形                                                                  |
+| コマンド                 | 内容                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `pnpm verify`            | **CI と同じ検査を全部**（秘密検査 → 依存検査 → lint → typecheck → test → build） |
+| `pnpm lint`              | ESLint                                                                           |
+| `pnpm typecheck`         | 型検査（`tsc --noEmit`）                                                         |
+| `pnpm test`              | 単体テスト（Vitest）                                                             |
+| `pnpm build`             | 全パッケージ・全アプリのビルド                                                   |
+| `pnpm e2e`               | E2E スモーク（Playwright。事前に `pnpm build` が必要）                           |
+| `pnpm check:deps`        | 依存の循環・層越えの検査                                                         |
+| `pnpm check:docs`        | 未決定事項レジスタの整合性検査（件数・重複・未登録ID）                           |
+| `pnpm check:secrets`     | 秘密情報の混入検査                                                               |
+| `pnpm db:generate`       | Prisma Client の生成                                                             |
+| `pnpm db:migrate:deploy` | 生成済みマイグレーションの適用（本番と同じ経路）                                 |
+| `pnpm db:migrate:dev`    | スキーマ変更からマイグレーションを生成                                           |
+| `pnpm format`            | Prettier で整形                                                                  |
 
 > CI にしか無い検査は作っていない。CI が実行するのは `pnpm verify` と
 > `pnpm format:check`、`pnpm db:generate`、E2E のみで、すべて手元で同じように動く。
@@ -232,7 +254,7 @@ EVM のアドレス形式などに型を固定すると、決定前に選択肢�
 設計文書は [`docs/`](./docs/) にある。索引は [docs/README.md](./docs/README.md)。
 
 各文書は記述を **✅事実 / 🟡仮決定 / ❓未決定** の 3 分類で明示的に分けている。
-**未決定事項（45 件）のマスタ一覧**は
+**未決定事項（46 件）のマスタ一覧**は
 [docs/IMPLEMENTATION_ROADMAP.md](./docs/IMPLEMENTATION_ROADMAP.md) の「未決定事項レジスタ」。
 
 とくに先に読むとよいもの:

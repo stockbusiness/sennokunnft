@@ -4,7 +4,9 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { livenessResponseSchema, readinessResponseSchema } from '@sengoku/contracts';
+import { DevTokenVerifier } from '@sengoku/integrations';
 import { AppModule } from '../src/app.module';
+import { buildHarness, TEST_AUDIENCE, TEST_ISSUER, TEST_TOKEN_SECRET } from './helpers/doubles';
 import { HealthService, type DependencyProbe } from '../src/health/health.service';
 import { DOMAIN_ERROR_HTTP_STATUS } from '../src/common/domain-error.filter';
 import { DOMAIN_ERROR_CODES } from '@sengoku/domain';
@@ -14,8 +16,15 @@ function probe(name: string, ok: boolean): DependencyProbe {
 }
 
 async function createApp(probes: readonly DependencyProbe[]): Promise<INestApplication> {
+  const harness = buildHarness(
+    new DevTokenVerifier({
+      secret: TEST_TOKEN_SECRET,
+      issuer: TEST_ISSUER,
+      audience: TEST_AUDIENCE,
+    }),
+  );
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.register({ version: '0.1.0', probes })],
+    imports: [AppModule.register({ ...harness, version: '0.1.0', probes })],
   }).compile();
   const app = moduleRef.createNestApplication();
   await app.init();

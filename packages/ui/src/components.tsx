@@ -66,3 +66,46 @@ export function EmptyState({ title, hint }: EmptyStateProps): ReactNode {
     </div>
   );
 }
+
+export interface ArtworkCardProps {
+  readonly title: string;
+  readonly href: string;
+  readonly price: MoneyView | null;
+  readonly availableSupply: number;
+  readonly maxSupply: number;
+  readonly purchasable: boolean;
+}
+
+/**
+ * カタログ一覧の 1 件。
+ *
+ * 残数を「◯点」とだけ出すのは、Web3 用語を避けるため。
+ * 売り切れは価格より先に伝わるよう、状態バッジを上に置く。
+ */
+export function ArtworkCard({
+  title,
+  href,
+  price,
+  availableSupply,
+  maxSupply,
+  purchasable,
+}: ArtworkCardProps): ReactNode {
+  return (
+    <article className="sengoku-artwork-card">
+      <a href={href} className="sengoku-artwork-card__link">
+        <h2 className="sengoku-artwork-card__title">{title}</h2>
+      </a>
+      <p className="sengoku-artwork-card__supply">
+        残り {availableSupply} 点 / 全 {maxSupply} 点
+      </p>
+      {price === null ? (
+        <StatusBadge label="準備中" tone="neutral" />
+      ) : (
+        <>
+          <PriceTag price={price} />
+          {purchasable ? null : <StatusBadge label="ただいまお求めいただけません" tone="warning" />}
+        </>
+      )}
+    </article>
+  );
+}

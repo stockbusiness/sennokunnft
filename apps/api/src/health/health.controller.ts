@@ -1,6 +1,7 @@
 import { Controller, Get, HttpCode, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { LivenessResponse } from '@sengoku/contracts';
+import { Public } from '../auth/auth.guard';
 import { HealthService } from './health.service';
 
 /**
@@ -8,7 +9,11 @@ import { HealthService } from './health.service';
  *
  * liveness と readiness を分けている理由は HealthService の注釈を参照。
  * ここでは HTTP ステータスへの対応付けだけを行う。
+ *
+ * ⚠️ 認証を要求しない。コンテナやロードバランサのプローブは
+ * 資格情報を持たないため。だからこそ、応答に内部情報を含めてはならない。
  */
+@Public()
 @Controller()
 export class HealthController {
   constructor(private readonly health: HealthService) {}

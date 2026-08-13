@@ -28,9 +28,14 @@ const ALLOWED = {
   '@sengoku/observability': ['@sengoku/config'],
   '@sengoku/domain': ['@sengoku/validation'],
   '@sengoku/contracts': ['@sengoku/validation', '@sengoku/domain'],
-  '@sengoku/database': ['@sengoku/config', '@sengoku/domain'],
+  '@sengoku/database': ['@sengoku/auth', '@sengoku/config', '@sengoku/domain'],
   '@sengoku/auth': ['@sengoku/config', '@sengoku/domain'],
-  '@sengoku/integrations': ['@sengoku/config', '@sengoku/domain', '@sengoku/observability'],
+  '@sengoku/integrations': [
+    '@sengoku/auth',
+    '@sengoku/config',
+    '@sengoku/domain',
+    '@sengoku/observability',
+  ],
   '@sengoku/web': [
     '@sengoku/config',
     '@sengoku/contracts',

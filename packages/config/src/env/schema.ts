@@ -60,6 +60,16 @@ const apiEnvObject = baseEnvObject.extend({
   SUPABASE_JWT_ISSUER: z.string().min(1).optional(),
   SUPABASE_JWT_AUDIENCE: z.string().min(1).optional(),
   SUPABASE_JWKS_URL: z.string().min(1).optional(),
+  /**
+   * 認証トークンの検証方式。
+   *
+   * 候補が `dev` しかないのは、検証方式（UD-801）が未決定で、
+   * 共有シークレットか JWKS かが決まっていないため。
+   * `dev` は誰でもトークンを作れるので、本番では使えないよう
+   * 起動時の組み合わせ検査で拒否する。
+   */
+  AUTH_PROVIDER: z.enum(['dev']).default('dev'),
+  AUTH_DEV_SECRET: z.string().min(8).optional(),
   PAYMENT_PROVIDER: z.enum(['fake']).default('fake'),
   PAYMENT_WEBHOOK_SECRET: z.string().min(1).optional(),
   MINT_PROVIDER: z.enum(['fake']).default('fake'),

@@ -22,6 +22,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@sengoku/auth": "workspace:*",
     "@sengoku/config": "workspace:*",
     "@sengoku/domain": "workspace:*",
     "@sengoku/observability": "workspace:*"

@@ -13,11 +13,17 @@
  * ✅ Phase 1 ではスキーマ定義と Client 生成のみを行い、
  *    マイグレーションの生成・適用、本番DBへの接続は行わない。
  */
+export { PrismaAccountRepository } from './repositories/account.repository';
+export { PrismaArtworkRepository } from './repositories/artwork.repository';
+export { PrismaListingRepository } from './repositories/listing.repository';
+export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';
+
 export {
   createPrismaClient,
   checkDatabaseConnection,
   type DatabaseConnectionCheck,
   type PrismaClientLike,
+  type PrismaClient,
 } from './client';
 
 export { ENTITLEMENT_CLAIM_SQL, MINT_JOB_ACQUIRE_SQL, IDEMPOTENCY_CONSTRAINTS } from './invariants';

@@ -13,7 +13,11 @@ import { currentRequestId } from '@sengoku/observability';
  */
 export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>> = {
   ARTWORK_NOT_AVAILABLE: HttpStatus.NOT_FOUND,
+  ARTWORK_NOT_PUBLISHED: HttpStatus.CONFLICT,
+  ARTWORK_SUPPLY_IMMUTABLE: HttpStatus.CONFLICT,
   LISTING_NOT_ACTIVE: HttpStatus.CONFLICT,
+  LISTING_NOT_EDITABLE: HttpStatus.CONFLICT,
+  LISTING_PERIOD_INVALID: HttpStatus.BAD_REQUEST,
   INSUFFICIENT_SUPPLY: HttpStatus.CONFLICT,
   INVALID_QUANTITY: HttpStatus.BAD_REQUEST,
   INVALID_MONEY: HttpStatus.BAD_REQUEST,
@@ -32,7 +36,12 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
 const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ARTWORK_NOT_AVAILABLE: 'お探しの作品は見つかりませんでした。',
+  ARTWORK_NOT_PUBLISHED: 'この作品はまだ公開されていません。先に公開してください。',
+  ARTWORK_SUPPLY_IMMUTABLE: '公開後の作品は発行数を変更できません。',
   LISTING_NOT_ACTIVE: 'この作品は現在販売していません。',
+  LISTING_NOT_EDITABLE:
+    '販売中または終了した内容は変更できません。一度停止してから変更してください。',
+  LISTING_PERIOD_INVALID: '販売期間の指定が正しくありません。',
   INSUFFICIENT_SUPPLY: '在庫が不足しています。',
   INVALID_QUANTITY: '数量の指定が正しくありません。',
   INVALID_MONEY: '金額の指定が正しくありません。',
