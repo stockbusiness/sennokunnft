@@ -7,6 +7,15 @@
  */
 
 /**
+ * 生成された Prisma Client の型。
+ *
+ * `import type` なので実行時には何も読み込まれない。
+ * 型だけを借りることで、クエリの型安全性を得つつ、
+ * 「import しただけで DB へ繋がる」ことを避けている。
+ */
+export type { PrismaClient } from '../generated/client';
+
+/**
  * 本パッケージが必要とする Prisma Client の最小インターフェース。
  *
  * 生成物（`generated/client`）への依存を型の面で切り離しておくことで、

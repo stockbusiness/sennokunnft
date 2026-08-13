@@ -27,6 +27,33 @@ const registerPath = join(docsDir, 'IMPLEMENTATION_ROADMAP.md');
 /** レジスタ以外に、UD-xxx を参照しうる場所。 */
 const EXTRA_SOURCES = ['packages/database/prisma/schema.prisma', 'README.md'];
 
+/**
+ * ソースコード中の UD-xxx も検査対象にする。
+ *
+ * 文書だけを見ていると、コードのコメントに書いた未決定事項が
+ * レジスタに載らないまま埋もれる。実際にそれが起きたので範囲を広げた。
+ */
+const SOURCE_GLOB_ROOTS = ['apps', 'packages'];
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mjs', '.prisma'];
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'generated', '.turbo', 'coverage']);
+
+/** 指定ディレクトリ以下のソースファイルを再帰的に集める。 */
+function collectSourceFiles(dir) {
+  const found = [];
+  if (!existsSync(dir)) return found;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') && entry.name !== '.github') continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      found.push(...collectSourceFiles(full));
+    } else if (SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
 const UD_PATTERN = /UD-\d+/g;
 /** レジスタの行。先頭セルが UD-xxx のものだけを数える。 */
 const REGISTER_ROW = /^\|\s*(UD-\d+)\s*\|/;
@@ -79,6 +106,7 @@ const sources = [
     .filter((name) => name.endsWith('.md'))
     .map((name) => join(docsDir, name)),
   ...EXTRA_SOURCES.map((relative) => join(projectRoot, relative)),
+  ...SOURCE_GLOB_ROOTS.flatMap((root) => collectSourceFiles(join(projectRoot, root))),
 ].filter((path) => existsSync(path));
 
 for (const path of sources) {

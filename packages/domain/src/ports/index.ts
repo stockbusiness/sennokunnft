@@ -155,3 +155,54 @@ export interface DomainEventRecord {
 export interface EventPublisherPort {
   publish(event: DomainEventRecord): Promise<void>;
 }
+
+export interface StoredObject {
+  /** ストレージ上のキー。**公開URLではない。** */
+  readonly key: string;
+  readonly contentType: string;
+  readonly byteSize: number;
+}
+
+export interface PutObjectInput {
+  readonly key: string;
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+}
+
+/**
+ * 画像などのオブジェクト保存。
+ *
+ * ⚠️ **保存するのは公開URLではなくキー。**
+ * URL を保存すると、保存先を変えたときに過去のレコードが全部壊れる。
+ * 公開URLは実行時にキーから解決する。
+ *
+ * 保存先は未決定（`UD-508`）。Phase 2 ではローカル/Fake 実装のみを用意し、
+ * S3・Supabase Storage・IPFS への接続は行わない。
+ */
+export interface StoragePort {
+  put(input: PutObjectInput): Promise<StoredObject>;
+  /** 置換・削除時に使う。存在しないキーでも例外にしない（冪等）。 */
+  remove(key: string): Promise<void>;
+  /** 表示用のURLを解決する。実装によって署名付きURLにもできる。 */
+  publicUrl(key: string): string;
+}
+
+export interface AuditEntry {
+  /** システムによる自動操作なら `null`。 */
+  readonly actorAccountId: string | null;
+  readonly action: string;
+  readonly targetType: string;
+  readonly targetId: string | null;
+  /**
+   * 何が起きたかの要約。
+   *
+   * ⚠️ **秘匿値・個人情報・入力値そのものを入れない。**
+   * 監査ログは長期に残り、閲覧範囲も広い。追跡に要る最小限に留める。
+   */
+  readonly summary: Record<string, unknown>;
+}
+
+/** 運営操作の証跡。 */
+export interface AuditLogPort {
+  record(entry: AuditEntry): Promise<void>;
+}

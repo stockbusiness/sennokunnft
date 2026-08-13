@@ -166,3 +166,32 @@ describe('assertProductionSafety', () => {
     }
   });
 });
+
+describe('本番での開発用トークン検証の拒否（Phase 2 で追加）', () => {
+  it('本番で AUTH_PROVIDER=dev なら起動を拒否する', () => {
+    // 開発用の検証は誰でもトークンを作れる。本番で有効になれば認証が無いに等しい。
+    expect(() =>
+      assertProductionSafety({ APP_ENV: 'production', LOG_LEVEL: 'info', AUTH_PROVIDER: 'dev' }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('本番以外では dev を許す', () => {
+    expect(() =>
+      assertProductionSafety({ APP_ENV: 'local', LOG_LEVEL: 'info', AUTH_PROVIDER: 'dev' }),
+    ).not.toThrow();
+  });
+
+  it('AUTH_PROVIDER の既定値は dev', () => {
+    const result = parseEnv(apiEnvSchema, MINIMAL_API_ENV as NodeJS.ProcessEnv);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.env.AUTH_PROVIDER).toBe('dev');
+  });
+
+  it('未対応の検証方式を拒否する（UD-801 未決定のため dev のみ）', () => {
+    const result = parseEnv(apiEnvSchema, {
+      ...MINIMAL_API_ENV,
+      AUTH_PROVIDER: 'supabase',
+    } as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(false);
+  });
+});

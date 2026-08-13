@@ -79,7 +79,11 @@ model Artwork {
   title         String
   description   String        @default("")
   /// ストレージ上のキー。公開URLは実行時に解決する（保存先は UD-508 で未決定）。
-  imageKey      String?       @map("image_key")
+  /// アップロード時にランダム生成する。**利用者が送ったファイル名は使わない。**
+  imageKey         String?    @map("image_key")
+  /// サーバー側で中身を検査して判定した MIME タイプ。拡張子は信用しない。
+  imageContentType String?    @map("image_content_type")
+  imageByteSize    Int?       @map("image_byte_size")
   maxSupply     Int           @map("max_supply")
   /// 決済待ちの注文が押さえている数。
   reservedCount Int           @default(0) @map("reserved_count")
@@ -99,9 +103,10 @@ model Artwork {
 
 enum ListingStatus {
   draft
+  scheduled
   active
-  paused
-  closed
+  suspended
+  ended
 }
 
 model Listing {
@@ -114,6 +119,8 @@ model Listing {
   status              ListingStatus @default(draft)
   startsAt            DateTime?     @map("starts_at") @db.Timestamptz(6)
   endsAt              DateTime?     @map("ends_at") @db.Timestamptz(6)
+  /// 一覧での並び順。小さいほど前に出る。
+  displayOrder        Int           @default(0) @map("display_order")
   createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -122,6 +129,7 @@ model Listing {
 
   @@index([artworkId])
   @@index([status, startsAt, endsAt])
+  @@index([displayOrder])
   @@map("listings")
 }
 

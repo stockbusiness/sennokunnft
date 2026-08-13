@@ -18,21 +18,24 @@
   "scripts": {
     "generate": "prisma generate",
     "build": "pnpm run generate && tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "prisma generate && tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "prisma generate && vitest run",
     "test:watch": "vitest",
     "db:validate": "prisma validate",
-    "db:format": "prisma format"
+    "db:format": "prisma format",
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
+    "@sengoku/auth": "workspace:*",
     "@sengoku/config": "workspace:*",
     "@sengoku/domain": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.20.0",
     "prisma": "6.19.3",
+    "tsx": "4.23.12",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

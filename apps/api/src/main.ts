@@ -8,6 +8,22 @@ import {
   UnsafeEnvironmentError,
 } from '@sengoku/config';
 import { createLogger } from '@sengoku/observability';
+import {
+  checkDatabaseConnection,
+  createPrismaClient,
+  PrismaAccountRepository,
+  PrismaArtworkRepository,
+  PrismaAuditLogRepository,
+  PrismaListingRepository,
+  type PrismaClient,
+} from '@sengoku/database';
+import {
+  DevTokenVerifier,
+  LocalFileStorage,
+  SystemClock,
+  UuidGenerator,
+  generateStorageKey,
+} from '@sengoku/integrations';
 import { AppModule } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
 import { NestStructuredLogger } from './common/nest-logger';
@@ -45,13 +61,47 @@ async function bootstrap(): Promise<void> {
     throw error;
   }
 
-  // 3. 依存の readiness プローブ。
-  //    Phase 1 では DB へ接続しないため、プローブは登録しない。
-  //    Phase 2 で `@sengoku/database` の checkDatabaseConnection を差し込む。
-  const probes: DependencyProbe[] = [];
+  // 3. DB 接続。ここで初めて外部へ繋ぐ。
+  const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+
+  const probes: DependencyProbe[] = [
+    {
+      name: 'database',
+      check: () => checkDatabaseConnection(prisma),
+    },
+  ];
+
+  // 4. トークン検証。
+  //    検証方式が未決定（UD-801）のため開発用実装のみ。
+  //    本番で dev を使えないことは assertProductionSafety が保証している。
+  if (env.AUTH_DEV_SECRET === undefined) {
+    logger.fatal(
+      { variable: 'AUTH_DEV_SECRET' },
+      '認証に必要な環境変数が設定されていないため起動を中止しました',
+    );
+    process.exit(1);
+  }
+  const tokenVerifier = new DevTokenVerifier({
+    secret: env.AUTH_DEV_SECRET,
+    issuer: env.SUPABASE_JWT_ISSUER ?? 'sennokunnft-dev',
+    audience: env.SUPABASE_JWT_AUDIENCE ?? 'sennokunnft',
+  });
 
   const app = await NestFactory.create(
-    AppModule.register({ version: VERSION, probes }),
+    AppModule.register({
+      version: VERSION,
+      probes,
+      artworks: new PrismaArtworkRepository(prisma),
+      listings: new PrismaListingRepository(prisma),
+      accounts: new PrismaAccountRepository(prisma),
+      tokenVerifier,
+      clock: new SystemClock(),
+      ids: new UuidGenerator(),
+      // ✅ 本番ストレージへは接続しない。保存先は UD-508 で未決定。
+      storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
+      audit: new PrismaAuditLogRepository(prisma),
+      generateStorageKey,
+    }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。
     // 後から有効化すると取りこぼしに気付きにくいため、最初から有効にしておく。
     { rawBody: true, bufferLogs: true },
@@ -79,18 +129,22 @@ async function bootstrap(): Promise<void> {
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
     // close() は処理中のリクエストを完了させてから解決する。
-    void app.close().then(
-      () => {
-        process.exit(0);
-      },
-      (error: unknown) => {
-        logger.error(
-          { error: error instanceof Error ? error.name : 'UnknownError' },
-          '停止処理に失敗しました',
-        );
-        process.exit(1);
-      },
-    );
+    // DB 接続はその後に閉じる（処理中のクエリを切らないため）。
+    void app
+      .close()
+      .then(() => prisma.$disconnect())
+      .then(
+        () => {
+          process.exit(0);
+        },
+        (error: unknown) => {
+          logger.error(
+            { error: error instanceof Error ? error.name : 'UnknownError' },
+            '停止処理に失敗しました',
+          );
+          process.exit(1);
+        },
+      );
   };
 
   process.on('SIGTERM', () => {

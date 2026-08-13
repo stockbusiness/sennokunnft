@@ -26,5 +26,11 @@ playwright-report/
 blob-report/
 .playwright/
 
+# アップロードされた画像の保存先（MEDIA_STORAGE_DIR）。
+# ⚠️ 利用者が送ったデータをリポジトリへ入れない。
+# E2E が作った画像を一度取り込んでしまったため、明示的に除外する。
+.media/
+.e2e-media/
+
 *.log
 .DS_Store

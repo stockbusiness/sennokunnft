@@ -23,7 +23,10 @@
     "dev:web": "pnpm --filter @sengoku/web run dev",
     "dev:api": "pnpm --filter @sengoku/api run dev",
     "dev:worker": "pnpm --filter @sengoku/worker run dev",
-    "verify": "pnpm check:secrets && pnpm check:deps && pnpm check:docs && turbo run lint typecheck test build"
+    "verify": "pnpm check:secrets && pnpm check:deps && pnpm check:docs && turbo run lint typecheck test build",
+    "db:migrate:deploy": "pnpm --filter @sengoku/database exec prisma migrate deploy",
+    "db:migrate:dev": "pnpm --filter @sengoku/database exec prisma migrate dev",
+    "db:seed": "pnpm --filter @sengoku/database run seed"
   },
   "devDependencies": {
     "@types/node": "22.20.0",

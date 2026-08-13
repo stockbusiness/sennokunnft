@@ -25,6 +25,7 @@
     "@sengoku/integrations": "workspace:*",
     "@sengoku/observability": "workspace:*",
     "@sengoku/validation": "workspace:*",
+    "express": "5.1.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },

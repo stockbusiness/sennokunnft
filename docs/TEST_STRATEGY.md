@@ -37,8 +37,12 @@
 | コンポーネント | Vitest + Testing Library | `ui` の部品                                                   | なし              |
 | E2E            | Playwright               | `web` の代表フロー                                            | 起動済みアプリ    |
 
-✅ **事実:** Phase 1 で実行するのは **単体テスト**と **E2E スモーク1本**。
-結合テスト（実 Postgres）は Phase 2 以降。
+✅ **事実:** Phase 2 時点で、単体テスト・E2E スモーク・**実 PostgreSQL に対する結合テスト**を実行している。
+
+結合テストは `TEST_DATABASE_URL` が設定されているときのみ動く。
+未設定なら手元ではスキップするが、**CI では `REQUIRE_INTEGRATION_TESTS=1` により
+設定漏れを「スキップ」ではなく「失敗」にする**。
+黙って飛ばすと「制約は効いているはず」という誤った安心を生むため。
 
 🟡 **仮決定:** 結合テストは **Testcontainers ではなく docker compose の Postgres** を使う。
 理由: CI での起動が速く、GitHub Actions の `services:` で同じ構成を再現できる。

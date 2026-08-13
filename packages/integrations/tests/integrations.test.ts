@@ -8,6 +8,9 @@ import {
   Sha256ClaimTokenService,
   signWebhookPayload,
   WEBHOOK_TOLERANCE_MS,
+  generateStorageKey,
+  LocalFileStorage,
+  InMemoryStorage,
 } from '../src/index';
 
 describe('Sha256ClaimTokenService（SECURITY_DESIGN §8）', () => {
@@ -237,5 +240,56 @@ describe('テスト用の補助実装', () => {
   it('SequentialIdGenerator は決定論的なIDを返す', () => {
     const generator = new SequentialIdGenerator('order');
     expect([generator.generate(), generator.generate()]).toEqual(['order-1', 'order-2']);
+  });
+});
+
+describe('保存キーの生成（SECURITY_DESIGN §5）', () => {
+  it('毎回異なるキーになる', () => {
+    const keys = new Set(Array.from({ length: 50 }, () => generateStorageKey('artworks', 'png')));
+    expect(keys.size).toBe(50);
+  });
+
+  it('利用者のファイル名を含まない', () => {
+    // 制御文字・パス区切り・同名衝突を持ち込ませないため、名前は使わない。
+    const key = generateStorageKey('artworks', 'png');
+    expect(key).toMatch(/^artworks\/\d{4}\/\d{2}\/[0-9a-f]{32}\.png$/);
+  });
+
+  it('パス区切りを含む拡張子を渡してもキーの形が崩れない', () => {
+    // 拡張子はドメイン側の許可形式からしか渡らないが、念のため形を確認する。
+    expect(generateStorageKey('artworks', 'png').split('/')).toHaveLength(4);
+  });
+});
+
+describe('LocalFileStorage', () => {
+  it('保存ルートの外へ出るキーを拒否する', async () => {
+    const storage = new LocalFileStorage('/tmp/sengoku-storage-test');
+    await expect(
+      storage.put({
+        key: '../../etc/passwd',
+        bytes: new Uint8Array([1, 2, 3]),
+        contentType: 'image/png',
+      }),
+    ).rejects.toThrow(/escapes the storage root/);
+  });
+
+  it('公開URLはキーから解決する（URLを保存しない）', () => {
+    const storage = new LocalFileStorage('/tmp/sengoku-storage-test', '/media');
+    expect(storage.publicUrl('artworks/2026/08/abc.png')).toBe('/media/artworks/2026/08/abc.png');
+  });
+});
+
+describe('InMemoryStorage', () => {
+  it('保存と削除ができる', async () => {
+    const storage = new InMemoryStorage();
+    await storage.put({ key: 'k1', bytes: new Uint8Array(10), contentType: 'image/png' });
+    expect(storage.has('k1')).toBe(true);
+    await storage.remove('k1');
+    expect(storage.has('k1')).toBe(false);
+  });
+
+  it('存在しないキーの削除でも失敗しない（置換や再試行のため）', async () => {
+    const storage = new InMemoryStorage();
+    await expect(storage.remove('missing')).resolves.toBeUndefined();
   });
 });

@@ -41,13 +41,51 @@ export {
   ORDER_STATUSES,
   ENTITLEMENT_STATUSES,
   MINT_JOB_STATUSES,
+  ARTWORK_STATUSES,
+  LISTING_STATUSES,
   orderStateMachine,
   entitlementStateMachine,
   mintJobStateMachine,
+  artworkStateMachine,
+  listingStateMachine,
   type OrderStatus,
   type EntitlementStatus,
   type MintJobStatus,
+  type ArtworkStatus,
+  type ListingStatus,
 } from './state/machines';
+
+export {
+  ARTWORK_TITLE_MAX,
+  ARTWORK_DESCRIPTION_MAX,
+  ARTWORK_MAX_SUPPLY_LIMIT,
+  createArtworkDraft,
+  updateArtwork,
+  publishArtwork,
+  archiveArtwork,
+  isPubliclyVisible,
+  hasRemainingSupply,
+  type Artwork,
+  type CreateArtworkInput,
+  type UpdateArtworkInput,
+} from './catalog/artwork';
+
+export {
+  createListing,
+  updateListing,
+  activateListing,
+  suspendListing,
+  endListing,
+  evaluatePurchasability,
+  resolveDisplayState,
+  unavailableReasonToError,
+  type Listing,
+  type CreateListingInput,
+  type UpdateListingInput,
+  type PurchasabilityInput,
+  type UnavailableReason,
+  type ListingDisplayState,
+} from './catalog/listing';
 
 export {
   evaluateClaim,
@@ -75,6 +113,19 @@ export {
   type RetryDecision,
 } from './mint/retry';
 
+export {
+  ALLOWED_IMAGE_TYPES,
+  IMAGE_MAX_BYTES,
+  IMAGE_MIN_BYTES,
+  inspectImage,
+  extensionFor,
+  type AllowedImageType,
+  type ImageInspection,
+  type InspectImageInput,
+} from './media/image';
+
+export type { Page, PageQuery, ArtworkRepository, ListingRepository } from './ports/catalog';
+
 export type {
   ClockPort,
   IdGeneratorPort,
@@ -95,4 +146,9 @@ export type {
   StoredMetadata,
   EventPublisherPort,
   DomainEventRecord,
+  StoragePort,
+  StoredObject,
+  PutObjectInput,
+  AuditEntry,
+  AuditLogPort,
 } from './ports/index';
