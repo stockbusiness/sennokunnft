@@ -1,0 +1,431 @@
+// 千ノ国NFTマーケット — データベーススキーマ
+//
+// 設計の根拠は docs/DATABASE_DESIGN.md を参照。
+//
+// ⚠️ Phase 1 では **スキーマ定義と Prisma Client の生成のみ**を行う。
+//    マイグレーションの生成・適用は行わない（本番DBへ接続しない）。
+//
+// この設計で最も重要なのは、冪等性を「アプリの if 文」ではなく
+// **DB の一意制約と条件付き UPDATE** で担保している点。
+// 競合状態ではアプリのチェックは破れるが、DB の制約は破れない。
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// アカウント
+// ============================================================================
+
+enum AccountRole {
+  buyer
+  operator
+  auditor
+}
+
+enum AccountStatus {
+  active
+  suspended
+}
+
+/// 認証の正は Supabase Auth 側にあり、本テーブルは参照と業務属性のみを持つ。
+/// パスワードや資格情報は一切保持しない。
+model Account {
+  id           String        @id @default(uuid()) @db.Uuid
+  authProvider String        @map("auth_provider")
+  authSubject  String        @map("auth_subject")
+  /// 照合用のハッシュ。平文のメールアドレスは保持しない（UD-503）。
+  emailHash    String?       @map("email_hash")
+  displayName  String?       @map("display_name")
+  /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
+  role         AccountRole   @default(buyer)
+  status       AccountStatus @default(active)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  orders               Order[]
+  entitlements         Entitlement[]        @relation("EntitlementPurchaser")
+  claimedEntitlements  Entitlement[]        @relation("EntitlementClaimer")
+  auditLogs            AuditLog[]
+
+  @@unique([authProvider, authSubject])
+  @@map("accounts")
+}
+
+// ============================================================================
+// 作品と出品
+// ============================================================================
+
+enum ArtworkStatus {
+  draft
+  published
+  archived
+}
+
+/// 在庫（発行上限）の正。
+/// reservedCount + issuedCount <= maxSupply を DB の CHECK 制約で担保する。
+/// アプリ側の行ロック検証と二重に持つことで、バグがあってもオーバーセルさせない。
+/// CHECK 制約は Prisma のスキーマ言語で表現できないため、
+/// マイグレーション生成時に手書きで追加する（DATABASE_DESIGN.md §3.2）。
+model Artwork {
+  id            String        @id @default(uuid()) @db.Uuid
+  slug          String        @unique
+  title         String
+  description   String        @default("")
+  /// ストレージ上のキー。公開URLは実行時に解決する（保存先は UD-508 で未決定）。
+  imageKey      String?       @map("image_key")
+  maxSupply     Int           @map("max_supply")
+  /// 決済待ちの注文が押さえている数。
+  reservedCount Int           @default(0) @map("reserved_count")
+  /// 受取権として発行済みの数。
+  issuedCount   Int           @default(0) @map("issued_count")
+  status        ArtworkStatus @default(draft)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  listings     Listing[]
+  orderLines   OrderLine[]
+  entitlements Entitlement[]
+
+  @@index([status])
+  @@map("artworks")
+}
+
+enum ListingStatus {
+  draft
+  active
+  paused
+  closed
+}
+
+model Listing {
+  id                  String        @id @default(uuid()) @db.Uuid
+  artworkId           String        @map("artwork_id") @db.Uuid
+  /// 最小通貨単位の整数。金額に浮動小数点を使わない。
+  priceAmount         Int           @map("price_amount")
+  priceCurrency       String        @map("price_currency") @db.Char(3)
+  maxQuantityPerOrder Int           @default(1) @map("max_quantity_per_order")
+  status              ListingStatus @default(draft)
+  startsAt            DateTime?     @map("starts_at") @db.Timestamptz(6)
+  endsAt              DateTime?     @map("ends_at") @db.Timestamptz(6)
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  artwork    Artwork     @relation(fields: [artworkId], references: [id])
+  orderLines OrderLine[]
+
+  @@index([artworkId])
+  @@index([status, startsAt, endsAt])
+  @@map("listings")
+}
+
+// ============================================================================
+// 注文と決済
+// ============================================================================
+
+enum OrderStatus {
+  pending
+  paid
+  failed
+  expired
+  refunded
+}
+
+model Order {
+  id             String      @id @default(uuid()) @db.Uuid
+  accountId      String      @map("account_id") @db.Uuid
+  status         OrderStatus @default(pending)
+  totalAmount    Int         @map("total_amount")
+  totalCurrency  String      @map("total_currency") @db.Char(3)
+  /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
+  idempotencyKey String      @map("idempotency_key")
+  /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
+  reservedUntil  DateTime?   @map("reserved_until") @db.Timestamptz(6)
+  paidAt         DateTime?   @map("paid_at") @db.Timestamptz(6)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account      Account       @relation(fields: [accountId], references: [id])
+  lines        OrderLine[]
+  payments     Payment[]
+  entitlements Entitlement[]
+
+  @@unique([accountId, idempotencyKey])
+  @@index([status, reservedUntil])
+  @@index([accountId, createdAt])
+  @@map("orders")
+}
+
+/// 注文時点の作品名と価格をスナップショットする。
+/// マスタを後から変更しても、過去の取引記録が書き換わらないようにするため。
+model OrderLine {
+  id                   String   @id @default(uuid()) @db.Uuid
+  orderId              String   @map("order_id") @db.Uuid
+  listingId            String   @map("listing_id") @db.Uuid
+  artworkId            String   @map("artwork_id") @db.Uuid
+  artworkTitleSnapshot String   @map("artwork_title_snapshot")
+  unitPriceAmount      Int      @map("unit_price_amount")
+  unitPriceCurrency    String   @map("unit_price_currency") @db.Char(3)
+  quantity             Int
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order        Order         @relation(fields: [orderId], references: [id])
+  listing      Listing       @relation(fields: [listingId], references: [id])
+  artwork      Artwork       @relation(fields: [artworkId], references: [id])
+  entitlements Entitlement[]
+
+  @@index([orderId])
+  @@map("order_lines")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+  partially_refunded
+}
+
+/// 決済の真の状態は常に外部の決済事業者側にある。
+/// 本テーブルは Webhook で受け取った事実の写像であり、
+/// 本システム側から状態を推測して進めない。
+model Payment {
+  id                 String        @id @default(uuid()) @db.Uuid
+  orderId            String        @map("order_id") @db.Uuid
+  provider           String
+  providerSessionRef String?       @map("provider_session_ref")
+  providerPaymentRef String?       @map("provider_payment_ref")
+  status             PaymentStatus @default(pending)
+  amount             Int
+  currency           String        @db.Char(3)
+  amountRefunded     Int           @default(0) @map("amount_refunded")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@unique([provider, providerPaymentRef])
+  @@index([orderId])
+  @@map("payments")
+}
+
+enum WebhookEventStatus {
+  received
+  processed
+  ignored
+  failed
+}
+
+/// 外部 Webhook の受信記録。二重処理防止の中核。
+///
+/// 処理順序: 署名検証 → 本テーブルへ INSERT（一意制約違反なら既受信として即 200）
+///           → 業務処理 → processedAt 更新
+///
+/// 本文（payload）は保存せず、ダイジェストのみ持つ。
+/// 本文には個人情報・カード関連情報が含まれうるため。
+model WebhookEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  provider      String
+  /// 送信元が採番したイベントID。
+  eventId       String             @map("event_id")
+  eventType     String             @map("event_type")
+  receivedAt    DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt   DateTime?          @map("processed_at") @db.Timestamptz(6)
+  status        WebhookEventStatus @default(received)
+  payloadDigest String             @map("payload_digest")
+  /// 失敗理由の要約。秘匿値を含めない。
+  errorSummary  String?            @map("error_summary")
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+// ============================================================================
+// 受取権（本ドメインの中核）
+// ============================================================================
+
+enum EntitlementStatus {
+  issued
+  claimed
+  expired
+  revoked
+}
+
+/// 「1枚のトークンを受け取る権利」。
+/// 数量Nの注文に対し **N 行**作成する。注文が数量を持つのではなく、
+/// 注文がN個の受取権を生む、という粒度でモデル化している。
+///
+/// claimed への遷移は条件付き UPDATE（WHERE status = 'issued'）で行い、
+/// 更新行数が 1 の場合のみ成功とする。同時 Claim でも 1 回しか成功しない。
+model Entitlement {
+  id                   String            @id @default(uuid()) @db.Uuid
+  orderId              String            @map("order_id") @db.Uuid
+  orderLineId          String            @map("order_line_id") @db.Uuid
+  artworkId            String            @map("artwork_id") @db.Uuid
+  /// 購入者。Claim の本人照合はこの値と認証アカウントの一致で行う。
+  accountId            String            @map("account_id") @db.Uuid
+  serialNo             Int               @map("serial_no")
+  /// Claim トークンのハッシュ。**平文は保存しない。**
+  claimTokenHash       String            @map("claim_token_hash")
+  status               EntitlementStatus @default(issued)
+  /// Claim 期限。null は無期限（UD-505 で未決定のため MVP は null）。
+  expiresAt            DateTime?         @map("expires_at") @db.Timestamptz(6)
+  claimedByAccountId   String?           @map("claimed_by_account_id") @db.Uuid
+  claimedAt            DateTime?         @map("claimed_at") @db.Timestamptz(6)
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order           Order     @relation(fields: [orderId], references: [id])
+  orderLine       OrderLine @relation(fields: [orderLineId], references: [id])
+  artwork         Artwork   @relation(fields: [artworkId], references: [id])
+  purchaser       Account   @relation("EntitlementPurchaser", fields: [accountId], references: [id])
+  claimedByAccount Account? @relation("EntitlementClaimer", fields: [claimedByAccountId], references: [id])
+  mintJob         MintJob?
+  nftToken        NftToken?
+
+  /// 同一作品内でシリアル番号が重複しないことを物理的に担保する。
+  @@unique([artworkId, serialNo])
+  /// トークンの衝突を検出する。
+  @@unique([claimTokenHash])
+  @@index([accountId, status])
+  @@index([orderId])
+  @@index([status, expiresAt])
+  @@map("entitlements")
+}
+
+// ============================================================================
+// 発行（Mint）
+// ============================================================================
+
+enum MintJobStatus {
+  queued
+  processing
+  succeeded
+  failed
+  cancelled
+}
+
+/// 発行ジョブ。ワーカーが FOR UPDATE SKIP LOCKED で排他取得する。
+///
+/// entitlementId の UNIQUE により、1つの受取権に対してジョブは 1 件しか作れない。
+/// これが「1つの受取権から複数Mintできない」ことを担保する4層のうちの1つ。
+///
+/// ⚠️ **発行先チェーンの列を意図的に置いていない。**
+///    マルチチェーン対応の要否が未決定（UD-512）で、チェーン選定（UD-501）と
+///    同時に判断する。本テーブルに本番データが入るのは Phase 5 以降なので、
+///    決定後に列を足しても安く済む（既存行の埋め戻しも自明）。
+///    記録側の nft_tokens には chainRef があり、そちらは単一チェーン運用でも保持する。
+model MintJob {
+  id             String        @id @default(uuid()) @db.Uuid
+  entitlementId  String        @unique @map("entitlement_id") @db.Uuid
+  status         MintJobStatus @default(queued)
+  attemptCount   Int           @default(0) @map("attempt_count")
+  maxAttempts    Int           @default(5) @map("max_attempts")
+  /// バックオフ後の実行予定時刻。
+  nextAttemptAt  DateTime      @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// processing 開始時刻。滞留の検出に使う。
+  lockedAt       DateTime?     @map("locked_at") @db.Timestamptz(6)
+  /// 外部Mint APIへ渡す冪等キー。受取権IDから決定論的に導出する。
+  idempotencyKey String        @unique @map("idempotency_key")
+  /// プロバイダ側の依頼識別子。状態問い合わせに使う。
+  submissionRef  String?       @map("submission_ref")
+  /// 失敗理由の分類コード。外部APIの生メッセージを入れない。
+  lastErrorCode  String?       @map("last_error_code")
+  /// 運用注記。processing 中の行を返金で取り消せない場合などに記録する。
+  note           String?
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  entitlement Entitlement @relation(fields: [entitlementId], references: [id])
+  nftToken    NftToken?
+
+  @@index([status, nextAttemptAt])
+  @@map("mint_jobs")
+}
+
+/// 発行済みトークンへの参照。
+///
+/// entitlementId の UNIQUE が「1受取権1トークン」の最終的な担保。
+/// 万一ジョブが2回実行されても、記録は1件しか作られない。
+///
+/// ⚠️ chainRef / contractRef / tokenRef / ownerRef は **不透明な文字列**にしてある。
+///    チェーン仕様が未決定（UD-501）のため、EVM のアドレス形式などに固定しない。
+///    決定後に CHECK 制約や正規化を追加する。
+model NftToken {
+  id            String   @id @default(uuid()) @db.Uuid
+  entitlementId String   @unique @map("entitlement_id") @db.Uuid
+  mintJobId     String   @unique @map("mint_job_id") @db.Uuid
+  chainRef      String   @map("chain_ref")
+  contractRef   String   @map("contract_ref")
+  tokenRef      String   @map("token_ref")
+  txRef         String?  @map("tx_ref")
+  /// 所有者参照。カストディ方式が未決定（UD-502）のため不透明参照。
+  ownerRef      String   @map("owner_ref")
+  metadataUri   String?  @map("metadata_uri")
+  mintedAt      DateTime @map("minted_at") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  entitlement Entitlement @relation(fields: [entitlementId], references: [id])
+  mintJob     MintJob     @relation(fields: [mintJobId], references: [id])
+
+  @@unique([chainRef, contractRef, tokenRef])
+  @@index([ownerRef])
+  @@map("nft_tokens")
+}
+
+// ============================================================================
+// イベントと監査
+// ============================================================================
+
+enum OutboxStatus {
+  pending
+  published
+  failed
+}
+
+/// Transactional Outbox。
+/// 業務データの更新と同一トランザクションでイベント行を書き、
+/// 別プロセスが配信する。「支払は確定したが通知が飛ばなかった」を防ぐ。
+///
+/// payload に個人情報を含めない。イベントは複数の購読者・ログを経由するため。
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  eventName     String       @map("event_name")
+  eventVersion  Int          @default(1) @map("event_version")
+  aggregateType String       @map("aggregate_type")
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  payload       Json
+  occurredAt    DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(6)
+  status        OutboxStatus @default(pending)
+  attemptCount  Int          @default(0) @map("attempt_count")
+
+  @@index([status, occurredAt])
+  @@map("outbox_events")
+}
+
+/// 管理操作の監査証跡。
+/// summary には業務値のみを入れ、秘匿値を含めない。
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// null はシステムによる自動操作。
+  actorAccountId String?  @map("actor_account_id") @db.Uuid
+  action         String
+  targetType     String   @map("target_type")
+  targetId       String?  @map("target_id") @db.Uuid
+  summary        Json
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  actor Account? @relation(fields: [actorAccountId], references: [id])
+
+  @@index([targetType, targetId, occurredAt])
+  @@index([actorAccountId, occurredAt])
+  @@map("audit_logs")
+}

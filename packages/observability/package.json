@@ -1,0 +1,33 @@
+{
+  "name": "@sengoku/observability",
+  "version": "0.1.0",
+  "private": true,
+  "description": "構造化ログ・相関ID・秘匿値マスキング",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@sengoku/config": "workspace:*",
+    "pino": "10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

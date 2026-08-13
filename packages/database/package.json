@@ -1,0 +1,39 @@
+{
+  "name": "@sengoku/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma スキーマと Client 生成、リポジトリ実装の置き場",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "prisma"
+  ],
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "pnpm run generate && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:validate": "prisma validate",
+    "db:format": "prisma format"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@sengoku/config": "workspace:*",
+    "@sengoku/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "prisma": "6.19.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

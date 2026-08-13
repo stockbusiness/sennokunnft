@@ -1,0 +1,241 @@
+import { describe, expect, it } from 'vitest';
+import {
+  FakeMintingAdapter,
+  FakePaymentGateway,
+  FixedClock,
+  HmacIdempotencyKeyService,
+  SequentialIdGenerator,
+  Sha256ClaimTokenService,
+  signWebhookPayload,
+  WEBHOOK_TOLERANCE_MS,
+} from '../src/index';
+
+describe('Sha256ClaimTokenService（SECURITY_DESIGN §8）', () => {
+  const service = new Sha256ClaimTokenService();
+
+  it('毎回異なるトークンを発行する', () => {
+    const tokens = new Set(Array.from({ length: 50 }, () => service.issue().token));
+    expect(tokens.size).toBe(50);
+  });
+
+  it('十分な長さのトークンを発行する（総当たり対策）', () => {
+    // 32 バイトを base64url にすると 43 文字。
+    expect(service.issue().token.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it('平文とハッシュが異なる（DB には平文を保存しない）', () => {
+    const issued = service.issue();
+    expect(issued.tokenHash).not.toBe(issued.token);
+    expect(issued.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('正しいトークンで照合できる', () => {
+    const issued = service.issue();
+    expect(service.matches(issued.token, issued.tokenHash)).toBe(true);
+  });
+
+  it('異なるトークンは照合に失敗する', () => {
+    const a = service.issue();
+    const b = service.issue();
+    expect(service.matches(a.token, b.tokenHash)).toBe(false);
+  });
+
+  it('長さの異なるハッシュを渡しても例外にならず false を返す', () => {
+    const issued = service.issue();
+    expect(service.matches(issued.token, 'short')).toBe(false);
+  });
+});
+
+describe('HmacIdempotencyKeyService（I-7）', () => {
+  const service = new HmacIdempotencyKeyService('test-secret');
+
+  it('同じ受取権IDからは常に同じキーを導出する', () => {
+    // 再試行のたびにキーが変わると、外部から見て別依頼になり多重発行の原因になる。
+    expect(service.deriveMintKey('e-1')).toBe(service.deriveMintKey('e-1'));
+  });
+
+  it('異なる受取権IDでは異なるキーになる', () => {
+    expect(service.deriveMintKey('e-1')).not.toBe(service.deriveMintKey('e-2'));
+  });
+
+  it('シークレットが異なればキーも異なる', () => {
+    const other = new HmacIdempotencyKeyService('another-secret');
+    expect(service.deriveMintKey('e-1')).not.toBe(other.deriveMintKey('e-1'));
+  });
+
+  it('導出したキーに受取権IDが平文で現れない', () => {
+    expect(service.deriveMintKey('entitlement-secret-id')).not.toContain('entitlement-secret-id');
+  });
+
+  it('空のシークレットを拒否する', () => {
+    expect(() => new HmacIdempotencyKeyService('')).toThrow();
+  });
+});
+
+describe('FakeMintingAdapter（多重発行の防止）', () => {
+  it('同じ冪等キーで再依頼しても発行は1件に留まる（I-6）', async () => {
+    const adapter = new FakeMintingAdapter();
+    const request = {
+      entitlementId: 'e-1',
+      idempotencyKey: 'key-1',
+      metadataRef: 'meta-1',
+      recipientRef: 'recipient-1',
+    };
+
+    const first = await adapter.submit(request);
+    const second = await adapter.submit(request);
+
+    expect(second.submissionRef).toBe(first.submissionRef);
+    expect(adapter.submissionCount()).toBe(1);
+  });
+
+  it('同時に複数回依頼しても発行は1件（I-5 相当）', async () => {
+    const adapter = new FakeMintingAdapter();
+    const request = {
+      entitlementId: 'e-1',
+      idempotencyKey: 'key-1',
+      metadataRef: 'meta-1',
+      recipientRef: 'recipient-1',
+    };
+
+    const results = await Promise.all(Array.from({ length: 10 }, () => adapter.submit(request)));
+
+    expect(new Set(results.map((r) => r.submissionRef)).size).toBe(1);
+    expect(adapter.submissionCount()).toBe(1);
+  });
+
+  it('異なる冪等キーは別の発行になる', async () => {
+    const adapter = new FakeMintingAdapter();
+    await adapter.submit({
+      entitlementId: 'e-1',
+      idempotencyKey: 'key-1',
+      metadataRef: 'm',
+      recipientRef: 'r',
+    });
+    await adapter.submit({
+      entitlementId: 'e-2',
+      idempotencyKey: 'key-2',
+      metadataRef: 'm',
+      recipientRef: 'r',
+    });
+    expect(adapter.submissionCount()).toBe(2);
+  });
+
+  it('失敗させた受取権は failed を返し、状態問い合わせでも失敗のまま', async () => {
+    const adapter = new FakeMintingAdapter(['e-bad']);
+    const submission = await adapter.submit({
+      entitlementId: 'e-bad',
+      idempotencyKey: 'key-bad',
+      metadataRef: 'm',
+      recipientRef: 'r',
+    });
+    expect(submission.state).toBe('failed');
+
+    const status = await adapter.getStatus(submission.submissionRef);
+    expect(status.state).toBe('failed');
+    expect(status.errorCode).toBe('FAKE_PROVIDER_REJECTED');
+  });
+
+  it('返す識別子は実チェーンの形式を模倣していない（UD-501 未決定）', async () => {
+    const adapter = new FakeMintingAdapter();
+    const submission = await adapter.submit({
+      entitlementId: 'e-1',
+      idempotencyKey: 'key-1',
+      metadataRef: 'm',
+      recipientRef: 'r',
+    });
+    const status = await adapter.getStatus(submission.submissionRef);
+    expect(status.chainRef).toBe('fake:local');
+    // EVM のアドレス形式などを既定にしてしまわないことを確認する。
+    expect(status.contractRef).not.toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+});
+
+describe('FakePaymentGateway の署名検証（TEST_STRATEGY §3.7）', () => {
+  const SECRET = 'webhook-secret';
+  const NOW = new Date('2026-01-01T00:00:00.000Z');
+  const gateway = new FakePaymentGateway(SECRET);
+
+  function signedRequest(body: unknown, options: { secret?: string; skewMs?: number } = {}) {
+    const rawBody = Buffer.from(JSON.stringify(body), 'utf8');
+    const timestampSec = Math.floor((NOW.getTime() + (options.skewMs ?? 0)) / 1000);
+    const signature = signWebhookPayload(options.secret ?? SECRET, timestampSec, rawBody);
+    return {
+      rawBody,
+      signatureHeader: `t=${String(timestampSec)},v1=${signature}`,
+      receivedAt: NOW,
+    };
+  }
+
+  const EVENT = { id: 'evt_1', type: 'payment.succeeded' };
+
+  it('正しい署名の通知を受理する', () => {
+    const verified = gateway.verifyWebhook(signedRequest(EVENT));
+    expect(verified?.eventId).toBe('evt_1');
+    expect(verified?.eventType).toBe('payment.succeeded');
+  });
+
+  it('署名がなければ拒否する（W-2）', () => {
+    const request = signedRequest(EVENT);
+    expect(gateway.verifyWebhook({ ...request, signatureHeader: undefined })).toBeNull();
+  });
+
+  it('署名が不正なら拒否する（W-1）', () => {
+    const request = signedRequest(EVENT, { secret: 'wrong-secret' });
+    expect(gateway.verifyWebhook(request)).toBeNull();
+  });
+
+  it('本文が改竄されていたら拒否する（W-4）', () => {
+    const request = signedRequest(EVENT);
+    const tampered = {
+      ...request,
+      rawBody: Buffer.from(JSON.stringify({ id: 'evt_2', type: 'x' })),
+    };
+    expect(gateway.verifyWebhook(tampered)).toBeNull();
+  });
+
+  it('タイムスタンプが古すぎる通知を拒否する（W-3 リプレイ）', () => {
+    const request = signedRequest(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS + 1000) });
+    expect(gateway.verifyWebhook(request)).toBeNull();
+  });
+
+  it('許容範囲内の時刻ずれは受理する', () => {
+    const request = signedRequest(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS - 60_000) });
+    expect(gateway.verifyWebhook(request)).not.toBeNull();
+  });
+
+  it('署名ヘッダの形式が不正なら拒否する', () => {
+    const request = signedRequest(EVENT);
+    expect(gateway.verifyWebhook({ ...request, signatureHeader: 'garbage' })).toBeNull();
+  });
+
+  it('署名は正しいが本文が JSON でなければ拒否する', () => {
+    const rawBody = Buffer.from('not-json', 'utf8');
+    const timestampSec = Math.floor(NOW.getTime() / 1000);
+    expect(
+      gateway.verifyWebhook({
+        rawBody,
+        signatureHeader: `t=${String(timestampSec)},v1=${signWebhookPayload(SECRET, timestampSec, rawBody)}`,
+        receivedAt: NOW,
+      }),
+    ).toBeNull();
+  });
+
+  it('イベントIDのない通知を拒否する（冪等排除ができないため）', () => {
+    expect(gateway.verifyWebhook(signedRequest({ type: 'payment.succeeded' }))).toBeNull();
+  });
+});
+
+describe('テスト用の補助実装', () => {
+  it('FixedClock は時刻を固定し、明示的に進められる', () => {
+    const clock = new FixedClock(new Date('2026-01-01T00:00:00.000Z'));
+    expect(clock.now().toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    clock.advanceMs(60_000);
+    expect(clock.now().toISOString()).toBe('2026-01-01T00:01:00.000Z');
+  });
+
+  it('SequentialIdGenerator は決定論的なIDを返す', () => {
+    const generator = new SequentialIdGenerator('order');
+    expect([generator.generate(), generator.generate()]).toEqual(['order-1', 'order-2']);
+  });
+});

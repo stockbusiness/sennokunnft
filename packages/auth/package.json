@@ -1,0 +1,33 @@
+{
+  "name": "@sengoku/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "トークン検証ポート・ロール・認可判定（純粋関数）",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@sengoku/config": "workspace:*",
+    "@sengoku/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
