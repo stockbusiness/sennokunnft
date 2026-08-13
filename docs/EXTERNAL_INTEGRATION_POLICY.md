@@ -192,11 +192,49 @@ Wallet へ送るカード情報には必ず `blockchain_status = NOT_MINTED` を
 `common_user_id` の解決は非同期に再試行する。
 Claim 時点で未解決なら `202` を返し、受取権は失効させない。
 
-❓ **未決定 `UD-1008`:** 代理店システムのリポジトリと
-`POST /api/common-users/resolve` の契約。
-指示書が指す `team478a/sengoku-agency-system` は
-本セッションからアクセスできるリポジトリ一覧に存在しない。
-**契約を確認できないため実装に着手できない。**
+✅ **決定済 `UD-1008`（2026-08-13）:** 参照先は `team478a/sengoku-agency-system`（公開）。
+契約は同リポジトリの `docs/integration/COMMON_HUB_EXTERNAL_CONTRACT_2026-07-21.md`。
+
+#### `POST /api/common-users/resolve` の契約（確認済み）
+
+エンドポイント: `https://sengoku-ai.com/api/common-users/resolve`
+認証: `x-api-key: {AI受信用APIキー}` または `Authorization: Bearer {同}`
+
+| 項目                    | 内容                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| `common_user_id` の形式 | `cu_` ＋ 32 桁 hex                                   |
+| 発行元                  | 代理店システムのみ                                   |
+| 入力キー                | `external_user_id`（`service_user_id` も受け付ける） |
+| 併せて送る              | `system_key`                                         |
+
+応答の `matched_by` は照合の根拠を示す。
+
+| `matched_by`           | 意味                                                   |
+| ---------------------- | ------------------------------------------------------ |
+| `common_user_id`       | 既知の ID で一致                                       |
+| `system_account_link`  | `system_key` ＋ `external_user_id` で一致              |
+| `service_user_mapping` | 旧マッピングで一致                                     |
+| `identity:*`           | **検証済み**の LINE / メール / 電話 / ウォレットで一致 |
+| `created`              | 新規作成された                                         |
+
+⚠️ **`create_if_missing` の既定値は `true`。**
+照会のつもりで呼ぶと、副作用として人物が新規作成される。
+**存在確認だけをしたい経路では明示的に `false` を渡す。**
+
+#### 自動名寄せの安全条件（契約 §4）
+
+代理店システムは、**未検証のメール・電話・ウォレットだけでは自動統合しない。**
+未検証の候補があったまま新規作成された場合、応答は
+
+```
+identity_match_status: "unverified_candidate_not_auto_merged"
+```
+
+となる。これは**同一人物が重複した可能性がある**という警告であり、
+本システム側でも無視してはならない。
+
+> 契約 §4 は外部システムに対しても
+> 「未検証メールだけで同一人物確定をしないでください」と明記している。
 
 #### Wallet 向けの署名
 
@@ -226,6 +264,13 @@ Claim 確定 API（`POST /claims/{token}/confirm`）の呼び出し元認証方�
 これは本システムの既存方針（[AUTHORIZATION_DESIGN.md](./AUTHORIZATION_DESIGN.md)
 「ロールの正は DB。トークンの自己申告を信用しない」）と同じ種類の判断である。
 
+**千ノ国の既存契約にも前例がある。** 代理店システムの外部連携契約 §5 は、
+API キーを**接続先ごと・通信方向ごとに分ける**と定めており、
+呼び出し元を認証しない連携は想定されていない。
+したがって必須化は新たな要求ではなく、既存の方式に揃えることにあたる。
+
+残る論点は方式の選択（API キー / HMAC / 併用）であり、そこは合意が要る。
+
 #### Claim の状態表現
 
 ❓ **未決定 `UD-1007`:** 内部状態と公開 API の `status` の対応。
@@ -251,8 +296,21 @@ Claim 確定 API（`POST /claims/{token}/confirm`）の呼び出し元認証方�
 
 指示書は「解決後に安全な条件で補完する」とするが、その条件が定義されていない。
 補完は受取先の決定に直結し、**誤ると他人の Wallet へ渡る。**
-指示書のロールバック条件にも「common_user 誤紐付け」が挙がっているため、
-条件が確定するまで補完処理を実装しない。
+
+🟡 **仮決定（代理店システムの契約 §4 を確認したうえでの案）:**
+
+1. 補完は **`system_key` ＋ `external_user_id`（本システムの account id）でのみ**行う。
+   これは本システムが発行した鍵なので、解決結果は構成上つねに同じ人物を指す
+2. **未検証の属性（メール・電話・ウォレット）を照合材料として送らない。**
+   送ると、他人の検証済み ID に当たって紐付く経路ができる
+3. 補完は `matched_by` が `common_user_id` / `system_account_link` /
+   `service_user_mapping` のときのみ受け入れる。`identity:*` では受け入れない
+4. `identity_match_status` が `unverified_candidate_not_auto_merged` の応答は、
+   重複の可能性として記録し、**自動では確定させない**
+
+> 残る判断は「そもそもメールアドレスを送るか」であり、これは `UD-503`
+> （メールアドレスを本システムで保持するか）と連動する。
+> 送らない前提なら 1〜4 だけで完結する。
 
 ### 5.3 代理店システム
 
