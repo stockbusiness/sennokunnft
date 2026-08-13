@@ -1,0 +1,168 @@
+import { describe, expect, it } from 'vitest';
+import {
+  apiEnvSchema,
+  workerEnvSchema,
+  webEnvSchema,
+  parseEnv,
+  loadEnv,
+  formatEnvProblems,
+  assertPhaseOneIntegrationLimits,
+  assertProductionSafety,
+  UnsafeEnvironmentError,
+} from '../src/index';
+
+const MINIMAL_API_ENV = {
+  DATABASE_URL: 'postgresql://user:pass@localhost:5432/sengoku',
+};
+
+describe('parseEnv', () => {
+  it('必須変数が揃っていれば成功する', () => {
+    const result = parseEnv(apiEnvSchema, MINIMAL_API_ENV as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(true);
+  });
+
+  it('既定値が適用される', () => {
+    const result = parseEnv(apiEnvSchema, MINIMAL_API_ENV as NodeJS.ProcessEnv);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.env.API_PORT).toBe(3001);
+    expect(result.env.APP_ENV).toBe('local');
+    expect(result.env.LOG_LEVEL).toBe('info');
+    // 未決定事項（UD-501 / UD-702）のため、既定は必ず fake。
+    expect(result.env.PAYMENT_PROVIDER).toBe('fake');
+    expect(result.env.MINT_PROVIDER).toBe('fake');
+  });
+
+  it('必須変数が欠けていると失敗し、変数名を報告する', () => {
+    const result = parseEnv(apiEnvSchema, {} as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected failure');
+    expect(result.problems.map((p) => p.variable)).toContain('DATABASE_URL');
+  });
+
+  it('.env.example をコピーした直後の空文字は「未設定」として扱う', () => {
+    // `API_PORT=` のような空値で既定値が効かないと、不親切なエラーになる。
+    const result = parseEnv(apiEnvSchema, {
+      ...MINIMAL_API_ENV,
+      API_PORT: '',
+      LOG_LEVEL: '',
+    } as NodeJS.ProcessEnv);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.env.API_PORT).toBe(3001);
+    expect(result.env.LOG_LEVEL).toBe('info');
+  });
+
+  it('範囲外のポート番号を拒否する', () => {
+    const result = parseEnv(apiEnvSchema, {
+      ...MINIMAL_API_ENV,
+      API_PORT: '99999',
+    } as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(false);
+  });
+
+  it('worker / web のスキーマも必須変数を検証する', () => {
+    expect(parseEnv(workerEnvSchema, {} as NodeJS.ProcessEnv).ok).toBe(false);
+    // web には必須変数がないため、空でも既定値で成立する。
+    const web = parseEnv(webEnvSchema, {} as NodeJS.ProcessEnv);
+    if (!web.ok) throw new Error('expected success');
+    expect(web.env.WEB_API_BASE_URL).toBe('http://localhost:3001');
+  });
+});
+
+describe('エラー出力に値を含めない（SECURITY_DESIGN §3.3）', () => {
+  it('検証エラーに環境変数の値が現れない', () => {
+    const secret = 'super-secret-connection-string-value';
+    const result = parseEnv(apiEnvSchema, {
+      DATABASE_URL: secret,
+      API_PORT: 'not-a-number',
+    } as NodeJS.ProcessEnv);
+    if (result.ok) throw new Error('expected failure');
+
+    const rendered = formatEnvProblems(result.problems);
+    expect(rendered).toContain('API_PORT');
+    expect(rendered).not.toContain(secret);
+    expect(rendered).not.toContain('not-a-number');
+  });
+});
+
+describe('loadEnv', () => {
+  it('検証失敗時に致命ハンドラを呼ぶ（不完全な設定で起動させない）', () => {
+    let fatalMessage: string | undefined;
+    expect(() =>
+      loadEnv(apiEnvSchema, {} as NodeJS.ProcessEnv, {
+        onFatal: (message) => {
+          fatalMessage = message;
+          throw new Error('fatal');
+        },
+      }),
+    ).toThrow('fatal');
+    expect(fatalMessage).toContain('DATABASE_URL');
+  });
+
+  it('成功時は検証済みの値を返す', () => {
+    const env = loadEnv(apiEnvSchema, MINIMAL_API_ENV as NodeJS.ProcessEnv);
+    expect(env.DATABASE_URL).toBe(MINIMAL_API_ENV.DATABASE_URL);
+  });
+});
+
+describe('assertPhaseOneIntegrationLimits', () => {
+  it('プロバイダが fake なら通過する', () => {
+    expect(() =>
+      assertPhaseOneIntegrationLimits({
+        APP_ENV: 'local',
+        LOG_LEVEL: 'info',
+        PAYMENT_PROVIDER: 'fake',
+        MINT_PROVIDER: 'fake',
+      }),
+    ).not.toThrow();
+  });
+
+  it('実サービスを指すプロバイダを拒否する', () => {
+    expect(() =>
+      assertPhaseOneIntegrationLimits({
+        APP_ENV: 'local',
+        LOG_LEVEL: 'info',
+        PAYMENT_PROVIDER: 'stripe',
+      }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+});
+
+describe('assertProductionSafety', () => {
+  it('本番以外では何も検査しない', () => {
+    expect(() =>
+      assertProductionSafety({
+        APP_ENV: 'local',
+        LOG_LEVEL: 'debug',
+        DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+      }),
+    ).not.toThrow();
+  });
+
+  it('本番で debug ログを拒否する', () => {
+    expect(() => assertProductionSafety({ APP_ENV: 'production', LOG_LEVEL: 'debug' })).toThrow(
+      UnsafeEnvironmentError,
+    );
+  });
+
+  it('本番でローカルホストを指す DB 接続を拒否する', () => {
+    expect(() =>
+      assertProductionSafety({
+        APP_ENV: 'production',
+        LOG_LEVEL: 'info',
+        DATABASE_URL: 'postgresql://u:p@127.0.0.1:5432/db',
+      }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('例外メッセージに接続文字列を含めない', () => {
+    const url = 'postgresql://admin:hunter2@localhost:5432/db';
+    try {
+      assertProductionSafety({ APP_ENV: 'production', LOG_LEVEL: 'info', DATABASE_URL: url });
+      throw new Error('expected throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnsafeEnvironmentError);
+      expect((error as Error).message).not.toContain('hunter2');
+      expect((error as Error).message).not.toContain(url);
+    }
+  });
+});

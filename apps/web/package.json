@@ -1,0 +1,35 @@
+{
+  "name": "@sengoku/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "画面とルーティング。ブラウザ向けの BFF",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "@sengoku/config": "workspace:*",
+    "@sengoku/contracts": "workspace:*",
+    "@sengoku/observability": "workspace:*",
+    "@sengoku/ui": "workspace:*",
+    "@sengoku/validation": "workspace:*",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "22.20.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

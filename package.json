@@ -1,0 +1,38 @@
+{
+  "name": "sengoku-nft-marketplace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:deps": "node packages/config/scripts/check-deps.mjs",
+    "check:secrets": "node packages/config/scripts/check-secrets.mjs",
+    "db:generate": "pnpm --filter @sengoku/database run generate",
+    "e2e": "pnpm --filter @sengoku/web run e2e",
+    "dev:web": "pnpm --filter @sengoku/web run dev",
+    "dev:api": "pnpm --filter @sengoku/api run dev",
+    "dev:worker": "pnpm --filter @sengoku/worker run dev",
+    "verify": "pnpm check:secrets && pnpm check:deps && turbo run lint typecheck test build"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.11.0",
+    "prettier": "3.9.6",
+    "turbo": "2.10.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}
