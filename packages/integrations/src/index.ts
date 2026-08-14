@@ -34,3 +34,17 @@ export {
 } from './dev-token-verifier';
 
 export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';
+
+export {
+  canonicalString,
+  signRequest,
+  SenNoKuniHmacVerifier,
+  InMemoryNonceStore,
+  HMAC_HEADERS,
+  TIMESTAMP_TOLERANCE_MS,
+  type CanonicalInput,
+  type HmacFailure,
+  type HmacVerification,
+  type HmacVerifierOptions,
+  type VerifyRequestInput,
+} from './sennokuni-hmac';
