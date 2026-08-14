@@ -19,6 +19,7 @@ import type {
   StoragePort,
 } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
+
 import type { Logger } from '@sengoku/observability';
 import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
@@ -38,6 +39,8 @@ import { AdminCatalogService } from './catalog/admin-catalog.service';
 import { CatalogController, PublicListingController } from './catalog/catalog.controller';
 import { CatalogService } from './catalog/catalog.service';
 import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.service';
+import { OrderController } from './order/order.controller';
+import { OrderService, type OrderStore } from './order/order.service';
 import { HealthController } from './health/health.controller';
 import { HealthService, type DependencyProbe } from './health/health.service';
 
@@ -62,6 +65,8 @@ export interface AppDependencies {
   readonly storage: StoragePort;
   readonly audit: AuditLogPort;
   readonly generateStorageKey: StorageKeyFactory;
+  /** 注文。決済事業者（`UD-702`）が未決定でも先に作れる。 */
+  readonly orders?: OrderStore;
   /**
    * Claim（OVEW Wallet 連携）。
    *
@@ -122,6 +127,7 @@ export class AppModule implements NestModule {
     //    すべての provider を作るため、Claim を使わない構成まで道連れに落ちる。
     //    実際にそれで既存の API テストが全滅した。
     const claim = deps.claim;
+    const orders = deps.orders;
     return {
       module: AppModule,
       controllers: [
@@ -129,6 +135,7 @@ export class AppModule implements NestModule {
         CatalogController,
         PublicListingController,
         AdminCatalogController,
+        ...(orders === undefined ? [] : [OrderController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -166,6 +173,14 @@ export class AppModule implements NestModule {
           provide: IdempotencyService,
           useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
         },
+        ...(orders === undefined
+          ? []
+          : [
+              {
+                provide: OrderService,
+                useFactory: () => new OrderService(orders, deps.clock),
+              },
+            ]),
         ...(claim === undefined
           ? []
           : [

@@ -19,6 +19,7 @@ import {
   PrismaListingRepository,
   PrismaIdempotencyStore,
   PrismaClaimRepository,
+  PrismaOrderRepository,
   PrismaNonceStore,
   type PrismaClient,
 } from '@sengoku/database';
@@ -127,6 +128,7 @@ async function bootstrap(): Promise<void> {
       storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
       audit: new PrismaAuditLogRepository(prisma),
       generateStorageKey,
+      orders: new PrismaOrderRepository(prisma),
       claim: {
         enabled: env.CLAIM_API_ENABLED,
         claims: new PrismaClaimRepository(prisma),

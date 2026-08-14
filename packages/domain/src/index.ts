@@ -120,6 +120,14 @@ export {
 } from './entitlement/wallet-claim';
 
 export {
+  DEFAULT_RESERVATION_MINUTES,
+  createOrder,
+  type CreateOrderInput,
+  type OrderDraft,
+  type OrderLineDraft,
+} from './order/create-order';
+
+export {
   availableSupply,
   reserveSupply,
   releaseReservation,

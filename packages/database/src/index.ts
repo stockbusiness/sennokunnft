@@ -24,6 +24,12 @@ export { PrismaNonceStore } from './repositories/nonce.repository';
 
 export { PrismaClaimRepository } from './repositories/claim.repository';
 
+export {
+  PrismaOrderRepository,
+  type PurchaseTarget,
+  type CreatedOrder,
+} from './repositories/order.repository';
+
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';
 
 export {
