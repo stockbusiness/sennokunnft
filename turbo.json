@@ -3,8 +3,17 @@
   "ui": "stream",
   "globalEnv": ["NODE_ENV", "APP_ENV", "CI"],
   "tasks": {
+    // ⚠️ **生成物を作るのは 1 つのタスクだけにする。**
+    // build / typecheck / test がそれぞれ `prisma generate` を呼んでいたため、
+    // Turborepo が並行実行すると、生成中のディレクトリを別のタスクが読み、
+    // 「モジュールが見つからない」で落ちた。**再現率は実行順まかせ**で、
+    // 通ったり落ちたりする。生成を 1 か所へ寄せ、他はそれに依存させる。
+    "generate": {
+      "inputs": ["prisma/**"],
+      "outputs": ["generated/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "generate"],
       "inputs": [
         "src/**",
         "prisma/**",
@@ -14,10 +23,10 @@
         "app/**",
         "public/**"
       ],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**", "generated/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "generate"],
       "inputs": ["src/**", "app/**", "tests/**", "tsconfig*.json"]
     },
     "lint": {
@@ -25,7 +34,7 @@
       "inputs": ["src/**", "app/**", "tests/**", "eslint.config.*", "package.json"]
     },
     "test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "generate"],
       "inputs": ["src/**", "tests/**", "vitest.config.*", "package.json"],
       // ⚠️ Turborepo 2 は既定で環境変数を絞り込む。ここに書かない変数はテストへ届かない。
       // 結合テストの接続先を書き忘れると、DB のテストが黙って飛ぶ。
