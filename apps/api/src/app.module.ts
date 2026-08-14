@@ -23,6 +23,7 @@ import type { Logger } from '@sengoku/observability';
 import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
 import { ClaimService } from './claim/claim.service';
+import { WalletDeliveryPlanner } from './claim/delivery.planner';
 import { ClaimReissueController } from './claim/reissue.controller';
 import { ReissueService, type ClaimTokenRotationSource } from './claim/reissue.service';
 import { CLAIM_HMAC_CONFIG, SenNoKuniHmacGuard, type ClaimHmacConfig } from './claim/hmac.guard';
@@ -31,6 +32,7 @@ import {
   ClaimRateLimitGuard,
   type ClaimRateLimitConfig,
 } from './claim/rate-limit.guard';
+import type { ContentHasher } from './common/content-hash';
 import { CorrelationMiddleware } from './common/correlation.middleware';
 import { IdempotencyService } from './common/idempotency';
 import { AdminCatalogController } from './catalog/admin-catalog.controller';
@@ -62,6 +64,8 @@ export interface AppDependencies {
   readonly storage: StoragePort;
   readonly audit: AuditLogPort;
   readonly generateStorageKey: StorageKeyFactory;
+  /** 画像の内容ハッシュ計算。実装は `@sengoku/integrations` の `contentHash`。 */
+  readonly hashContent: ContentHasher;
   /**
    * Claim（OVEW Wallet 連携）。
    *
@@ -80,6 +84,15 @@ export interface AppDependencies {
     readonly postPerMinute: number;
     /** 受取ページの前置き。末尾のスラッシュを含めない。 */
     readonly claimBaseUrl: string;
+    /**
+     * Wallet への配送を有効にするか。
+     *
+     * ⚠️ **Claim 本体とは別のフラグ。**
+     * 有効にすると、受取確定と同時に配送本文が組み立てられ、
+     * 組み立てられない作品（長期URLの画像が無い等）は受取が失敗する。
+     * 画像の長期URL（Cloudflare R2）が整うまでは無効のままにする。
+     */
+    readonly deliveryEnabled: boolean;
   };
 }
 
@@ -160,6 +173,7 @@ export class AppModule implements NestModule {
               deps.storage,
               deps.generateStorageKey,
               deps.audit,
+              deps.hashContent,
             ),
         },
         {
@@ -172,7 +186,17 @@ export class AppModule implements NestModule {
               {
                 provide: ClaimService,
                 useFactory: (idempotency: IdempotencyService) =>
-                  new ClaimService(claim.claims, claim.tokens, deps.clock, idempotency),
+                  new ClaimService(
+                    claim.claims,
+                    claim.tokens,
+                    deps.clock,
+                    idempotency,
+                    // 無効なら planner ごと渡さない。「渡すが中で何もしない」に
+                    // すると、無効なのに本文を組み立てて落ちる経路が残る。
+                    claim.deliveryEnabled
+                      ? new WalletDeliveryPlanner(deps.ids, deps.storage, deps.hashContent)
+                      : null,
+                  ),
                 inject: [IdempotencyService],
               },
               SenNoKuniHmacGuard,

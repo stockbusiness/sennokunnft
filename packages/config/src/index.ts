@@ -44,8 +44,12 @@ export {
   assertProductionSafety,
   assertCommonUserLinkingConfig,
   assertClaimApiConfig,
+  assertWalletDeliveryConfig,
+  assertStagingFixtureAllowed,
   parseHmacKeys,
   type IntegrationTargets,
   type CommonUserLinkingTargets,
   type ClaimApiTargets,
+  type WalletDeliveryTargets,
+  type StagingFixtureTargets,
 } from './env/guards';

@@ -1,0 +1,25 @@
+# ビルドコンテキストに入れないもの。
+#
+# ⚠️ **.env を必ず除く。** イメージに焼き込まれると、
+# イメージを取得できる人すべてが秘密情報を読めることになる。
+.env
+.env.*
+!.env.example
+
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/generated
+.media
+coverage
+**/test-results
+**/playwright-report
+
+# 文書は実行に要らない。イメージを小さくし、変更でビルドキャッシュを壊さない。
+docs
+*.md
+!README.md

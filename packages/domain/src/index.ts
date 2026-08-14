@@ -104,7 +104,13 @@ export {
   type WalletDeliveryStatus,
 } from './entitlement/claim-status';
 
-export type { ClaimRepositoryPort, ClaimLookupResult, ClaimConfirmOutcome } from './ports/claim';
+export type {
+  ClaimRepositoryPort,
+  ClaimLookupResult,
+  ClaimConfirmOutcome,
+  ClaimArtworkSnapshot,
+  ClaimDeliveryEnqueue,
+} from './ports/claim';
 
 export {
   evaluateReissue,
@@ -127,6 +133,64 @@ export {
   allocateSerialNumbers,
   type SupplyCounters,
 } from './supply/supply';
+
+export {
+  RETRY_BACKOFF_MINUTES,
+  RETRY_MAX_ATTEMPTS,
+  retryBackoffMinutes,
+  retryBackoffMs,
+} from './retry/backoff';
+
+export {
+  WALLET_DELIVERY_EVENT_TYPES,
+  SOURCE_SYSTEM_KEY,
+  TARGET_SITE_KEY,
+  WALLET_EVENT_VERSION,
+  BLOCKCHAIN_STATUS_NOT_MINTED,
+  ENTITLEMENT_TYPE_DIGITAL_COLLECTIBLE,
+  isContentHash,
+  formatSerialNumber,
+  isLongLivedImageUrl,
+  buildGrantedEvent,
+  buildRevokedEvent,
+  type WalletDeliveryEventType,
+  type WalletEventMetadata,
+  type WalletEventData,
+  type WalletGrantedEvent,
+  type WalletRevokedEvent,
+  type WalletDeliveryEvent,
+  type WalletEventEnvelopeInput,
+  type WalletGrantedEventInput,
+} from './wallet-delivery/event';
+
+export {
+  WALLET_DELIVERY_OUTBOX_STATUSES,
+  WALLET_DELIVERY_MAX_ATTEMPTS,
+  isRetryable,
+  errorCodeFor,
+  isSuccessStatus,
+  decideDelivery,
+  canManuallyResend,
+  type WalletDeliveryOutboxStatus,
+  type DeliveryAttemptOutcome,
+  type DeliveryDecision,
+  type DeliveryAttemptContext,
+} from './wallet-delivery/dispatch';
+
+export {
+  STALE_PROCESSING_MS,
+  sweepWalletDeliveries,
+  type WalletDeliveryDependencies,
+  type WalletDeliveryOutcome,
+} from './wallet-delivery/dispatcher';
+
+export type {
+  WalletDeliveryRecord,
+  WalletDeliveryEnqueueInput,
+  WalletDeliveryFailureInput,
+  WalletDeliveryOutboxPort,
+  WalletDeliverySenderPort,
+} from './ports/wallet-delivery';
 
 export {
   BACKOFF_MINUTES,

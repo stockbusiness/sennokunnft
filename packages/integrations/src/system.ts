@@ -47,6 +47,19 @@ export class SequentialIdGenerator implements IdGeneratorPort {
   }
 }
 
+/**
+ * 内容ハッシュ（`sha256:<hex>`）。
+ *
+ * 配送本文（`payload_hash`）と作品画像（`image_hash`）で**同じ形式**を使う。
+ * DB の CHECK 制約と `@sengoku/domain` の `isContentHash` も同じ規則で書いてある。
+ * 形式が 3 か所でずれると、保存はできるのに照合が通らない値ができる。
+ */
+export function contentHash(data: string | Uint8Array): string {
+  const hash = createHash('sha256');
+  hash.update(typeof data === 'string' ? Buffer.from(data, 'utf8') : data);
+  return `sha256:${hash.digest('hex')}`;
+}
+
 /** Claim トークンの乱数長（バイト）。総当たりを実用上不可能にする。 */
 const CLAIM_TOKEN_BYTES = 32;
 

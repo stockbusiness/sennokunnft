@@ -33,6 +33,7 @@ function artwork(overrides: Partial<Artwork> = {}): Artwork {
     title: '作品名',
     description: '説明',
     imageKey: 'images/sample.png',
+    imageHash: null,
     imageContentType: 'image/png',
     imageByteSize: 1024,
     maxSupply: 10,

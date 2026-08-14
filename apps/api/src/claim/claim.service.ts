@@ -8,8 +8,10 @@ import {
   type ClockPort,
   type PublicClaimStatus,
 } from '@sengoku/domain';
+import { currentRequestId } from '@sengoku/observability';
 import { DomainErrorException } from '../common/domain-error.filter';
 import type { IdempotencyService } from '../common/idempotency';
+import type { WalletDeliveryPlanner } from './delivery.planner';
 
 /** 冪等キーの区切り。他の操作と同じキーがぶつからないようにする。 */
 export const CLAIM_CONFIRM_SCOPE = 'collectible-claim-confirm';
@@ -41,6 +43,15 @@ export class ClaimService {
     private readonly tokens: ClaimTokenPort,
     private readonly clock: ClockPort,
     private readonly idempotency: IdempotencyService,
+    /**
+     * Wallet への配送。
+     *
+     * ⚠️ **`null` は「まだ Wallet へ繋がない」を意味する。**
+     * 繋がない構成では行列に載せない。載せておいて送らないと、
+     * 送信できない本文（相対パスの画像URL 等）の行が溜まり、
+     * 実接続の初日にまとめて失敗する。
+     */
+    private readonly delivery: WalletDeliveryPlanner | null = null,
   ) {}
 
   /**
@@ -169,11 +180,28 @@ export class ClaimService {
       return { status: decision.value.status };
     }
 
+    const now = this.clock.now();
+    // ⚠️ 本文の組み立ては確定の**前**に済ませる。
+    //    組み立てに失敗する材料（画像が無い等）で確定だけ通すと、
+    //    受取済みなのに配送されない行が残る。
+    const plan =
+      this.delivery === null
+        ? undefined
+        : this.delivery.plan({
+            entitlementId: found.entitlement.id,
+            commonUserId,
+            // Claim から配送まで同じ相関IDで追える（§17）。
+            correlationId: currentRequestId() ?? found.entitlement.id,
+            snapshot: found.snapshot,
+            now,
+          });
+
     const outcome = await this.claims.confirmClaim({
       entitlementId: found.entitlement.id,
       commonUserId,
       accountId: found.purchaserAccountId,
-      now: this.clock.now(),
+      now,
+      delivery: plan,
     });
 
     if (outcome.kind === 'raced') {
@@ -194,7 +222,7 @@ export class ClaimService {
       throw new DomainErrorException('CLAIM_PROCESSING');
     }
 
-    // 配送は本 PR では行わない（PR-NW04）。待ち行列へ載せたところまで。
+    // 送信そのものは配送ワーカーが行う。ここでは行列に載せたところまで。
     return { status: 'DELIVERY_PENDING' };
   }
 }

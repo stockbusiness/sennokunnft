@@ -1,3 +1,4 @@
+import { RETRY_MAX_ATTEMPTS, retryBackoffMinutes } from '../retry/backoff';
 import { domainError, type DomainError } from '../shared/errors';
 import { err, ok, type Result } from '../shared/result';
 
@@ -115,19 +116,17 @@ export type CommonUserFailureKind =
   | 'permanent';
 
 /** 再試行の上限。超えたら人手に回す。 */
-export const MAX_LINK_ATTEMPTS = 5;
+export const MAX_LINK_ATTEMPTS = RETRY_MAX_ATTEMPTS;
 
 /**
  * 再試行の間隔（分）。
  *
- * 指数的に伸ばすのは、相手が落ちているときに叩き続けて
- * 復旧を妨げないため。
+ * ⚠️ **千ノ国連携の共通バックオフをそのまま使う。**
+ * 相手も障害の性質も同じなので、連携ごとに別の間隔を持つと、
+ * 片方が復旧を待っているあいだにもう片方が叩き続ける。
  */
-const BACKOFF_MINUTES = [1, 5, 15, 60, 240] as const;
-
 export function backoffMinutes(attemptCount: number): number {
-  const index = Math.min(Math.max(attemptCount - 1, 0), BACKOFF_MINUTES.length - 1);
-  return BACKOFF_MINUTES[index] ?? 240;
+  return retryBackoffMinutes(attemptCount);
 }
 
 /** まだ解決していないアカウントの初期状態。 */

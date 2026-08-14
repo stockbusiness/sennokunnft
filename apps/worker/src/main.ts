@@ -2,6 +2,7 @@ import {
   assertCommonUserLinkingConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
+  assertWalletDeliveryConfig,
   loadEnv,
   UnsafeEnvironmentError,
   workerEnvSchema,
@@ -9,11 +10,17 @@ import {
 import {
   createPrismaClient,
   PrismaCommonUserLinkRepository,
+  PrismaWalletDeliveryOutboxRepository,
   type PrismaClient,
 } from '@sengoku/database';
-import { AgencyCommonUserDirectory, SystemClock } from '@sengoku/integrations';
+import {
+  AgencyCommonUserDirectory,
+  HttpWalletDeliverySender,
+  SystemClock,
+} from '@sengoku/integrations';
 import { createLogger } from '@sengoku/observability';
 import { createCommonUserLinkJob } from './common-user-job';
+import { createWalletDeliveryJob } from './wallet-delivery-job';
 import { WorkerRunner, type JobHandler } from './runner';
 
 /**
@@ -39,6 +46,10 @@ async function bootstrap(): Promise<void> {
     // 有効なのに接続先や鍵が無い状態で起動させない。
     // 起動すると全件が PENDING に積み上がるが、購入は続くので誰も気付かない。
     assertCommonUserLinkingConfig(env);
+    // 有効なのに宛先や鍵が無い状態で起動させない。
+    // 起動すると配送だけが全件失敗して溜まり、利用者の画面は
+    // 「お届け中」のままなので誰も異常に気づけない。
+    assertWalletDeliveryConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       logger.fatal({ reasons: error.reasons }, '環境設定が安全でないため起動を中止しました');
@@ -74,7 +85,33 @@ async function bootstrap(): Promise<void> {
     logger.info({ batchSize: env.COMMON_USER_LINK_BATCH_SIZE }, '共通顧客ID連携を有効化しました');
   }
 
-  // 発行ジョブ・Outbox 配信・期限切れ回収は Phase 5-6 で追加する。
+  // OVEW Wallet への配送。⚠️ 既定は無効（PR-NW04 §37）。
+  // フラグが立っていなければハンドラそのものを登録しない。
+  if (env.WALLET_DELIVERY_ENABLED) {
+    const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+    const clock = new SystemClock();
+    handlers.push(
+      createWalletDeliveryJob({
+        logger,
+        batchSize: env.WALLET_DELIVERY_BATCH_SIZE,
+        deps: {
+          outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
+          sender: new HttpWalletDeliverySender({
+            // 上のガードで存在を確認済み。
+            endpoint: env.WALLET_DELIVERY_ENDPOINT ?? '',
+            keyId: env.WALLET_DELIVERY_KEY_ID ?? '',
+            secret: env.WALLET_DELIVERY_SECRET ?? '',
+            clock,
+            timeoutMs: env.WALLET_DELIVERY_TIMEOUT_MS,
+          }),
+          clock,
+        },
+      }),
+    );
+    logger.info({ batchSize: env.WALLET_DELIVERY_BATCH_SIZE }, 'Wallet 配送を有効化しました');
+  }
+
+  // 発行ジョブ・期限切れ回収は Phase 5-6 で追加する。
 
   const runner = new WorkerRunner({
     handlers,

@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import {
   apiEnvSchema,
   assertClaimApiConfig,
+  assertWalletDeliveryConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
@@ -29,6 +30,7 @@ import {
   SenNoKuniHmacVerifier,
   Sha256ClaimTokenService,
   SystemClock,
+  contentHash,
   UuidGenerator,
   generateStorageKey,
 } from '@sengoku/integrations';
@@ -63,6 +65,10 @@ async function bootstrap(): Promise<void> {
     // ⚠️ 有効なのに鍵が無ければ起動しない。
     //    起動させると相手の要求が全部 403 で落ち、攻撃と設定漏れの区別がつかない。
     assertClaimApiConfig(env);
+    // ⚠️ 配送が有効なのに宛先や鍵が無ければ起動しない。
+    //    起動させると受取は成立し続け、配送だけが全件溜まる。
+    //    利用者の画面は「お届け中」のままなので、誰も異常に気づけない。
+    assertWalletDeliveryConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       // 理由は変数名と説明のみで、値を含まない。
@@ -127,6 +133,7 @@ async function bootstrap(): Promise<void> {
       storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
       audit: new PrismaAuditLogRepository(prisma),
       generateStorageKey,
+      hashContent: contentHash,
       claim: {
         enabled: env.CLAIM_API_ENABLED,
         claims: new PrismaClaimRepository(prisma),
@@ -139,6 +146,8 @@ async function bootstrap(): Promise<void> {
         getPerMinute: env.CLAIM_RATE_LIMIT_GET_PER_MIN,
         postPerMinute: env.CLAIM_RATE_LIMIT_POST_PER_MIN,
         claimBaseUrl: env.CLAIM_BASE_URL.replace(/\/+$/, ''),
+        // ⚠️ 既定は無効。画像の長期URL（Cloudflare R2）が整うまで有効にしない。
+        deliveryEnabled: env.WALLET_DELIVERY_ENABLED,
       },
     }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。
