@@ -16,7 +16,15 @@ kill_timeout = "30s"
   dockerfile = "Dockerfile"
 
 [env]
-  APP_ENV = "production"
+  # ⚠️ **段階1〜2 は `staging`。`production` にしない。**
+  #    `assertProductionSafety` は APP_ENV=production のとき
+  #    AUTH_PROVIDER=dev を拒否する。候補は現状 dev しか無いので、
+  #    ここを production にすると**起動せずに終了する**。
+  #
+  #    `production` へ切り替えるのは、UD-801（JWT の検証方式）を
+  #    解決して一般公開する時点。順序はこの仕組みで守られている。
+  APP_ENV = "staging"
+  # Node の最適化のためのもので、APP_ENV とは別物。こちらは production でよい。
   NODE_ENV = "production"
   LOG_LEVEL = "info"
   API_PORT = "8080"

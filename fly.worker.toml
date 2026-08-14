@@ -19,7 +19,11 @@ kill_timeout = "60s"
   dockerfile = "Dockerfile"
 
 [env]
-  APP_ENV = "production"
+  # ⚠️ api と必ずそろえる（段階1〜2 は staging）。
+  #    片方だけ production にすると、同じ DB を見ているのに
+  #    起動できる側とできない側ができ、原因の切り分けに時間を使う。
+  APP_ENV = "staging"
+  # Node の最適化のためのもので、APP_ENV とは別物。こちらは production でよい。
   NODE_ENV = "production"
   LOG_LEVEL = "info"
   WORKER_POLL_INTERVAL_MS = "5000"
