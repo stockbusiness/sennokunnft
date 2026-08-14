@@ -373,18 +373,56 @@ RETURNING *;
 
 ---
 
+### 3.13 `idempotency_keys` — 冪等キーの占有
+
+✅ **事実:** 保存先はプロセス内メモリではなく DB。
+メモリだと台数を増やした瞬間に効かなくなり、しかもその事実が外からは見えない。
+
+| 列                 | 型          | 制約                                   | 説明                                     |
+| ------------------ | ----------- | -------------------------------------- | ---------------------------------------- |
+| `id`               | UUID        | PK                                     |                                          |
+| `actor_account_id` | UUID        | NOT NULL, FK → `accounts.id` (CASCADE) | **アクターごとに区切る**（下記）         |
+| `key`              | TEXT        | NOT NULL                               | クライアント指定の `Idempotency-Key`     |
+| `request_digest`   | TEXT        | NOT NULL                               | 内容のハッシュ。**値そのものは持たない** |
+| `status`           | TEXT        | NOT NULL, CHECK                        | `in_progress` / `completed`              |
+| `status_code`      | INTEGER     | NULL                                   | `completed` のときのみ                   |
+| `response_body`    | JSONB       | NULL                                   | `completed` のときのみ                   |
+| `created_at`       | TIMESTAMPTZ | NOT NULL                               | 呼び出し側の時計から入れる（下記）       |
+| `completed_at`     | TIMESTAMPTZ | NULL                                   |                                          |
+| `expires_at`       | TIMESTAMPTZ | NOT NULL                               | 既定 24 時間。過ぎたキーは未使用扱い     |
+
+- UNIQUE `(actor_account_id, key)` … **占有はこの制約が決める**
+- INDEX `(expires_at)`
+- CHECK `idempotency_keys_status_known` … 状態は 2 値のみ
+- CHECK `idempotency_keys_completed_has_response` … `completed` なら応答が揃っていること
+- CHECK `idempotency_keys_expires_after_creation` … 期限は作成時より後
+
+⚠️ **アクターごとに区切る理由:** 区切らないと、他人が使ったキーを当てることで
+その応答（＝他人のデータ）を読み出せてしまう。
+
+⚠️ **`created_at` を DB の `now()` 既定に任せない理由:** `expires_at` は
+呼び出し側の時計から作られる。`created_at` を DB の時計にすると、
+別々の時計で書かれた 2 つの時刻が同じ行に並び、
+両者を比べる CHECK が意味のない比較になる。
+
+---
+
 ## 4. 冪等性を担保する制約の一覧
 
-| #   | 制約                                                    | 防ぐ事故                                 |
-| --- | ------------------------------------------------------- | ---------------------------------------- |
-| 1   | `webhook_events UNIQUE(provider, event_id)`             | 同一Webhookの二重処理                    |
-| 2   | `orders UNIQUE(account_id, idempotency_key)`            | 二重注文                                 |
-| 3   | `entitlements UNIQUE(artwork_id, serial_no)`            | シリアル重複発行                         |
-| 4   | `mint_jobs UNIQUE(entitlement_id)`                      | 1受取権に対する複数ジョブ                |
-| 5   | `mint_jobs UNIQUE(idempotency_key)`                     | 外部への重複依頼                         |
-| 6   | `nft_tokens UNIQUE(entitlement_id)`                     | **1受取権からの複数Mint**（✅ 必須要件） |
-| 7   | `nft_tokens UNIQUE(chain_ref, contract_ref, token_ref)` | 同一トークンの二重登録                   |
-| 8   | `artworks CHECK(reserved + issued <= max_supply)`       | オーバーセル                             |
+| #   | 制約                                                     | 防ぐ事故                                 |
+| --- | -------------------------------------------------------- | ---------------------------------------- |
+| 1   | `webhook_events UNIQUE(provider, event_id)`              | 同一Webhookの二重処理                    |
+| 2   | `orders UNIQUE(account_id, idempotency_key)`             | 二重注文                                 |
+| 3   | `entitlements UNIQUE(artwork_id, serial_no)`             | シリアル重複発行                         |
+| 4   | `mint_jobs UNIQUE(entitlement_id)`                       | 1受取権に対する複数ジョブ                |
+| 5   | `mint_jobs UNIQUE(idempotency_key)`                      | 外部への重複依頼                         |
+| 6   | `nft_tokens UNIQUE(entitlement_id)`                      | **1受取権からの複数Mint**（✅ 必須要件） |
+| 7   | `nft_tokens UNIQUE(chain_ref, contract_ref, token_ref)`  | 同一トークンの二重登録                   |
+| 8   | `artworks CHECK(reserved + issued <= max_supply)`        | オーバーセル                             |
+| 9   | `idempotency_keys UNIQUE(actor_account_id, key)`         | 同一操作の二重実行（占有はこれが決める） |
+| 10  | `listings 部分UNIQUE(artwork_id) WHERE 有効`             | 同一作品に有効な出品が複数               |
+| 11  | トリガ `listings_require_published_artwork`              | 非公開作品への出品作成                   |
+| 12  | トリガ `artworks_no_effective_listings_when_unpublished` | **非公開なのに販売中の出品が残る**       |
 
 ✅ **事実:** 「1つの受取権から複数Mintできない設計」は **#4 と #6 の UNIQUE 制約**で
 物理的に担保される。アプリのロジックだけに依存しない。

@@ -6,6 +6,7 @@ import {
   ARTWORK_TITLE_MAX,
   activateListing,
   archiveArtwork,
+  archiveArtworkAndEndListings,
   artworkStateMachine,
   endListing,
   createArtworkDraft,
@@ -562,5 +563,58 @@ describe('販売終了の表示（利用者に「終わった」と伝える）'
     expect(
       resolveDisplayState({ listing: listing({ status: 'draft' }), artwork: artwork(), now: NOW }),
     ).toBe('not_available');
+  });
+});
+
+describe('非公開化と出品の終了（非公開なのに販売中、を作らない）', () => {
+  it('有効な出品（active / scheduled）をすべて終了させる', () => {
+    const result = archiveArtworkAndEndListings(artwork(), [
+      listing({ id: 'l-active', status: 'active' }),
+      listing({ id: 'l-scheduled', status: 'scheduled', startsAt: NOW }),
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.artwork.status).toBe('archived');
+    expect(result.value.endedListings.map((item) => item.id)).toEqual(['l-active', 'l-scheduled']);
+    expect(result.value.endedListings.every((item) => item.status === 'ended')).toBe(true);
+  });
+
+  it('下書き・停止中・終了済みの出品は書き換えない', () => {
+    // 有効でない出品まで ended にすると、下書きに戻せなくなる。
+    const result = archiveArtworkAndEndListings(artwork(), [
+      listing({ id: 'l-draft', status: 'draft' }),
+      listing({ id: 'l-suspended', status: 'suspended' }),
+      listing({ id: 'l-ended', status: 'ended' }),
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.endedListings).toEqual([]);
+  });
+
+  it('別の作品の出品が混ざっていたら拒否する', () => {
+    // 巻き込みで他作品の販売を止めるのは取り返しがつきにくい。
+    const result = archiveArtworkAndEndListings(artwork({ id: 'artwork-1' }), [
+      listing({ id: 'l-other', artworkId: 'artwork-2', status: 'active' }),
+    ]);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('非公開にできない状態なら、出品も書き換えない', () => {
+    // 作品の遷移が失敗したのに出品だけ終了していたら、それこそ不整合になる。
+    // すでに archived の作品は archived へ遷移できない（遷移表どおり）。
+    const result = archiveArtworkAndEndListings(artwork({ status: 'archived' }), [
+      listing({ status: 'active' }),
+    ]);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('下書きの作品も非公開にできる（遷移表どおり）', () => {
+    // draft -> archived は許されている。公開しないまま取り下げる経路。
+    const result = archiveArtworkAndEndListings(artwork({ status: 'draft' }), []);
+    expect(result.ok).toBe(true);
   });
 });

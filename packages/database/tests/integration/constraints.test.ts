@@ -415,3 +415,95 @@ suite('作品の画像メタデータ', () => {
     ).rejects.toSatisfy((error) => violatesConstraint(error, 'artworks_image_size_positive'));
   });
 });
+
+suite('非公開化と出品（不変条件を両方向から守る）', () => {
+  type SeedStatus = 'draft' | 'scheduled' | 'active' | 'suspended' | 'ended';
+
+  async function seedListing(artworkId: string, status: SeedStatus): Promise<string> {
+    const id = randomUUID();
+    await prisma.listing.create({
+      data: {
+        id,
+        artworkId,
+        priceAmount: 12000,
+        priceCurrency: 'JPY',
+        status,
+        // scheduled は開始日時が必須（CHECK listings_scheduled_requires_start）。
+        ...(status === 'scheduled' ? { startsAt: new Date('2026-09-01T00:00:00.000Z') } : {}),
+      },
+    });
+    return id;
+  }
+
+  it('有効な出品が残ったまま作品を非公開にできない', async () => {
+    // これが Phase 2 で開いていた穴。出品側のトリガだけでは
+    // 「作る」ことしか防げず、「残る」ことを防げていなかった。
+    const artworkId = await seedArtwork({ status: 'published' });
+    await seedListing(artworkId, 'active');
+
+    await expect(
+      prisma.artwork.update({ where: { id: artworkId }, data: { status: 'archived' } }),
+    ).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'artworks_no_effective_listings_when_unpublished'),
+    );
+  });
+
+  it('販売予定（scheduled）でも同じく拒否する', async () => {
+    const artworkId = await seedArtwork({ status: 'published' });
+    await seedListing(artworkId, 'scheduled');
+
+    await expect(
+      prisma.artwork.update({ where: { id: artworkId }, data: { status: 'archived' } }),
+    ).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'artworks_no_effective_listings_when_unpublished'),
+    );
+  });
+
+  it('出品を終了してから非公開にすれば通る', async () => {
+    const artworkId = await seedArtwork({ status: 'published' });
+    const listingId = await seedListing(artworkId, 'active');
+
+    await prisma.$transaction(async (tx) => {
+      await tx.listing.update({ where: { id: listingId }, data: { status: 'ended' } });
+      await tx.artwork.update({ where: { id: artworkId }, data: { status: 'archived' } });
+    });
+
+    const artwork = await prisma.artwork.findUniqueOrThrow({ where: { id: artworkId } });
+    const listing = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
+    expect(artwork.status).toBe('archived');
+    expect(listing.status).toBe('ended');
+  });
+
+  it('順序を逆にすると（作品を先に非公開）トランザクションごと失敗する', async () => {
+    // 片方だけ適用されて終わらないことを確かめる。
+    const artworkId = await seedArtwork({ status: 'published' });
+    const listingId = await seedListing(artworkId, 'active');
+
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await tx.artwork.update({ where: { id: artworkId }, data: { status: 'archived' } });
+        await tx.listing.update({ where: { id: listingId }, data: { status: 'ended' } });
+      }),
+    ).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'artworks_no_effective_listings_when_unpublished'),
+    );
+
+    // 巻き戻っていること。作品も出品も元のまま。
+    const artwork = await prisma.artwork.findUniqueOrThrow({ where: { id: artworkId } });
+    const listing = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
+    expect(artwork.status).toBe('published');
+    expect(listing.status).toBe('active');
+  });
+
+  it('下書き・終了済みの出品しかなければ、そのまま非公開にできる', async () => {
+    const artworkId = await seedArtwork({ status: 'published' });
+    await seedListing(artworkId, 'draft');
+    await seedListing(artworkId, 'ended');
+
+    const updated = await prisma.artwork.update({
+      where: { id: artworkId },
+      data: { status: 'archived' },
+    });
+    expect(updated.status).toBe('archived');
+  });
+});

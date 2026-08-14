@@ -709,3 +709,79 @@ describe('冪等キー（API_DESIGN §3）', () => {
     expect(other.body.slug).toBe('other-art');
   });
 });
+
+describe('管理API 作品の非公開化（販売中の出品を残さない）', () => {
+  it('非公開にすると、有効な出品も終了する', async () => {
+    // 「非公開なのに販売中の出品がある」状態を運用手順で埋めない。
+    harness.artworks.seed(sampleArtwork({ id: 'a-arch', status: 'published' }));
+    harness.listings.seed(sampleListing({ id: 'l-active', artworkId: 'a-arch', status: 'active' }));
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks/a-arch/archive')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .expect(200);
+
+    const listing = await harness.listings.findById('l-active');
+    expect(listing?.status).toBe('ended');
+  });
+
+  it('下書きの出品は書き換えない', async () => {
+    harness.artworks.seed(sampleArtwork({ id: 'a-arch2', status: 'published' }));
+    harness.listings.seed(sampleListing({ id: 'l-draft', artworkId: 'a-arch2', status: 'draft' }));
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks/a-arch2/archive')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .expect(200);
+
+    const listing = await harness.listings.findById('l-draft');
+    expect(listing?.status).toBe('draft');
+  });
+
+  it('巻き込みで終了した出品を監査ログに残す', async () => {
+    // 「知らないうちに販売が止まっていた」を後から追えるようにする。
+    harness.artworks.seed(sampleArtwork({ id: 'a-arch3', status: 'published' }));
+    harness.listings.seed(sampleListing({ id: 'l-a3', artworkId: 'a-arch3', status: 'active' }));
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks/a-arch3/archive')
+      .set('Authorization', `Bearer ${actorToken('operator')}`)
+      .expect(200);
+
+    const entry = harness.audit.entries.find((item) => item.action === 'artwork.archive');
+    expect(entry?.summary).toMatchObject({ endedListingIds: ['l-a3'] });
+  });
+});
+
+describe('冪等キーと失敗（失敗したキーを塞いだままにしない）', () => {
+  it('失敗した操作の冪等キーは、原因を直せば再利用できる', async () => {
+    // 一度失敗しただけのキーが期限切れまで塞がると、
+    // 利用者は同じ操作をやり直せなくなる。
+    harness.artworks.seed(sampleArtwork({ id: 'a-retry', status: 'draft' }));
+    harness.listings.seed(sampleListing({ id: 'l-retry', artworkId: 'a-retry', status: 'draft' }));
+    const token = actorToken('operator');
+    const key = '01J8Z7Q4RETRYXXXXXXXXXXXXX';
+
+    // 未公開なので失敗する。
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/listings/l-retry/activate')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .expect(409);
+
+    // 原因を直す。
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/artworks/a-retry/publish')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // 同じキーでやり直せる（前回の失敗が再生されない）。
+    const retry = await request(app.getHttpServer())
+      .post('/api/v1/admin/listings/l-retry/activate')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', key)
+      .expect(200);
+
+    expect(retry.body.status).toBe('active');
+  });
+});

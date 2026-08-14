@@ -265,13 +265,28 @@ export class AdminCatalogController {
     const actorId = requireActorId(actor);
     const digest = this.idempotency.digest(scope, payload);
 
-    const existing = this.idempotency.lookup(actorId, key, digest);
-    if (existing !== null) {
-      return existing.body as T;
+    const outcome = await this.idempotency.begin<T>(actorId, key, digest);
+    if (outcome.kind === 'replay') {
+      return outcome.body;
     }
 
-    const result = await execute();
-    this.idempotency.remember(actorId, key, digest, 200, result);
+    let result: T;
+    try {
+      result = await execute();
+    } catch (error) {
+      // ⚠️ **本体が失敗したときだけ解放する。**
+      //    解放しないと、一度失敗しただけのキーが期限切れまで塞がり、
+      //    利用者が同じ操作をやり直せなくなる。
+      //    解放そのものに失敗しても、元の失敗を握りつぶさない。
+      await outcome.claim.release().catch(() => undefined);
+      throw error;
+    }
+
+    // ⚠️ **ここで失敗しても解放しない。**
+    //    本体は既に成功している。解放すると、やり直しで本体がもう一度走る。
+    //    塞がったままなら「やり直せない」で済むが、解放すると「二重に実行される」。
+    //    取り返しのつかない操作（注文・決済）では、後者のほうが重い。
+    await outcome.claim.complete(200, result);
     return result;
   }
 }

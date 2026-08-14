@@ -15,6 +15,7 @@ import {
   PrismaArtworkRepository,
   PrismaAuditLogRepository,
   PrismaListingRepository,
+  PrismaIdempotencyStore,
   type PrismaClient,
 } from '@sengoku/database';
 import {
@@ -94,6 +95,8 @@ async function bootstrap(): Promise<void> {
       artworks: new PrismaArtworkRepository(prisma),
       listings: new PrismaListingRepository(prisma),
       accounts: new PrismaAccountRepository(prisma),
+      // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
+      idempotency: new PrismaIdempotencyStore(prisma),
       tokenVerifier,
       clock: new SystemClock(),
       ids: new UuidGenerator(),
