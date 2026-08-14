@@ -1,11 +1,19 @@
 import {
+  assertCommonUserLinkingConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
   UnsafeEnvironmentError,
   workerEnvSchema,
 } from '@sengoku/config';
+import {
+  createPrismaClient,
+  PrismaCommonUserLinkRepository,
+  type PrismaClient,
+} from '@sengoku/database';
+import { AgencyCommonUserDirectory, SystemClock } from '@sengoku/integrations';
 import { createLogger } from '@sengoku/observability';
+import { createCommonUserLinkJob } from './common-user-job';
 import { WorkerRunner, type JobHandler } from './runner';
 
 /**
@@ -28,6 +36,9 @@ async function bootstrap(): Promise<void> {
   try {
     assertPhaseOneIntegrationLimits(env);
     assertProductionSafety(env);
+    // 有効なのに接続先や鍵が無い状態で起動させない。
+    // 起動すると全件が PENDING に積み上がるが、購入は続くので誰も気付かない。
+    assertCommonUserLinkingConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       logger.fatal({ reasons: error.reasons }, '環境設定が安全でないため起動を中止しました');
@@ -36,10 +47,34 @@ async function bootstrap(): Promise<void> {
     throw error;
   }
 
-  // Phase 1 ではジョブハンドラを登録しない。
-  // 実際の処理（発行ジョブ・Outbox 配信・期限切れ回収）は Phase 5-6 で追加する。
-  // ここで空のまま起動できることが、器としての最小要件。
   const handlers: JobHandler[] = [];
+
+  // 共通顧客IDの解決。⚠️ 既定は無効（指示書 §16）。
+  // フラグが立っていなければ、ハンドラそのものを登録しない。
+  // 「登録はするが中で何もしない」にすると、無効なのに毎回 DB を引く。
+  if (env.COMMON_USER_LINKING_ENABLED) {
+    const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+    handlers.push(
+      createCommonUserLinkJob({
+        logger,
+        batchSize: env.COMMON_USER_LINK_BATCH_SIZE,
+        deps: {
+          links: new PrismaCommonUserLinkRepository(prisma),
+          directory: new AgencyCommonUserDirectory({
+            // 上のガードで存在を確認済み。
+            baseUrl: env.COMMON_USER_API_BASE_URL ?? '',
+            apiKey: env.COMMON_USER_API_KEY ?? '',
+            systemKey: env.COMMON_USER_SYSTEM_KEY,
+          }),
+          clock: new SystemClock(),
+          systemKey: env.COMMON_USER_SYSTEM_KEY,
+        },
+      }),
+    );
+    logger.info({ batchSize: env.COMMON_USER_LINK_BATCH_SIZE }, '共通顧客ID連携を有効化しました');
+  }
+
+  // 発行ジョブ・Outbox 配信・期限切れ回収は Phase 5-6 で追加する。
 
   const runner = new WorkerRunner({
     handlers,

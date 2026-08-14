@@ -46,6 +46,22 @@ model Account {
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
   role         AccountRole   @default(buyer)
   status       AccountStatus @default(active)
+
+  /// 共通顧客ID。**発行元は代理店システムのみ**で、本システムは受け取るだけ。
+  /// ⚠️ 主キーにしない。外部が発行した値を主キーにすると、
+  /// 相手の都合で自分のデータが壊れる。人物識別は accounts.id のまま。
+  /// ⚠️ UNIQUE にしない。同一人物が別の認証手段で 2 アカウントを持つと、
+  /// どちらも同じ common_user_id へ解決されうる。UNIQUE にすると
+  /// 「正しい解決」が保存できずに落ちる。
+  commonUserId        String?   @map("common_user_id")
+  commonUserStatus    String    @default("UNRESOLVED") @map("common_user_status")
+  commonUserLinkedAt  DateTime? @map("common_user_linked_at") @db.Timestamptz(6)
+  /// 失敗の理由。⚠️ 応答本文をそのまま入れない（個人情報が混ざりうる）。
+  commonUserLastError String?   @map("common_user_last_error")
+  /// 再試行の状態。指示書は 4 列だが、バックオフには回数と次回時刻が要る。
+  commonUserAttemptCount  Int       @default(0) @map("common_user_attempt_count")
+  commonUserNextAttemptAt DateTime? @map("common_user_next_attempt_at") @db.Timestamptz(6)
+
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -55,6 +71,8 @@ model Account {
   auditLogs            AuditLog[]
 
   @@unique([authProvider, authSubject])
+  @@index([commonUserStatus, commonUserNextAttemptAt])
+  @@index([commonUserId])
   @@map("accounts")
 }
 

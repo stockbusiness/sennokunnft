@@ -36,6 +36,12 @@ export {
 export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';
 
 export {
+  AgencyCommonUserDirectory,
+  FakeCommonUserDirectory,
+  type AgencyCommonUserOptions,
+} from './agency-common-user';
+
+export {
   canonicalString,
   signRequest,
   SenNoKuniHmacVerifier,
