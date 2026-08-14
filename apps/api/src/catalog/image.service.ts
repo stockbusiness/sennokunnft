@@ -9,6 +9,7 @@ import {
   type StoragePort,
   type AuditLogPort,
 } from '@sengoku/domain';
+import type { ContentHasher } from '../common/content-hash';
 import { DomainErrorException } from '../common/domain-error.filter';
 
 /** 保存キーの生成。実装は `@sengoku/integrations`（CSPRNG を使う）。 */
@@ -35,6 +36,7 @@ export class ArtworkImageService {
     private readonly storage: StoragePort,
     private readonly generateKey: StorageKeyFactory,
     private readonly audit: AuditLogPort,
+    private readonly hashContent: ContentHasher,
   ) {}
 
   async upload(input: {
@@ -68,6 +70,10 @@ export class ArtworkImageService {
       imageKey: stored.key,
       imageContentType: stored.contentType,
       imageByteSize: stored.byteSize,
+      // Wallet へ渡す表示情報の同一性確認に使う（PR-NW04 §23）。
+      // 保存と同時に計算する。あとで走査して埋める方式にすると、
+      // 埋まっていない作品が売れてしまう。
+      imageHash: this.hashContent(input.bytes),
     });
 
     await this.audit.record({

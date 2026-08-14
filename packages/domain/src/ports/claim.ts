@@ -1,5 +1,24 @@
 import type { ReissuableEntitlement } from '../entitlement/reissue';
 import type { WalletClaimableEntitlement } from '../entitlement/wallet-claim';
+import type { WalletDeliveryEventType } from '../wallet-delivery/event';
+
+/**
+ * Wallet へ送る表示情報の材料（§24）。
+ *
+ * ⚠️ **受取を確定する時点で読み、そのまま本文へ固める。**
+ * 配送のたびにマスタを読み直すと、あとから作品名や画像を差し替えたときに
+ * 既に渡した Holding の表示が黙って別物になる。
+ */
+export interface ClaimArtworkSnapshot {
+  readonly orderId: string;
+  readonly orderLineId: string;
+  readonly artworkId: string;
+  readonly serialNo: number;
+  readonly artworkTitle: string;
+  readonly artworkDescription: string;
+  readonly imageKey: string | null;
+  readonly imageHash: string | null;
+}
 
 /** Claim の照会結果。作品名は `GET` の応答に必要なので一緒に取る。 */
 export interface ClaimLookupResult {
@@ -7,6 +26,24 @@ export interface ClaimLookupResult {
   /** 購入者のアカウントID。受取を確定するときに記録する。 */
   readonly purchaserAccountId: string;
   readonly cardName: string;
+  readonly snapshot: ClaimArtworkSnapshot;
+}
+
+/**
+ * 受取確定と同時に作る配送待ち行列の中身。
+ *
+ * ⚠️ **これを別呼び出しにしない。**
+ * 受取を確定してから行列へ入れると、そのあいだに落ちたときに
+ * 「受け取ったのに Wallet へ永遠に届かない」行が、誰にも気づかれず残る。
+ */
+export interface ClaimDeliveryEnqueue {
+  readonly eventId: string;
+  readonly eventType: WalletDeliveryEventType;
+  readonly targetSiteKey: string;
+  /** 送信本文の JSON テキストそのもの。署名対象と同一。 */
+  readonly payload: string;
+  readonly payloadHash: string;
+  readonly correlationId: string;
 }
 
 /** 受取確定の結果。 */
@@ -38,12 +75,20 @@ export interface ClaimRepositoryPort {
    */
   findByTokenHash(claimTokenHash: string): Promise<ClaimLookupResult | null>;
 
-  /** 受取を確定する。確定できたのが自分かどうかを返す。 */
+  /**
+   * 受取を確定する。確定できたのが自分かどうかを返す。
+   *
+   * ⚠️ **`delivery` を渡したときは、確定と行列への追加を同一トランザクションで行う。**
+   * 片方だけ成立する経路があると、受取済みなのに配送されない行、
+   * あるいは受け取っていないのに配送される行ができる。
+   */
   confirmClaim(input: {
     readonly entitlementId: string;
     readonly commonUserId: string;
     readonly accountId: string;
     readonly now: Date;
+    /** 配送が有効なときだけ渡す。 */
+    readonly delivery?: ClaimDeliveryEnqueue | undefined;
   }): Promise<ClaimConfirmOutcome>;
 
   /** 再発行の判定に必要な情報を、受取権IDから引く。 */

@@ -17,6 +17,7 @@ export function toArtwork(row: ArtworkRow): Artwork {
     imageKey: row.imageKey,
     imageContentType: row.imageContentType,
     imageByteSize: row.imageByteSize,
+    imageHash: row.imageHash,
     maxSupply: row.maxSupply,
     reservedCount: row.reservedCount,
     issuedCount: row.issuedCount,

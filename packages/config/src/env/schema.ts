@@ -112,6 +112,28 @@ const apiEnvObject = baseEnvObject.extend({
    */
   CLAIM_RATE_LIMIT_GET_PER_MIN: integerFromEnv(1, 1_000_000, 3000),
   CLAIM_RATE_LIMIT_POST_PER_MIN: integerFromEnv(1, 1_000_000, 300),
+
+  /**
+   * OVEW Wallet への配送（PR-NW04）。
+   *
+   * ⚠️ **Claim API とは別のフラグ。**
+   * Claim は受け取りの記録まで、配送は Wallet へ届けるところまで。
+   * 有効にすると受取確定と同時に配送本文が組み立てられ、
+   * 組み立てられない作品（長期URLの画像が無い等）は**受取が失敗する**。
+   * 画像の長期URL（Cloudflare R2）が整うまでは無効のままにする。
+   */
+  WALLET_DELIVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** 送信先。`https://` の完全な URL。 */
+  WALLET_DELIVERY_ENDPOINT: z.url().optional(),
+  /** 署名に使う鍵ID。相手が発行する。 */
+  WALLET_DELIVERY_KEY_ID: z.string().min(1).optional(),
+  /** ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけを書く。 */
+  WALLET_DELIVERY_SECRET: z.string().min(8).optional(),
+  /** 応答を待つ上限。待ち続けると配送ワーカーが詰まる。 */
+  WALLET_DELIVERY_TIMEOUT_MS: integerFromEnv(1000, 60_000, 10_000),
 });
 
 const workerEnvObject = baseEnvObject.extend({
@@ -142,6 +164,45 @@ const workerEnvObject = baseEnvObject.extend({
    * 復旧しかけた相手をもう一度落とす。
    */
   COMMON_USER_LINK_BATCH_SIZE: integerFromEnv(1, 500, 25),
+
+  /**
+   * OVEW Wallet への配送（PR-NW04）。
+   *
+   * ⚠️ **Claim API とは別のフラグ。**
+   * Claim は受け取りの記録まで、配送は Wallet へ届けるところまで。
+   * 有効にすると受取確定と同時に配送本文が組み立てられ、
+   * 組み立てられない作品（長期URLの画像が無い等）は**受取が失敗する**。
+   * 画像の長期URL（Cloudflare R2）が整うまでは無効のままにする。
+   */
+  WALLET_DELIVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** 送信先。`https://` の完全な URL。 */
+  WALLET_DELIVERY_ENDPOINT: z.url().optional(),
+  /** 署名に使う鍵ID。相手が発行する。 */
+  WALLET_DELIVERY_KEY_ID: z.string().min(1).optional(),
+  /** ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけを書く。 */
+  WALLET_DELIVERY_SECRET: z.string().min(8).optional(),
+  /** 応答を待つ上限。待ち続けると配送ワーカーが詰まる。 */
+  WALLET_DELIVERY_TIMEOUT_MS: integerFromEnv(1000, 60_000, 10_000),
+  /** 1 巡で送る件数の上限。相手の復旧直後に全件を叩きつけない。 */
+  WALLET_DELIVERY_BATCH_SIZE: integerFromEnv(1, 500, 20),
+
+  /** 受取ページの前置き。Fixture が出力する Claim URL に使う。 */
+  CLAIM_BASE_URL: z.url().default('http://localhost:3000/claims'),
+
+  /**
+   * staging 動作確認用の Fixture を許可するか（PR-NW04 §9）。
+   *
+   * ⚠️ **これだけでは足りない。** `NODE_ENV != production` と**両方**を
+   * 満たしたときにのみ実行できる。フラグ 1 本にすると、
+   * 本番の環境変数へ 1 行足しただけで本番DBに偽の受取権が作れてしまう。
+   */
+  ENABLE_STAGING_FIXTURES: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 
   MINT_PROVIDER: z.enum(['fake']).default('fake'),
 });

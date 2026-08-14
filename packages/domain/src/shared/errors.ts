@@ -34,6 +34,13 @@ export const DOMAIN_ERROR_CODES = [
   'COMMON_USER_ID_INVALID',
   'COMMON_USER_PENDING',
   'COMMON_USER_MISMATCH',
+  /**
+   * Wallet へ送るイベントを組み立てられなかった。
+   *
+   * ⚠️ これは**外へ返す符号ではない**。相手へ送る前に落ちているので、
+   * 利用者への応答ではなく運用ログとアラートへ出す。
+   */
+  'WALLET_EVENT_INVALID',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

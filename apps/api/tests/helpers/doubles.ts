@@ -15,7 +15,7 @@ import type {
   Page,
   PageQuery,
 } from '@sengoku/domain';
-import { InMemoryStorage } from '@sengoku/integrations';
+import { contentHash, InMemoryStorage } from '@sengoku/integrations';
 import type { AppDependencies } from '../../src/app.module';
 
 /**
@@ -322,6 +322,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     // テストでは決定論的なキーにする。実装は CSPRNG を使う。
     generateStorageKey: (prefix, extension) =>
       `${prefix}/test/${String(keyCounter++)}.${extension}`,
+    hashContent: contentHash,
   };
 }
 
@@ -336,6 +337,7 @@ export function sampleArtwork(overrides: Partial<Artwork> = {}): Artwork {
     imageKey: 'images/sample.png',
     imageContentType: 'image/png',
     imageByteSize: 2048,
+    imageHash: `sha256:${'a'.repeat(64)}`,
     maxSupply: 10,
     reservedCount: 0,
     issuedCount: 0,

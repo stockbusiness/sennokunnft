@@ -20,7 +20,14 @@ export {
   SequentialIdGenerator,
   Sha256ClaimTokenService,
   HmacIdempotencyKeyService,
+  contentHash,
 } from './system';
+
+export {
+  HttpWalletDeliverySender,
+  WALLET_DELIVERY_HEADERS,
+  type WalletDeliverySenderOptions,
+} from './wallet-delivery-sender';
 
 export { FakeMintingAdapter } from './fake-minting';
 

@@ -43,6 +43,10 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // まだ解決していないだけで、失敗ではない。受取権は失効させない。
   COMMON_USER_PENDING: HttpStatus.ACCEPTED,
   COMMON_USER_MISMATCH: HttpStatus.CONFLICT,
+  // ⚠️ 外へ返す想定が無い符号。Wallet へ送る本文を組み立てられなかった
+  //    ときにだけ立ち、運用ログとアラートで扱う。万一 HTTP へ漏れたときに
+  //    利用者の入力のせいに見せないよう 5xx 側へ置く。
+  WALLET_EVENT_INVALID: HttpStatus.INTERNAL_SERVER_ERROR,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -75,6 +79,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   COMMON_USER_ID_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
   COMMON_USER_PENDING: 'お客様情報の確認中です。しばらくしてからお試しください。',
   COMMON_USER_MISMATCH: 'この受取りは、ご購入されたご本人のアカウントでお受け取りください。',
+  // 利用者に原因は無い。何が起きたかは伝えず、時間をおいて試せることだけ伝える。
+  WALLET_EVENT_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

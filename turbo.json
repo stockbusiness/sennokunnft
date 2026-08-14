@@ -40,6 +40,18 @@
       // 結合テストの接続先を書き忘れると、DB のテストが黙って飛ぶ。
       "env": ["DATABASE_URL", "TEST_DATABASE_URL", "REQUIRE_INTEGRATION_TESTS"]
     },
+    // ⚠️ **同じ PostgreSQL を使う結合テストを並行させない。**
+    // `@sengoku/database` と `@sengoku/worker` はどちらも実 DB に対して動き、
+    // 各テストの前に TRUNCATE する。並行させると、片方が掃除した瞬間に
+    // もう片方の行が消え、**実装ではなく実行順のせいで落ちる**。
+    // しかも落ち方が毎回違うので、原因がテストの相乗りだと気づきにくい。
+    // 接続先を分けるのが本筋だが、CI で DB を 2 つ用意する手間に見合わない。
+    // ここでは順序で直列化し、共有資源であることを依存として明示する。
+    "@sengoku/worker#test": {
+      "dependsOn": ["^build", "@sengoku/database#test"],
+      "inputs": ["src/**", "tests/**", "vitest.config.*", "package.json"],
+      "env": ["DATABASE_URL", "TEST_DATABASE_URL", "REQUIRE_INTEGRATION_TESTS"]
+    },
     "test:watch": {
       "cache": false,
       "persistent": true

@@ -1,5 +1,6 @@
 import type {
   ClaimConfirmOutcome,
+  ClaimDeliveryEnqueue,
   ClaimLookupResult,
   ClaimRepositoryPort,
   ReissuableEntitlement,
@@ -33,7 +34,13 @@ export class PrismaClaimRepository implements ClaimRepositoryPort {
         accountId: true,
         claimedByCommonUserId: true,
         walletDeliveryStatus: true,
-        artwork: { select: { title: true } },
+        orderId: true,
+        orderLineId: true,
+        artworkId: true,
+        serialNo: true,
+        artwork: {
+          select: { title: true, description: true, imageKey: true, imageHash: true },
+        },
         purchaser: { select: { commonUserId: true, commonUserStatus: true } },
       },
     });
@@ -59,34 +66,75 @@ export class PrismaClaimRepository implements ClaimRepositoryPort {
       },
       purchaserAccountId: row.accountId,
       cardName: row.artwork.title,
+      // 表示情報は受取確定の時点で読む。配送のたびに読み直さない（§24）。
+      snapshot: {
+        orderId: row.orderId,
+        orderLineId: row.orderLineId,
+        artworkId: row.artworkId,
+        serialNo: row.serialNo,
+        artworkTitle: row.artwork.title,
+        artworkDescription: row.artwork.description,
+        imageKey: row.artwork.imageKey,
+        imageHash: row.artwork.imageHash,
+      },
     };
   }
 
   /**
-   * 受取を確定する。
+   * 受取を確定し、同時に配送待ち行列へ載せる。
    *
    * `WHERE status = 'issued'` を条件に含めるため、**同時に何本来ても
    * 確定できるのは 1 本だけ**になる。競合した側は `raced` を受け取り、
    * 呼び出し元が読み直して現在の状態を返す。
+   *
+   * ⚠️ **確定と行列への追加を同一トランザクションで行う。**
+   * 確定したあとに別呼び出しで INSERT すると、そのあいだに落ちた行が
+   * 「受け取ったのに Wallet へ永遠に届かない」まま、誰にも気づかれず残る。
+   * 逆順（先に行列へ入れる）にすると、確定に負けた側の行が
+   * 送られてしまう。順序ではなく、**同じトランザクションに入れる**ことで塞ぐ。
    */
   async confirmClaim(input: {
     readonly entitlementId: string;
     readonly commonUserId: string;
     readonly accountId: string;
     readonly now: Date;
+    readonly delivery?: ClaimDeliveryEnqueue | undefined;
   }): Promise<ClaimConfirmOutcome> {
-    const updated = await this.prisma.entitlement.updateMany({
-      where: { id: input.entitlementId, status: 'issued' },
-      data: {
-        status: 'claimed',
-        claimedByAccountId: input.accountId,
-        claimedByCommonUserId: input.commonUserId,
-        claimedAt: input.now,
-        // 配送はここでは行わない（PR-NW04）。待ち行列に載せるだけ。
-        walletDeliveryStatus: 'pending',
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.entitlement.updateMany({
+        where: { id: input.entitlementId, status: 'issued' },
+        data: {
+          status: 'claimed',
+          claimedByAccountId: input.accountId,
+          claimedByCommonUserId: input.commonUserId,
+          claimedAt: input.now,
+          // 送信そのものは配送ワーカーが行う。ここでは行列に載せるだけ。
+          walletDeliveryStatus: 'pending',
+        },
+      });
+      if (updated.count !== 1) {
+        // 競合して負けた。**行列へは何も入れない。**
+        return { kind: 'raced' };
+      }
+
+      if (input.delivery !== undefined) {
+        await tx.walletDeliveryOutbox.create({
+          data: {
+            eventId: input.delivery.eventId,
+            eventType: input.delivery.eventType,
+            entitlementId: input.entitlementId,
+            targetSiteKey: input.delivery.targetSiteKey,
+            payload: input.delivery.payload,
+            payloadHash: input.delivery.payloadHash,
+            correlationId: input.delivery.correlationId,
+            nextRetryAt: input.now,
+            createdAt: input.now,
+            updatedAt: input.now,
+          },
+        });
+      }
+      return { kind: 'claimed' };
     });
-    return updated.count === 1 ? { kind: 'claimed' } : { kind: 'raced' };
   }
 
   /** 再発行の判定に必要な情報だけを引く。 */

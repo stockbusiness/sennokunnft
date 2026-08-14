@@ -97,12 +97,16 @@ model Artwork {
   slug          String        @unique
   title         String
   description   String        @default("")
-  /// ストレージ上のキー。公開URLは実行時に解決する（保存先は UD-508 で未決定）。
+  /// ストレージ上のキー。公開URLは実行時に解決する（保存先は Cloudflare R2、UD-508）。
   /// アップロード時にランダム生成する。**利用者が送ったファイル名は使わない。**
   imageKey         String?    @map("image_key")
   /// サーバー側で中身を検査して判定した MIME タイプ。拡張子は信用しない。
   imageContentType String?    @map("image_content_type")
   imageByteSize    Int?       @map("image_byte_size")
+  /// 画像の内容ハッシュ（`sha256:<hex>`）。保存時に**中身から**計算する。
+  /// Wallet の Holding 表示情報の同一性確認に使う（PR-NW04 §23）。
+  /// ⚠️ ファイル名や URL から導出しない。差し替えを検出できなくなる。
+  imageHash        String?    @map("image_hash")
   maxSupply     Int           @map("max_supply")
   /// 決済待ちの注文が押さえている数。
   reservedCount Int           @default(0) @map("reserved_count")
@@ -164,10 +168,26 @@ enum OrderStatus {
   refunded
 }
 
+/// 注文が生まれた経路。
+///
+/// ⚠️ **`entitlements.order_id` の NOT NULL を緩めないために存在する。**
+/// staging の動作確認では「注文の無い受取権」を作りたくなるが、
+/// 列を NULL 許容へ変えると、その穴は**本番の経路にも開く**。
+/// 代わりに Fixture 側で本物の Order / OrderLine を作り、
+/// この列で出自を区別する（PR-NW04 §7）。
+enum OrderSource {
+  /// 通常の購入。
+  PURCHASE
+  /// staging 動作確認用の Fixture が作ったもの。決済は一切伴わない。
+  STAGING_FIXTURE
+}
+
 model Order {
   id             String      @id @default(uuid()) @db.Uuid
   accountId      String      @map("account_id") @db.Uuid
   status         OrderStatus @default(pending)
+  /// 出自。既定は購入。Fixture だけが `STAGING_FIXTURE` を入れる。
+  source         OrderSource @default(PURCHASE)
   totalAmount    Int         @map("total_amount")
   totalCurrency  String      @map("total_currency") @db.Char(3)
   /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
@@ -186,6 +206,8 @@ model Order {
   @@unique([accountId, idempotencyKey])
   @@index([status, reservedUntil])
   @@index([accountId, createdAt])
+  /// Fixture 由来の行を洗い出して掃除するため。
+  @@index([source, createdAt])
   @@map("orders")
 }
 
@@ -310,8 +332,11 @@ model Entitlement {
   /// ⚠️ 受取時点の値を**そのまま残す**。あとでマスタが変わっても遡って書き換えない。
   claimedByCommonUserId String?          @map("claimed_by_common_user_id")
   /// Wallet への配送状態。not_started / pending / delivered。
-  /// ⚠️ 本 PR は配送そのものを実装しない。`delivered` へ進めるのは PR-NW04。
+  /// ⚠️ `delivered` へ進めてよいのは、Wallet が 2xx を返し、
+  ///    それが Holding の永続化を意味する場合のみ（PR-NW04 §21）。
   walletDeliveryStatus String            @default("not_started") @map("wallet_delivery_status")
+  /// 配送が完了した時刻。`walletDeliveryStatus = 'delivered'` と必ず同時に入る。
+  walletDeliveredAt    DateTime?         @map("wallet_delivered_at") @db.Timestamptz(6)
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -322,6 +347,7 @@ model Entitlement {
   claimedByAccount Account? @relation("EntitlementClaimer", fields: [claimedByAccountId], references: [id])
   mintJob         MintJob?
   nftToken        NftToken?
+  walletDeliveries WalletDeliveryOutbox[]
 
   /// 同一作品内でシリアル番号が重複しないことを物理的に担保する。
   @@unique([artworkId, serialNo])
@@ -442,6 +468,74 @@ model OutboxEvent {
 
   @@index([status, occurredAt])
   @@map("outbox_events")
+}
+
+enum WalletDeliveryOutboxStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  DEAD
+}
+
+/// OVEW Wallet への配送待ち行列（PR-NW04 §10）。
+///
+/// ⚠️ **`outbox_events` とは別のテーブルにしてある。**
+/// あちらは「業務で起きた事実」の記録で、購読者が何であっても内容は変わらない。
+/// こちらは「特定の相手へ HTTP で届ける仕事」で、宛先・試行回数・
+/// 打ち切りといった**配送の都合**を持つ。1 つの表に混ぜると、
+/// 事実の記録が配送の再試行で書き換わる。
+///
+/// ⚠️ **行の作成は業務状態の変更と同一トランザクションで行う。**
+/// Claim を確定してから別途 INSERT すると、その間に落ちたときに
+/// 「受け取ったのに Wallet へ届かない」行が誰にも気づかれず残る。
+///
+/// ⚠️ **`event_id` は再試行で作り直さない。**
+/// 相手の冪等キーがこの値なので、作り直すと再試行のたびに
+/// 別のイベントとして扱われ、Holding が重複しうる。
+model WalletDeliveryOutbox {
+  id            String                     @id @default(uuid()) @db.Uuid
+  /// 送信側が採番するイベントID。**相手の Idempotency-Key と同じ値**。
+  /// UNIQUE が二重配送を防ぐ最後の砦（アプリの重複チェックは競合で破れる）。
+  eventId       String                     @unique @map("event_id")
+  eventType     String                     @map("event_type")
+  entitlementId String                     @map("entitlement_id") @db.Uuid
+  /// 宛先の識別子。現状は `ovew-wallet` のみ。
+  targetSiteKey String                     @map("target_site_key")
+  /// 送信する本文の **JSON テキストそのもの**。
+  ///
+  /// ⚠️ **jsonb ではなく文字列で持つ。**
+  /// 署名は「送るバイト列そのもの」に対して行う（HMAC v1.1）。
+  /// jsonb に入れると Postgres がキー順と空白を正規化するため、
+  /// 読み戻して stringify した文字列は**入れたときと別物**になりうる。
+  /// 保存・署名・送信で 3 通りの本文が生まれる余地を、型で消しておく。
+  ///
+  /// 送信時点のスナップショットであり、あとでマスタが変わっても
+  /// 再試行の内容は変わらない（§24）。
+  /// ⚠️ 個人情報を入れない。入れてよいのは `common_user_id` まで。
+  payload       String
+  /// 本文の内容ハッシュ（`sha256:<hex>`）。`payload` の文字列に対して計算する。
+  payloadHash   String                     @map("payload_hash")
+  status        WalletDeliveryOutboxStatus @default(PENDING)
+  attemptCount  Int                        @default(0) @map("attempt_count")
+  maxAttempts   Int                        @default(5) @map("max_attempts")
+  /// バックオフ後の実行予定時刻。
+  nextRetryAt   DateTime                   @default(now()) @map("next_retry_at") @db.Timestamptz(6)
+  /// 失敗理由の分類コード。外部の生メッセージを入れない。
+  lastErrorCode String?                    @map("last_error_code")
+  /// 運用が読むための要約。⚠️ 応答本文をそのまま入れない（秘匿値が混ざりうる）。
+  lastErrorMessage String?                 @map("last_error_message")
+  /// Claim から配送まで同じ値を引き継ぐ（§17）。
+  correlationId String                     @map("correlation_id")
+  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deliveredAt   DateTime?                  @map("delivered_at") @db.Timestamptz(6)
+
+  entitlement Entitlement @relation(fields: [entitlementId], references: [id])
+
+  @@index([status, nextRetryAt])
+  @@index([entitlementId])
+  @@map("wallet_delivery_outbox")
 }
 
 /// 管理操作の監査証跡。

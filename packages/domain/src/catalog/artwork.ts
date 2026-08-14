@@ -18,6 +18,11 @@ export interface Artwork extends SupplyCounters {
   /** サーバー側で中身を検査して判定した MIME タイプ。 */
   readonly imageContentType: string | null;
   readonly imageByteSize: number | null;
+  /**
+   * 画像の内容ハッシュ（`sha256:<hex>`）。保存時に**中身から**計算する。
+   * Wallet へ渡す表示情報の同一性確認に使う（PR-NW04 §23）。
+   */
+  readonly imageHash: string | null;
   readonly status: ArtworkStatus;
 }
 
@@ -84,6 +89,7 @@ export function createArtworkDraft(input: CreateArtworkInput): Result<Artwork, D
     imageKey: input.imageKey ?? null,
     imageContentType: null,
     imageByteSize: null,
+    imageHash: null,
     maxSupply: input.maxSupply,
     reservedCount: 0,
     issuedCount: 0,

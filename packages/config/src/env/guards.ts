@@ -82,6 +82,73 @@ export function assertClaimApiConfig(env: ClaimApiTargets): void {
   }
 }
 
+export interface WalletDeliveryTargets {
+  readonly WALLET_DELIVERY_ENABLED: boolean;
+  readonly WALLET_DELIVERY_ENDPOINT?: string | undefined;
+  readonly WALLET_DELIVERY_KEY_ID?: string | undefined;
+  readonly WALLET_DELIVERY_SECRET?: string | undefined;
+}
+
+/**
+ * Wallet 配送の設定が揃っているか。
+ *
+ * ⚠️ **有効なのに宛先や鍵が無い状態で起動させない。**
+ * 起動すると受取は成立し続け、配送だけが全件失敗して溜まる。
+ * しかも利用者の画面は「お届け中」のままなので、誰も異常に気づけない。
+ *
+ * ⚠️ **送信先は `https` に限る。**
+ * 平文で送ると、common_user_id と作品情報が経路上に出る。
+ */
+export function assertWalletDeliveryConfig(env: WalletDeliveryTargets): void {
+  if (!env.WALLET_DELIVERY_ENABLED) {
+    return;
+  }
+  const reasons: string[] = [];
+  if (env.WALLET_DELIVERY_ENDPOINT === undefined || env.WALLET_DELIVERY_ENDPOINT === '') {
+    reasons.push('WALLET_DELIVERY_ENDPOINT: 配送が有効なのに送信先が設定されていない');
+  } else if (!env.WALLET_DELIVERY_ENDPOINT.startsWith('https://')) {
+    // ⚠️ 値そのものは載せない。ホスト名や資格情報が混ざりうる。
+    reasons.push('WALLET_DELIVERY_ENDPOINT: https でなければならない');
+  }
+  if (env.WALLET_DELIVERY_KEY_ID === undefined || env.WALLET_DELIVERY_KEY_ID === '') {
+    reasons.push('WALLET_DELIVERY_KEY_ID: 配送が有効なのに鍵IDが設定されていない');
+  }
+  if (env.WALLET_DELIVERY_SECRET === undefined || env.WALLET_DELIVERY_SECRET === '') {
+    reasons.push('WALLET_DELIVERY_SECRET: 配送が有効なのに秘密鍵が設定されていない');
+  }
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
+export interface StagingFixtureTargets {
+  readonly NODE_ENV: string;
+  readonly APP_ENV: string;
+  readonly ENABLE_STAGING_FIXTURES: boolean;
+}
+
+/**
+ * staging Fixture を実行してよいか（PR-NW04 §9）。
+ *
+ * ⚠️ **2 つの条件を両方満たすことを要求する。**
+ * フラグ 1 本にすると、本番の環境変数へ 1 行足しただけで
+ * 本番DBに偽の受取権が作れてしまう。逆に `NODE_ENV` だけにすると、
+ * 誤って `development` で起動した本番でも通ってしまう。
+ * **片方だけでは通らない**ことが、この関数の存在理由。
+ */
+export function assertStagingFixtureAllowed(env: StagingFixtureTargets): void {
+  const reasons: string[] = [];
+  if (env.NODE_ENV === 'production' || env.APP_ENV === 'production') {
+    reasons.push('本番環境では staging Fixture を実行できない');
+  }
+  if (!env.ENABLE_STAGING_FIXTURES) {
+    reasons.push('ENABLE_STAGING_FIXTURES: staging Fixture が有効化されていない');
+  }
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
 /**
  * `鍵ID:秘密鍵,鍵ID:秘密鍵` を表に変換する。
  *

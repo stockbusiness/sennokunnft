@@ -77,6 +77,16 @@ class FakeClaimRepository implements ClaimTokenRotationSource {
       entitlement: { ...this.row },
       purchaserAccountId: 'account-1',
       cardName: '天下布武の陣羽織',
+      snapshot: {
+        orderId: 'order-1',
+        orderLineId: 'line-1',
+        artworkId: 'artwork-1',
+        serialNo: 7,
+        artworkTitle: '天下布武の陣羽織',
+        artworkDescription: '説明文',
+        imageKey: 'artworks/sample.png',
+        imageHash: `sha256:${'a'.repeat(64)}`,
+      },
     });
   }
 
@@ -172,6 +182,7 @@ async function boot(
     repo?: FakeClaimRepository;
     getPerMinute?: number;
     postPerMinute?: number;
+    deliveryEnabled?: boolean;
   } = {},
 ): Promise<void> {
   claims = options.repo ?? new FakeClaimRepository();
@@ -201,6 +212,8 @@ async function boot(
           logger: createLogger({ service: 'test', level: 'fatal' }),
           rateLimiter: new InMemoryRateLimiter(),
           claimBaseUrl: 'https://example.test/claims',
+          // 配送は既定で無効。有効時の挙動は wallet-delivery のテストで見る。
+          deliveryEnabled: options.deliveryEnabled ?? false,
           // 既定は本番と同じ値。制限そのものを見るテストだけ小さくする。
           getPerMinute: options.getPerMinute ?? 3000,
           postPerMinute: options.postPerMinute ?? 300,
