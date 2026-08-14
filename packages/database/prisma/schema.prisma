@@ -455,3 +455,24 @@ model AuditLog {
   @@index([actorAccountId, occurredAt])
   @@map("audit_logs")
 }
+
+/// 署名の使い捨て値（nonce）。リプレイ攻撃を防ぐ。
+///
+/// ⚠️ **一意制約そのものが判定。**
+/// 「探して無ければ受け付ける」だと、同時に届いた 2 本が両方通る。
+/// INSERT を試みて弾かれたかどうかで、使用済みかを決める。
+///
+/// ⚠️ プロセス内メモリに置かない。台数を増やすと別プロセスの記録が
+/// 見えず、リプレイを素通しする。しかもその事実が外からは見えない。
+model HmacNonce {
+  id        String   @id @default(uuid()) @db.Uuid
+  keyId     String   @map("key_id")
+  nonce     String
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  /// この時刻を過ぎたら掃除してよい。署名の許容時間より少し先。
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([keyId, nonce])
+  @@index([expiresAt])
+  @@map("hmac_nonces")
+}

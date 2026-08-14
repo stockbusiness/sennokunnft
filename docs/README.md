@@ -17,23 +17,24 @@
 
 ## 文書一覧
 
-| #   | 文書                                                               | 目的                                                                |
-| --- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 1   | [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md)               | 誰の何の課題を解くか。機能／非機能要件                              |
-| 2   | [MVP_SCOPE.md](./MVP_SCOPE.md)                                     | MVPに入れるもの／入れないものの線引き                               |
-| 3   | [ARCHITECTURE.md](./ARCHITECTURE.md)                               | システム構成、パッケージ責務、依存方向                              |
-| 4   | [DOMAIN_MODEL.md](./DOMAIN_MODEL.md)                               | ドメイン用語、集約、状態遷移、不変条件                              |
-| 5   | [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)                         | 論理・物理データモデル、制約、インデックス                          |
-| 6   | [API_DESIGN.md](./API_DESIGN.md)                                   | HTTP API 契約、エラー規約、冪等性                                   |
-| 7   | [EVENT_CATALOG.md](./EVENT_CATALOG.md)                             | ドメインイベント／外部Webhookの一覧と契約                           |
-| 8   | [AUTHORIZATION_DESIGN.md](./AUTHORIZATION_DESIGN.md)               | 認証・ロール・権限マトリクス                                        |
-| 9   | [SECURITY_DESIGN.md](./SECURITY_DESIGN.md)                         | 脅威モデルと対策、秘密情報の扱い                                    |
-| 10  | [BLOCKCHAIN_DECISION_RECORD.md](./BLOCKCHAIN_DECISION_RECORD.md)   | チェーン・規格・カストディの選択肢と判断基準（**未確定**）          |
-| 11  | [LAZY_MINT_FLOW.md](./LAZY_MINT_FLOW.md)                           | 購入→受取権→Claim→Mint の詳細フロー                                 |
-| 12  | [EXTERNAL_INTEGRATION_POLICY.md](./EXTERNAL_INTEGRATION_POLICY.md) | 既存システム（Sengoku Market / OVEW Wallet / 代理店）との疎結合方針 |
-| 13  | [TEST_STRATEGY.md](./TEST_STRATEGY.md)                             | テストの層構成と必須ケース                                          |
-| 14  | [OPERATIONS_AND_ROLLBACK.md](./OPERATIONS_AND_ROLLBACK.md)         | 運用手順、監視、ロールバック基準                                    |
-| 15  | [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md)           | Phase 分割と、**全未決定事項の統合一覧**                            |
+| #   | 文書                                                               | 目的                                                                  |
+| --- | ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| 1   | [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md)               | 誰の何の課題を解くか。機能／非機能要件                                |
+| 2   | [MVP_SCOPE.md](./MVP_SCOPE.md)                                     | MVPに入れるもの／入れないものの線引き                                 |
+| 3   | [ARCHITECTURE.md](./ARCHITECTURE.md)                               | システム構成、パッケージ責務、依存方向                                |
+| 4   | [DOMAIN_MODEL.md](./DOMAIN_MODEL.md)                               | ドメイン用語、集約、状態遷移、不変条件                                |
+| 5   | [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)                         | 論理・物理データモデル、制約、インデックス                            |
+| 6   | [API_DESIGN.md](./API_DESIGN.md)                                   | HTTP API 契約、エラー規約、冪等性                                     |
+| 7   | [EVENT_CATALOG.md](./EVENT_CATALOG.md)                             | ドメインイベント／外部Webhookの一覧と契約                             |
+| 8   | [AUTHORIZATION_DESIGN.md](./AUTHORIZATION_DESIGN.md)               | 認証・ロール・権限マトリクス                                          |
+| 9   | [SECURITY_DESIGN.md](./SECURITY_DESIGN.md)                         | 脅威モデルと対策、秘密情報の扱い                                      |
+| 10  | [BLOCKCHAIN_DECISION_RECORD.md](./BLOCKCHAIN_DECISION_RECORD.md)   | チェーン・規格・カストディの選択肢と判断基準（**未確定**）            |
+| 11  | [LAZY_MINT_FLOW.md](./LAZY_MINT_FLOW.md)                           | 購入→受取権→Claim→Mint の詳細フロー                                   |
+| 12  | [EXTERNAL_INTEGRATION_POLICY.md](./EXTERNAL_INTEGRATION_POLICY.md) | 既存システム（Sengoku Market / OVEW Wallet / 代理店）との疎結合方針   |
+| 13  | [TEST_STRATEGY.md](./TEST_STRATEGY.md)                             | テストの層構成と必須ケース                                            |
+| 14  | [OPERATIONS_AND_ROLLBACK.md](./OPERATIONS_AND_ROLLBACK.md)         | 運用手順、監視、ロールバック基準                                      |
+| 15  | [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md)           | Phase 分割と、**全未決定事項の統合一覧**                              |
+| 16  | [HMAC_TEST_VECTORS.md](./HMAC_TEST_VECTORS.md)                     | 千ノ国共通 HMAC v1.1 FINAL の固定テストベクトル（**両システム共有**） |
 
 未決定事項（`UD-xxx`）の**マスタ一覧は [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md) の「未決定事項レジスタ」**。
 各文書には該当分の抜粋のみを置く。
