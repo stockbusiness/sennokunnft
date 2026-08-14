@@ -125,6 +125,7 @@ export {
 } from './media/image';
 
 export type { Page, PageQuery, ArtworkRepository, ListingRepository } from './ports/catalog';
+export type { NonceStorePort } from './ports/nonce';
 
 export type {
   ClockPort,
