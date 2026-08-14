@@ -52,6 +52,58 @@ export function assertCommonUserLinkingConfig(env: CommonUserLinkingTargets): vo
   }
 }
 
+export interface ClaimApiTargets {
+  readonly CLAIM_API_ENABLED: boolean;
+  readonly CLAIM_HMAC_KEYS?: string | undefined;
+}
+
+/**
+ * Claim API の設定が揃っているか。
+ *
+ * ⚠️ **有効なのに鍵が無い状態で起動させない。**
+ * 起動してしまうと、OVEW Wallet からの要求が全部 403 で落ちる。
+ * しかも本システムから見れば「署名が合わない要求が来ている」だけなので、
+ * **攻撃と設定漏れの区別がつかない。**
+ */
+export function assertClaimApiConfig(env: ClaimApiTargets): void {
+  if (!env.CLAIM_API_ENABLED) {
+    return;
+  }
+  if (env.CLAIM_HMAC_KEYS === undefined || env.CLAIM_HMAC_KEYS === '') {
+    throw new UnsafeEnvironmentError([
+      'CLAIM_HMAC_KEYS: Claim API が有効なのに HMAC の鍵が設定されていない',
+    ]);
+  }
+  // 形が壊れていれば、鍵が 1 本も読めないまま起動してしまう。
+  if (Object.keys(parseHmacKeys(env.CLAIM_HMAC_KEYS)).length === 0) {
+    throw new UnsafeEnvironmentError([
+      'CLAIM_HMAC_KEYS: 形式が正しくない（鍵ID:秘密鍵 をカンマ区切りで指定する）',
+    ]);
+  }
+}
+
+/**
+ * `鍵ID:秘密鍵,鍵ID:秘密鍵` を表に変換する。
+ *
+ * ⚠️ **失敗しても内容を例外へ載せない。** 秘密鍵がそのままログへ出る。
+ * 読めなかった項目は黙って捨て、件数だけを呼び出し元の判断材料にする。
+ */
+export function parseHmacKeys(raw: string): Readonly<Record<string, string>> {
+  const keys: Record<string, string> = {};
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed === '') continue;
+    // 秘密鍵に ':' が含まれても壊れないよう、最初の 1 個だけで区切る。
+    const separator = trimmed.indexOf(':');
+    if (separator <= 0) continue;
+    const keyId = trimmed.slice(0, separator).trim();
+    const secret = trimmed.slice(separator + 1).trim();
+    if (keyId === '' || secret === '') continue;
+    keys[keyId] = secret;
+  }
+  return keys;
+}
+
 /** 接続先がローカル環境かどうかを、URL の host 部分だけを見て判定する。 */
 function isLocalHost(connectionUrl: string): boolean {
   // 接続文字列には資格情報が含まれるため、パースに失敗しても内容をログに出さない。

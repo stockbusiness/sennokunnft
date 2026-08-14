@@ -21,6 +21,9 @@ export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
 
 export { PrismaNonceStore } from './repositories/nonce.repository';
+
+export { PrismaClaimRepository } from './repositories/claim.repository';
+
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';
 
 export {

@@ -2,9 +2,11 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import {
   apiEnvSchema,
+  assertClaimApiConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
+  parseHmacKeys,
   UnsafeEnvironmentError,
 } from '@sengoku/config';
 import { createLogger } from '@sengoku/observability';
@@ -16,11 +18,15 @@ import {
   PrismaAuditLogRepository,
   PrismaListingRepository,
   PrismaIdempotencyStore,
+  PrismaClaimRepository,
+  PrismaNonceStore,
   type PrismaClient,
 } from '@sengoku/database';
 import {
   DevTokenVerifier,
   LocalFileStorage,
+  SenNoKuniHmacVerifier,
+  Sha256ClaimTokenService,
   SystemClock,
   UuidGenerator,
   generateStorageKey,
@@ -53,6 +59,9 @@ async function bootstrap(): Promise<void> {
   try {
     assertPhaseOneIntegrationLimits(env);
     assertProductionSafety(env);
+    // ⚠️ 有効なのに鍵が無ければ起動しない。
+    //    起動させると相手の要求が全部 403 で落ち、攻撃と設定漏れの区別がつかない。
+    assertClaimApiConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       // 理由は変数名と説明のみで、値を含まない。
@@ -88,6 +97,19 @@ async function bootstrap(): Promise<void> {
     audience: env.SUPABASE_JWT_AUDIENCE ?? 'sennokunnft',
   });
 
+  // Claim（OVEW Wallet 連携）。既定は無効。
+  // ✅ 相手側の署名器が v1.1 FINAL へ揃い、固定ベクトルが両システムで
+  //    一致してから有効にする（指示書 §12 の着手条件 10・11）。
+  const claimVerifier =
+    env.CLAIM_API_ENABLED && env.CLAIM_HMAC_KEYS !== undefined
+      ? new SenNoKuniHmacVerifier({
+          secrets: parseHmacKeys(env.CLAIM_HMAC_KEYS),
+          // ⚠️ nonce は DB に置く。プロセス内メモリだと台数を増やした瞬間に
+          //    別プロセスの記録が見えず、リプレイを素通しする。
+          nonces: new PrismaNonceStore(prisma),
+        })
+      : null;
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -104,6 +126,13 @@ async function bootstrap(): Promise<void> {
       storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
       audit: new PrismaAuditLogRepository(prisma),
       generateStorageKey,
+      claim: {
+        enabled: env.CLAIM_API_ENABLED,
+        claims: new PrismaClaimRepository(prisma),
+        tokens: new Sha256ClaimTokenService(),
+        verifier: claimVerifier,
+        logger,
+      },
     }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。
     // 後から有効化すると取りこぼしに気付きにくいため、最初から有効にしておく。

@@ -43,6 +43,9 @@ export {
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   assertCommonUserLinkingConfig,
+  assertClaimApiConfig,
+  parseHmacKeys,
   type IntegrationTargets,
   type CommonUserLinkingTargets,
+  type ClaimApiTargets,
 } from './env/guards';

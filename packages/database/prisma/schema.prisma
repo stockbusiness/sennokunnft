@@ -306,6 +306,12 @@ model Entitlement {
   expiresAt            DateTime?         @map("expires_at") @db.Timestamptz(6)
   claimedByAccountId   String?           @map("claimed_by_account_id") @db.Uuid
   claimedAt            DateTime?         @map("claimed_at") @db.Timestamptz(6)
+  /// Wallet 経由で受け取った本人の `common_user_id`。
+  /// ⚠️ 受取時点の値を**そのまま残す**。あとでマスタが変わっても遡って書き換えない。
+  claimedByCommonUserId String?          @map("claimed_by_common_user_id")
+  /// Wallet への配送状態。not_started / pending / delivered。
+  /// ⚠️ 本 PR は配送そのものを実装しない。`delivered` へ進めるのは PR-NW04。
+  walletDeliveryStatus String            @default("not_started") @map("wallet_delivery_status")
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
