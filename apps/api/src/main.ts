@@ -24,6 +24,7 @@ import {
 } from '@sengoku/database';
 import {
   DevTokenVerifier,
+  InMemoryRateLimiter,
   LocalFileStorage,
   SenNoKuniHmacVerifier,
   Sha256ClaimTokenService,
@@ -132,6 +133,11 @@ async function bootstrap(): Promise<void> {
         tokens: new Sha256ClaimTokenService(),
         verifier: claimVerifier,
         logger,
+        // ⚠️ プロセス内メモリのため、台数を増やすと実効の上限が台数倍になる。
+        //    増やすときは上限を割るか、共有の実装へ差し替える（UD-1101）。
+        rateLimiter: new InMemoryRateLimiter(),
+        getPerMinute: env.CLAIM_RATE_LIMIT_GET_PER_MIN,
+        postPerMinute: env.CLAIM_RATE_LIMIT_POST_PER_MIN,
       },
     }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。

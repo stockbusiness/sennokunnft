@@ -155,6 +155,16 @@ export type {
 export type { NonceStorePort } from './ports/nonce';
 
 export {
+  consumeFixedWindow,
+  type RateLimitWindow,
+  type RateLimitInput,
+  type RateLimitDecision,
+  type RateLimitResult,
+} from './rate-limit/fixed-window';
+
+export type { RateLimiterPort } from './ports/rate-limit';
+
+export {
   COMMON_USER_STATUSES,
   MATCHED_BY_VALUES,
   MAX_LINK_ATTEMPTS,

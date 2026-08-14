@@ -13,6 +13,7 @@ import type {
 import {
   DevTokenVerifier,
   InMemoryNonceStore,
+  InMemoryRateLimiter,
   SenNoKuniHmacVerifier,
   Sha256ClaimTokenService,
   signRequest,
@@ -129,7 +130,12 @@ function signed(method: 'GET' | 'POST', path: string, rawBody = '', nonce = `n-$
 let nonceSeq = 1;
 
 async function boot(
-  options: { enabled?: boolean; repo?: FakeClaimRepository } = {},
+  options: {
+    enabled?: boolean;
+    repo?: FakeClaimRepository;
+    getPerMinute?: number;
+    postPerMinute?: number;
+  } = {},
 ): Promise<void> {
   claims = options.repo ?? new FakeClaimRepository();
   harness = buildHarness(
@@ -156,6 +162,10 @@ async function boot(
               })
             : null,
           logger: createLogger({ service: 'test', level: 'fatal' }),
+          rateLimiter: new InMemoryRateLimiter(),
+          // 既定は本番と同じ値。制限そのものを見るテストだけ小さくする。
+          getPerMinute: options.getPerMinute ?? 3000,
+          postPerMinute: options.postPerMinute ?? 300,
         },
       }),
     ],
@@ -476,5 +486,64 @@ describe('X-Correlation-Id', () => {
       .set({ 'x-correlation-id': 'trace-unauthed' });
     expect(response.status).toBe(401);
     expect(response.headers['x-correlation-id']).toBe('trace-unauthed');
+  });
+});
+
+describe('レート制限（完成指示書 §17）', () => {
+  it('上限を超えると 429 と Retry-After を返す', async () => {
+    await boot({ getPerMinute: 3 });
+    const path = `/api/collectible-claims/${TOKEN}`;
+    for (let i = 0; i < 3; i += 1) {
+      const ok = await request(app.getHttpServer()).get(path).set(signed('GET', path));
+      expect(ok.status).toBe(200);
+    }
+    const limited = await request(app.getHttpServer()).get(path).set(signed('GET', path));
+    expect(limited.status).toBe(429);
+    expect(limited.body.error.code).toBe('RATE_LIMITED');
+    // いつ送り直せばよいかを伝えないと、相手は当てずっぽうで送り続ける。
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
+  it('GET と POST は別の枠で数える', async () => {
+    // ⚠️ 同じ枠にすると、5 秒ポーリング（通常動作）が受取確定の枠を
+    //    食いつぶし、肝心の POST だけが弾かれる。
+    await boot({ getPerMinute: 2, postPerMinute: 5 });
+    const path = `/api/collectible-claims/${TOKEN}`;
+    for (let i = 0; i < 2; i += 1) {
+      await request(app.getHttpServer()).get(path).set(signed('GET', path));
+    }
+    expect((await request(app.getHttpServer()).get(path).set(signed('GET', path))).status).toBe(
+      429,
+    );
+    // GET が枯れていても POST は通る。
+    const confirm = await postConfirm(PURCHASER_CU);
+    expect(confirm.status).toBe(202);
+  });
+
+  it('署名に失敗した要求は枠を消費しない', async () => {
+    // ⚠️ ここが逆だと、他人の鍵IDを名乗って送りつけるだけで
+    //    正規の相手の枠を使い切らせられる（＝締め出せる）。
+    await boot({ getPerMinute: 2 });
+    const path = `/api/collectible-claims/${TOKEN}`;
+    for (let i = 0; i < 5; i += 1) {
+      const bad = await request(app.getHttpServer())
+        .get(path)
+        .set({ ...signed('GET', path), 'x-sennokuni-signature': 'sha256=deadbeef' });
+      expect(bad.status).toBe(403);
+    }
+    // 正規の要求はまだ通る。
+    expect((await request(app.getHttpServer()).get(path).set(signed('GET', path))).status).toBe(
+      200,
+    );
+  });
+
+  it('既定値は Wallet の 5 秒ポーリングを妨げない', async () => {
+    // 1 セッションあたり毎分 12 回。既定 3000 なら遠く及ばない。
+    await boot();
+    const path = `/api/collectible-claims/${TOKEN}`;
+    for (let i = 0; i < 12; i += 1) {
+      const res = await request(app.getHttpServer()).get(path).set(signed('GET', path));
+      expect(res.status).toBe(200);
+    }
   });
 });

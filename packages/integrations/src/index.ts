@@ -41,6 +41,8 @@ export {
   type AgencyCommonUserOptions,
 } from './agency-common-user';
 
+export { InMemoryRateLimiter } from './in-memory-rate-limiter';
+
 export {
   canonicalString,
   signRequest,
