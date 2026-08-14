@@ -1,0 +1,62 @@
+# api（NestJS）— 本番。
+#
+# ⚠️ **worker と同じアプリにしない。**
+# 同居させると台数を独立に変えられず、api を 2 台にした瞬間に
+# worker も 2 台になる。worker の 2 台化は代理店システムへの
+# 二重呼び出しを起こす（docs/PRODUCTION_ARCHITECTURE.md §3-2）。
+#
+# 変更したら `fly config validate --config fly.api.toml` で確かめること。
+
+app = "sennokunnft-api"
+primary_region = "nrt"
+# ⚠️ 停止時、処理中の要求が終わるのを待つ。短くすると応答を返せずに切れる。
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENV = "production"
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  API_PORT = "8080"
+  # 秘密でない設定はここに置く。⚠️ 鍵と接続文字列は `fly secrets` へ。
+
+[processes]
+  app = "node apps/api/dist/main.js"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  processes = ["app"]
+
+  # ⚠️ **アイドルで止めない。**
+  #    止まると最初の要求が待たされる。OVEW Wallet の Claim は
+  #    利用者の操作の途中で来るので、そこで待たせたくない。
+  auto_stop_machines = "off"
+  auto_start_machines = true
+
+  # ⚠️ **段階1 は 1 台。2 台にする前にレート制限を DB 実装へ差し替える。**
+  #    いまはプロセス内メモリで数えているため、台数を増やすと
+  #    実効上限が台数倍になる。落ちないしログにも出ない。
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# ⚠️ **liveness に /readyz を使わない。**
+#    DB が一時的に落ちたときにマシンが再起動を繰り返し、
+#    DB が戻っても復帰が遅れる。生死は /healthz で見る。
+[[http_service.checks]]
+  method = "GET"
+  path = "/healthz"
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["app"]

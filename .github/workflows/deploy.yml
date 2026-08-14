@@ -1,0 +1,82 @@
+# 千ノ国NFTマーケット — 本番デプロイ
+#
+# ⚠️ **CI が通ったときだけ走る。**
+#    push を直接の起点にすると、テストの結果を待たずに本番が変わる。
+#
+# ⚠️ **公開後は自動デプロイをやめる。**
+#    `main` を触るたびに本番が変わる状態は、公開前の構築中だけ許される。
+#    公開したら `push` の起点を外し、`workflow_dispatch` だけにする。
+
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # ⚠️ **同時に走らせない。** マイグレーションが 2 本同時に流れる。
+  #    進行中を止めもしない。デプロイの途中で切ると状態が読めなくなる。
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: マイグレーション適用
+    # 手動実行のときは workflow_run の結果が無いので、そこも通す。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # ⚠️ **アプリの起動時にマイグレーションを走らせない。**
+      #    台数分だけ同時に走る。ここで 1 回だけ流す。
+      #
+      # ⚠️ **Pooler 経由では実行できない。Direct 接続を使う。**
+      #    取り違えると、通らないか、通ったように見えて壊れる。
+      - name: prisma migrate deploy
+        run: pnpm --filter @sengoku/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+
+  deploy-api:
+    name: api をデプロイ
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --config fly.api.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-worker:
+    name: worker をデプロイ
+    needs: migrate
+    # ⚠️ worker は段階3（連携を有効にするとき）に作る。
+    #    アプリが無いうちに走らせると必ず失敗するので、
+    #    リポジトリ変数 DEPLOY_WORKER を 'true' にしてから有効にする。
+    if: vars.DEPLOY_WORKER == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --config fly.worker.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

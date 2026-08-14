@@ -1,0 +1,41 @@
+# worker（配送・共通顧客IDの解決）— 本番。
+#
+# ⚠️ **1 台に固定する。増やさない。**
+# 配送（wallet_delivery_outbox）は FOR UPDATE SKIP LOCKED で掴むので
+# 何台でも安全だが、共通顧客IDの解決ジョブは行をロックせずに拾う。
+# 2 台にすると両方が同じアカウントを拾い、代理店システムを二重に呼ぶ。
+# 増やす必要が出たら、先に listDue を SKIP LOCKED へ直すこと
+# （docs/PRODUCTION_ARCHITECTURE.md §3-2）。
+#
+# 変更したら `fly config validate --config fly.worker.toml` で確かめること。
+
+app = "sennokunnft-worker"
+primary_region = "nrt"
+# ⚠️ 送信中に殺さない。PROCESSING のまま殺された配送行は、
+#    外部へ届いたかどうかが分からなくなる。
+kill_timeout = "60s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENV = "production"
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  WORKER_POLL_INTERVAL_MS = "5000"
+  # ⚠️ **本番で staging Fixture を許可しない。** 明示的に false を置く。
+  #    NODE_ENV=production 側でも拒否されるが、意図を設定にも残す。
+  ENABLE_STAGING_FIXTURES = "false"
+
+[processes]
+  app = "node apps/worker/dist/main.js"
+
+# ⚠️ **`[http_service]` を書かない。**
+#    worker は HTTP を受けない。書くと「アイドル」と判定されて
+#    止められる余地ができる。止まっても HTTP が来ないので、
+#    誰も落ちたことに気づけない。
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["app"]
