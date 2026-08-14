@@ -8,6 +8,7 @@ import {
   formatEnvProblems,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
+  assertCommonUserLinkingConfig,
   UnsafeEnvironmentError,
 } from '../src/index';
 
@@ -193,5 +194,53 @@ describe('本番での開発用トークン検証の拒否（Phase 2 で追加�
       AUTH_PROVIDER: 'supabase',
     } as NodeJS.ProcessEnv);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('共通顧客HUB連携の設定ガード', () => {
+  it('無効なら何も要求しない', () => {
+    expect(() =>
+      assertCommonUserLinkingConfig({ COMMON_USER_LINKING_ENABLED: false }),
+    ).not.toThrow();
+  });
+
+  it('有効なのに接続先が無ければ起動を拒否する', () => {
+    // 起動させると全件が PENDING に積み上がるが、購入は続くので誰も気付かない。
+    expect(() =>
+      assertCommonUserLinkingConfig({
+        COMMON_USER_LINKING_ENABLED: true,
+        COMMON_USER_API_KEY: 'a-real-key',
+      }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('有効なのに鍵が無ければ起動を拒否する', () => {
+    expect(() =>
+      assertCommonUserLinkingConfig({
+        COMMON_USER_LINKING_ENABLED: true,
+        COMMON_USER_API_BASE_URL: 'https://agency.test',
+      }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('揃っていれば通る', () => {
+    expect(() =>
+      assertCommonUserLinkingConfig({
+        COMMON_USER_LINKING_ENABLED: true,
+        COMMON_USER_API_BASE_URL: 'https://agency.test',
+        COMMON_USER_API_KEY: 'a-real-key',
+      }),
+    ).not.toThrow();
+  });
+
+  it('拒否の理由に鍵の値を含めない', () => {
+    try {
+      assertCommonUserLinkingConfig({
+        COMMON_USER_LINKING_ENABLED: true,
+        COMMON_USER_API_KEY: 'super-secret-key-value',
+      });
+    } catch (error) {
+      expect(String(error)).not.toContain('super-secret-key-value');
+    }
   });
 });

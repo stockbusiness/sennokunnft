@@ -109,6 +109,109 @@ Idempotency-Key: 01J8Z7Q4...
 
 ---
 
+## 3-2. Claim API の契約（OVEW Wallet 連携）
+
+✅ **確定（2026-08-14 回答書）。** 相手システムと合わせた契約なので、
+**片方だけ変えると通信が成立しない。** 変更は両システム同時に行う。
+
+### パス
+
+```http
+GET  /api/collectible-claims/{token}
+POST /api/collectible-claims/{token}/confirm
+```
+
+⚠️ 旧案の `/api/v1/claims/{token}` は**採用しない**。
+
+### 認証（`UD-1005` 確定: HMAC 必須）
+
+✅ **`POST` も `GET` も HMAC 必須。**
+
+この API は本文で `common_user_id` を受け取るが、
+**`common_user_id` は識別子であって資格情報ではない。**
+呼び出し元が OVEW Wallet であることを検証しなければ、この値は自己申告にすぎず、
+受入条件「Claim はログイン必須」を本システム側で確認する手段が無くなる。
+
+| ヘッダ                  | 内容           |
+| ----------------------- | -------------- |
+| `X-SenNoKuni-Key-Id`    | 鍵の識別子     |
+| `X-SenNoKuni-Timestamp` | UNIX 秒        |
+| `X-SenNoKuni-Nonce`     | 使い捨て値     |
+| `X-SenNoKuni-Signature` | `sha256=<hex>` |
+| `Idempotency-Key`       | 再送の識別     |
+| `X-Correlation-Id`      | 追跡用         |
+
+正準文字列（千ノ国共通 v1.1 FINAL）:
+
+```
+key_id \n timestamp \n nonce \n METHOD \n path \n raw_body
+```
+
+- アルゴリズムは HMAC-SHA256
+- `path` に**クエリ文字列を含めない**
+- `raw_body` は**受信した生の文字列**。`GET` は空文字
+- ⚠️ **JSON を parse して stringify した文字列で署名しない。**
+  キー順や空白が変わり、送信側と受信側で別の文字列になる
+- タイムスタンプは前後 5 分まで。**未来方向のずれも弾く**
+- nonce は使い捨て。**再利用は拒否する**（リプレイ攻撃対策）
+
+### 状態（`UD-1007` 確定）
+
+```
+PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
+```
+
+内部の Claim 状態と Wallet への配送状態を合成した値であり、
+**公開する状態はこの 5 値のみ**とする。
+
+### `GET` の応答
+
+✅ **最小形式。** 画像 URL とシリアル番号は返さない。
+
+```json
+{ "status": "PENDING", "card_name": "作品名", "expires_at": null }
+```
+
+> 画像とシリアルは Claim 確定後の `entitlement.granted` で Wallet へ渡す。
+> この切り分けにより、**`UD-508`（画像の保存先）が Claim API のブロッカーから外れる。**
+
+### `POST` の応答
+
+| 状況                               | HTTP  | 本文                                                       |
+| ---------------------------------- | ----- | ---------------------------------------------------------- |
+| 受理した                           | `202` | `{ "status": "DELIVERY_PENDING" }`                         |
+| 購入者の `common_user_id` が未解決 | `202` | `{ "status": "PENDING", "reason": "common_user_pending" }` |
+
+⚠️ **未解決は失敗ではない。** 受取権は失効させず、解決後に再度 Claim できる。
+
+### エラー（本システム標準の封筒）
+
+✅ **Claim API だけ独自形式にしない。** 全 API 共通の `{ error: { code, message } }` を使う。
+
+```json
+{
+  "error": {
+    "code": "COMMON_USER_MISMATCH",
+    "message": "この受取りは、ご購入されたご本人のアカウントでお受け取りください。"
+  }
+}
+```
+
+| HTTP          | `error.code`             |
+| ------------- | ------------------------ |
+| `404`         | `CLAIM_TOKEN_INVALID`    |
+| `410`         | `CLAIM_EXPIRED`          |
+| `409`         | `CLAIM_REVOKED`          |
+| `409`         | `COMMON_USER_MISMATCH`   |
+| `409`         | `CLAIM_PROCESSING`       |
+| `401` / `403` | 署名の検証に失敗（下記） |
+
+⚠️ **署名の失敗理由を応答に含めない。**
+「鍵が違う」「タイムスタンプがずれている」「nonce が使用済み」を伝えると、
+攻撃者にどこまで合っていたかを教えることになる。ログにのみ残す。
+
+---
+
 ## 4. エンドポイント一覧
 
 ### 4.1 Phase 1 実装分（システム）

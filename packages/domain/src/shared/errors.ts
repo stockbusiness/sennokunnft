@@ -26,6 +26,9 @@ export const DOMAIN_ERROR_CODES = [
   'IMAGE_INVALID',
   'IMAGE_TOO_LARGE',
   'IMAGE_UNSUPPORTED_TYPE',
+  'COMMON_USER_ID_INVALID',
+  'COMMON_USER_PENDING',
+  'COMMON_USER_MISMATCH',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

@@ -135,6 +135,42 @@ export type {
   IdempotencyStore,
 } from './ports/idempotency';
 
+export type { NonceStorePort } from './ports/nonce';
+
+export {
+  COMMON_USER_STATUSES,
+  MATCHED_BY_VALUES,
+  MAX_LINK_ATTEMPTS,
+  isCommonUserId,
+  isAcceptableMatch,
+  isDueForAttempt,
+  isUsableForClaim,
+  backoffMinutes,
+  unresolvedLink,
+  applyResolution,
+  applyFailure,
+  type CommonUserStatus,
+  type MatchedBy,
+  type CommonUserLink,
+  type CommonUserResolution,
+  type CommonUserFailureKind,
+} from './identity/common-user';
+
+export type {
+  CommonUserDirectoryPort,
+  ResolveCommonUserInput,
+  ResolveCommonUserResult,
+} from './ports/common-user';
+
+export type { CommonUserLinkRepository } from './ports/common-user-link';
+
+export {
+  advanceCommonUserLink,
+  sweepCommonUserLinks,
+  type LinkOutcome,
+  type LinkDependencies,
+} from './identity/linking';
+
 export type {
   ClockPort,
   IdGeneratorPort,

@@ -46,6 +46,22 @@ model Account {
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
   role         AccountRole   @default(buyer)
   status       AccountStatus @default(active)
+
+  /// 共通顧客ID。**発行元は代理店システムのみ**で、本システムは受け取るだけ。
+  /// ⚠️ 主キーにしない。外部が発行した値を主キーにすると、
+  /// 相手の都合で自分のデータが壊れる。人物識別は accounts.id のまま。
+  /// ⚠️ UNIQUE にしない。同一人物が別の認証手段で 2 アカウントを持つと、
+  /// どちらも同じ common_user_id へ解決されうる。UNIQUE にすると
+  /// 「正しい解決」が保存できずに落ちる。
+  commonUserId        String?   @map("common_user_id")
+  commonUserStatus    String    @default("UNRESOLVED") @map("common_user_status")
+  commonUserLinkedAt  DateTime? @map("common_user_linked_at") @db.Timestamptz(6)
+  /// 失敗の理由。⚠️ 応答本文をそのまま入れない（個人情報が混ざりうる）。
+  commonUserLastError String?   @map("common_user_last_error")
+  /// 再試行の状態。指示書は 4 列だが、バックオフには回数と次回時刻が要る。
+  commonUserAttemptCount  Int       @default(0) @map("common_user_attempt_count")
+  commonUserNextAttemptAt DateTime? @map("common_user_next_attempt_at") @db.Timestamptz(6)
+
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -56,6 +72,8 @@ model Account {
   idempotencyKeys      IdempotencyKey[]
 
   @@unique([authProvider, authSubject])
+  @@index([commonUserStatus, commonUserNextAttemptAt])
+  @@index([commonUserId])
   @@map("accounts")
 }
 
@@ -470,4 +488,25 @@ model IdempotencyKey {
   @@unique([actorAccountId, key])
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+/// 署名の使い捨て値（nonce）。リプレイ攻撃を防ぐ。
+///
+/// ⚠️ **一意制約そのものが判定。**
+/// 「探して無ければ受け付ける」だと、同時に届いた 2 本が両方通る。
+/// INSERT を試みて弾かれたかどうかで、使用済みかを決める。
+///
+/// ⚠️ プロセス内メモリに置かない。台数を増やすと別プロセスの記録が
+/// 見えず、リプレイを素通しする。しかもその事実が外からは見えない。
+model HmacNonce {
+  id        String   @id @default(uuid()) @db.Uuid
+  keyId     String   @map("key_id")
+  nonce     String
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  /// この時刻を過ぎたら掃除してよい。署名の許容時間より少し先。
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([keyId, nonce])
+  @@index([expiresAt])
+  @@map("hmac_nonces")
 }

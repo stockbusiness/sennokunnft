@@ -190,6 +190,73 @@ Phase 1 では `PaymentGatewayPort` の interface と Fake 実装のみ用意す
 
 ---
 
+## 4-2. 外部イベントへの変換（OVEW Wallet）
+
+⚠️ **内部イベントをそのまま外部へ送らない。**
+内部のイベント名は本システムのドメインの言葉であり、
+連携先の都合で変えると、外部の要求が内部設計に染み出す。
+変換はアダプタの責務とする。
+
+| 内部イベント          | →   | OVEW Wallet 向け      |
+| --------------------- | --- | --------------------- |
+| `entitlement.claimed` | →   | `entitlement.granted` |
+| `entitlement.revoked` | →   | `entitlement.revoked` |
+
+### 封筒（千ノ国共通契約）
+
+```json
+{
+  "event_id": "evt_xxxxx",
+  "event_type": "entitlement.granted",
+  "event_version": "1.0",
+  "source_system_key": "sennokuni-nft-market",
+  "target_site_key": "ovew-wallet",
+  "correlation_id": "corr_xxxxx",
+  "occurred_at": "2026-08-13T16:00:00+09:00",
+  "common_user_id": "cu_xxxxx",
+  "data": {
+    "entitlement_id": "ent_xxxxx",
+    "order_id": "ord_xxxxx",
+    "artwork_id": "art_xxxxx"
+  },
+  "metadata": {
+    "entitlement_type": "DIGITAL_COLLECTIBLE",
+    "asset_code": "art_xxxxx",
+    "name": "作品名",
+    "description": "作品説明",
+    "image_url": "https://...",
+    "thumbnail_url": "https://...",
+    "image_hash": "sha256:...",
+    "rarity": null,
+    "serial_number": "0007",
+    "blockchain_status": "NOT_MINTED"
+  }
+}
+```
+
+### 送信時の約束
+
+| 項目                | 約束                                                               |
+| ------------------- | ------------------------------------------------------------------ |
+| `serial_number`     | **文字列**で送る。`"0007"` であって `7` ではない                   |
+| `blockchain_status` | MVP では常に `NOT_MINTED`                                          |
+| `metadata`          | **購入・Claim 時点のスナップショット**                             |
+| `image_url`         | Wallet 側から取得できる HTTPS URL。`image_key` をそのまま送らない  |
+| 配送保証            | at-least-once・順序保証なし。Wallet 側が `event_id` で冪等処理する |
+| 送信の位置          | **コミット後**。トランザクション内で HTTP 送信しない               |
+
+⚠️ **後から作品マスタが変わっても、過去の Holding の表示情報を書き換えない。**
+購入時に見えていたものが後から変わるのは、購入者への約束の一方的な変更になる。
+
+⚠️ **`image_hash` は現在の DB に存在しない。** 作品テーブルへの追加が必要
+（[DATABASE_DESIGN.md](./DATABASE_DESIGN.md)）。Phase 4.5 の実装対象。
+
+> **Wallet への配送完了は、ブロックチェーンへの発行完了ではない。**
+> `Entitlement=CLAIMED` / `Wallet=DELIVERED` / `Blockchain=NOT_MINTED` は同時に成立する。
+> 状態を混同すると、利用者に「発行済み」と誤って伝わる。
+
+---
+
 ## 5. 購読側への要求事項
 
 🟡 **仮決定:** 本システムのイベントを購読する外部システムには、次を要求する。
@@ -204,8 +271,9 @@ Phase 1 では `PaymentGatewayPort` の interface と Fake 実装のみ用意す
 
 ## 6. 本文書の未決定事項
 
-| ID     | 概要                                             |
-| ------ | ------------------------------------------------ |
-| UD-701 | チェーン系識別子（`chainRef` 等）の値形式        |
-| UD-702 | 決済事業者の確定とイベント種別名                 |
-| UD-703 | Mint 完了通知の方式（コールバック / ポーリング） |
+| ID     | 概要                                                 |
+| ------ | ---------------------------------------------------- |
+| UD-701 | チェーン系識別子（`chainRef` 等）の値形式            |
+| UD-702 | 決済事業者の確定とイベント種別名                     |
+| UD-703 | Mint 完了通知の方式（コールバック / ポーリング）     |
+| UD-508 | `image_url` の長期参照方式（Phase 4.5 のブロッカー） |

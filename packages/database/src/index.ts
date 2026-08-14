@@ -14,10 +14,13 @@
  *    マイグレーションの生成・適用、本番DBへの接続は行わない。
  */
 export { PrismaAccountRepository } from './repositories/account.repository';
+export { PrismaCommonUserLinkRepository } from './repositories/common-user-link.repository';
 export { PrismaAuditLogRepository } from './repositories/audit.repository';
 export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
+
+export { PrismaNonceStore } from './repositories/nonce.repository';
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';
 
 export {

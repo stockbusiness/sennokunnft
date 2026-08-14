@@ -68,6 +68,45 @@
 ❓ **未決定 `UD-503`:** メールアドレスを本システム側で保持する必要があるか
 （＝メール送信を本システムが行うか、Supabase / 外部に委ねるか）。→ `UD-201`
 
+#### 共通顧客ID の紐付け（`accounts` への追加）
+
+✅ **事実:** `common_user_id` の発行元は**代理店システムのみ**。本システムは受け取るだけ。
+
+| 列                            | 型          | 制約                  | 説明                          |
+| ----------------------------- | ----------- | --------------------- | ----------------------------- |
+| `common_user_id`              | TEXT        | NULL, CHECK（形式）   | `cu_` ＋ 32 桁 hex            |
+| `common_user_status`          | TEXT        | NOT NULL, CHECK       | 下記 5 値                     |
+| `common_user_linked_at`       | TIMESTAMPTZ | NULL                  | 解決した時刻                  |
+| `common_user_last_error`      | TEXT        | NULL                  | ⚠️ 応答本文をそのまま入れない |
+| `common_user_attempt_count`   | INTEGER     | NOT NULL, CHECK(>= 0) | 再試行の回数                  |
+| `common_user_next_attempt_at` | TIMESTAMPTZ | NULL                  | 次に試してよい時刻            |
+
+状態: `UNRESOLVED` / `PENDING` / `RESOLVED` / `CONFLICT` / `ERROR`
+
+- CHECK `accounts_common_user_status_known` … 状態は 5 値のみ
+- CHECK `accounts_common_user_id_format` … `^cu_[0-9a-f]{32}$`
+- CHECK `accounts_common_user_resolved_has_id` … `RESOLVED` なら値と時刻が揃う
+- CHECK `accounts_common_user_unresolved_is_clean` … 未着手の行に失敗の痕跡を残さない
+- INDEX `(common_user_status, common_user_next_attempt_at)` … 再試行の取り出し用
+
+⚠️ **主キーにしない。** 外部が発行した値を主キーにすると、相手の都合で自分のデータが壊れる。
+人物識別は `accounts.id` のまま変えない。
+
+⚠️ **UNIQUE にしない。** 同一人物が別の認証手段で 2 アカウントを持つと、
+どちらも同じ `common_user_id` へ解決されうる。
+UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
+
+⚠️ **`CONFLICT` の行を自動で直さない。** 上書きすると受取先が黙って別人に変わる。
+`CONFLICT` になる理由は 3 つあり、`common_user_last_error` で区別する。
+
+| 理由                                   | `last_error` の例                                |
+| -------------------------------------- | ------------------------------------------------ |
+| 既存と異なる値が返った                 | `resolved id differs from the stored id`         |
+| 本システムが検証していない属性で一致   | `unacceptable match: identity:email`             |
+| 名寄せ候補が残っている（重複の可能性） | `identity_match_status=unverified_candidate_...` |
+
+---
+
 ### 3.2 `artworks` — 作品
 
 | 列                          | 型          | 制約                             | 説明                                      |

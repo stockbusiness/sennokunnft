@@ -34,6 +34,11 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   IMAGE_INVALID: HttpStatus.BAD_REQUEST,
   IMAGE_TOO_LARGE: HttpStatus.PAYLOAD_TOO_LARGE,
   IMAGE_UNSUPPORTED_TYPE: HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+  // 相手の応答が契約と違う。利用者の操作の問題ではないので 5xx 側に置く。
+  COMMON_USER_ID_INVALID: HttpStatus.BAD_GATEWAY,
+  // まだ解決していないだけで、失敗ではない。受取権は失効させない。
+  COMMON_USER_PENDING: HttpStatus.ACCEPTED,
+  COMMON_USER_MISMATCH: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -60,6 +65,9 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   IMAGE_INVALID: '画像ファイルとして読み取れませんでした。',
   IMAGE_TOO_LARGE: '画像のサイズが大きすぎます。',
   IMAGE_UNSUPPORTED_TYPE: 'この形式の画像は登録できません。JPEG・PNG・WebP をご利用ください。',
+  COMMON_USER_ID_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
+  COMMON_USER_PENDING: 'お客様情報の確認中です。しばらくしてからお試しください。',
+  COMMON_USER_MISMATCH: 'この受取りは、ご購入されたご本人のアカウントでお受け取りください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
