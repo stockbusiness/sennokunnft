@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -57,8 +58,15 @@ export class ClaimController {
   @Post(':token/confirm')
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
-  async confirm(@Param('token') token: string, @Body() body: unknown): Promise<ClaimConfirmation> {
+  async confirm(
+    @Param('token') token: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: unknown,
+  ): Promise<ClaimConfirmation> {
     const parsed = parseOrThrow(confirmBodySchema, body);
-    return this.claims.confirm(token, parsed.common_user_id);
+    // ⚠️ **必須にする。** 省略を許すと、DB は更新できたが応答だけ失われた
+    //    ときの再送を業務側で止められない（nonce は新しくなるので効かない）。
+    const key = this.claims.requireIdempotencyKey(idempotencyKey);
+    return this.claims.confirm(token, parsed.common_user_id, key);
   }
 }

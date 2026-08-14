@@ -24,6 +24,7 @@ import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
 import { ClaimService } from './claim/claim.service';
 import { CLAIM_HMAC_CONFIG, SenNoKuniHmacGuard, type ClaimHmacConfig } from './claim/hmac.guard';
+import { CorrelationMiddleware } from './common/correlation.middleware';
 import { IdempotencyService } from './common/idempotency';
 import { AdminCatalogController } from './catalog/admin-catalog.controller';
 import { AdminCatalogService } from './catalog/admin-catalog.service';
@@ -94,6 +95,9 @@ export class AppModule implements NestModule {
    * 対象を画像の MIME に限定しているので、他のエンドポイントには影響しない。
    */
   configure(consumer: MiddlewareConsumer): void {
+    // ⚠️ **すべての経路へ最初に適用する。**
+    //    ここより後に置いたミドルウェアのログにも相関IDが乗る。
+    consumer.apply(CorrelationMiddleware).forRoutes('*');
     consumer
       .apply(express.raw({ type: ['image/*', 'application/octet-stream'], limit: RAW_BODY_LIMIT }))
       .forRoutes('api/v1/admin/artworks/:id/image');
@@ -154,7 +158,9 @@ export class AppModule implements NestModule {
           : [
               {
                 provide: ClaimService,
-                useFactory: () => new ClaimService(claim.claims, claim.tokens, deps.clock),
+                useFactory: (idempotency: IdempotencyService) =>
+                  new ClaimService(claim.claims, claim.tokens, deps.clock, idempotency),
+                inject: [IdempotencyService],
               },
               SenNoKuniHmacGuard,
               {

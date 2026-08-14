@@ -1,13 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   evaluateWalletClaim,
   toPublicClaimStatus,
+  type ClaimLookupResult,
   type ClaimRepositoryPort,
   type ClaimTokenPort,
   type ClockPort,
   type PublicClaimStatus,
 } from '@sengoku/domain';
 import { DomainErrorException } from '../common/domain-error.filter';
+import type { IdempotencyService } from '../common/idempotency';
+
+/** 冪等キーの区切り。他の操作と同じキーがぶつからないようにする。 */
+export const CLAIM_CONFIRM_SCOPE = 'collectible-claim-confirm';
 
 /** `GET` の応答。✅ **最小形式**（回答書 §11）。画像とシリアルは返さない。 */
 export interface ClaimView {
@@ -35,7 +40,27 @@ export class ClaimService {
     private readonly claims: ClaimRepositoryPort,
     private readonly tokens: ClaimTokenPort,
     private readonly clock: ClockPort,
+    private readonly idempotency: IdempotencyService,
   ) {}
+
+  /**
+   * `Idempotency-Key` を取り出す。**省略は 400。**
+   *
+   * ⚠️ 省略時にサーバー側で発番しない。毎回違うキーになり、
+   * 再送を見分けられなくなる。それでは付けていないのと同じ。
+   */
+  requireIdempotencyKey(raw: string | undefined): string {
+    const key = this.idempotency.normalizeKey(raw);
+    if (key === null) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Idempotency-Key ヘッダが必要です。',
+        },
+      });
+    }
+    return key;
+  }
 
   /** 受取りの状態を返す。 */
   async view(token: string): Promise<ClaimView> {
@@ -53,13 +78,78 @@ export class ClaimService {
     };
   }
 
-  /** 受取りを確定する。 */
-  async confirm(token: string, commonUserId: string): Promise<ClaimConfirmation> {
-    const found = await this.claims.findByTokenHash(this.tokens.hash(token));
+  /**
+   * 受取りを確定する。
+   *
+   * ⚠️ **`nonce` と `Idempotency-Key` は役割が違う。混同しない。**
+   * `nonce` が防ぐのは「同じ署名の要求をそのまま録画・再送された」場合。
+   * しかし **DB は更新できたが応答だけが失われた**とき、正規の相手は
+   * **新しい nonce で** 送り直す。これは署名としては正当なので nonce では防げない。
+   * 業務上の二重実行を止めるのが `Idempotency-Key` の仕事。
+   */
+  async confirm(
+    token: string,
+    commonUserId: string,
+    idempotencyKey: string,
+  ): Promise<ClaimConfirmation> {
+    const tokenHash = this.tokens.hash(token);
+    const found = await this.claims.findByTokenHash(tokenHash);
     if (found === null) {
+      // ⚠️ 冪等キーを占有する**前**に弾く。
+      //    知らないトークンでキーを使い潰せてしまうと、正規の要求が
+      //    同じキーで送れなくなる。
       throw new DomainErrorException('CLAIM_TOKEN_INVALID');
     }
 
+    // ⚠️ **アクターは購入者のアカウント。**
+    //    キーはアクターごとに区切らないと、他人の使ったキーを当てることで
+    //    その応答（＝他人のデータ）を読み出せてしまう。
+    //    呼び出し元は Wallet だが、Wallet は本システムのアカウントを持たない。
+    //    受取権の持ち主である購入者を単位にすれば、契約上も安全に固定できる。
+    // ⚠️ ダイジェストに**生のトークンを入れない**。ハッシュを使う。
+    const digest = this.idempotency.digest(CLAIM_CONFIRM_SCOPE, {
+      tokenHash,
+      commonUserId,
+    });
+    const outcome = await this.idempotency.begin<ClaimConfirmation>(
+      found.purchaserAccountId,
+      idempotencyKey,
+      digest,
+    );
+    if (outcome.kind === 'replay') {
+      return outcome.body;
+    }
+
+    let result: ClaimConfirmation;
+    try {
+      result = await this.execute(tokenHash, commonUserId, found);
+    } catch (error) {
+      // 本体が失敗したら解放する。解放しないと、一度失敗しただけのキーが
+      // 期限切れまで塞がり、相手がやり直せなくなる。
+      await outcome.claim.release().catch(() => undefined);
+      throw error;
+    }
+
+    if (result.reason === 'common_user_pending') {
+      // ⚠️ **保留を「結果」として記録しない。**
+      //    記録すると、同じキーで送り直したときに解決後も PENDING が返り続ける。
+      //    指示書 §7 の「解決後に再実行可能」を満たせなくなる。
+      //    保留は状態を変えていないので、解放しても二重実行にならない。
+      await outcome.claim.release().catch(() => undefined);
+      return result;
+    }
+
+    // ⚠️ ここで失敗しても解放しない。本体は既に成功している。
+    //    解放すると、やり直しで本体がもう一度走る。
+    await outcome.claim.complete(202, result);
+    return result;
+  }
+
+  private async execute(
+    tokenHash: string,
+    commonUserId: string,
+    found: ClaimLookupResult,
+  ): Promise<ClaimConfirmation> {
     const decision = evaluateWalletClaim({
       entitlement: found.entitlement,
       presentedCommonUserId: commonUserId,
@@ -90,7 +180,7 @@ export class ClaimService {
       // ⚠️ 判定から書き込みまでの隙間で、別の要求が確定させた。
       //    読み直して、確定させたのが同じ本人なら成功として答える。
       //    ここで一律に失敗を返すと、再送しただけの相手を落としてしまう。
-      const reread = await this.claims.findByTokenHash(this.tokens.hash(token));
+      const reread = await this.claims.findByTokenHash(tokenHash);
       if (
         reread !== null &&
         reread.entitlement.claimedByCommonUserId === commonUserId &&

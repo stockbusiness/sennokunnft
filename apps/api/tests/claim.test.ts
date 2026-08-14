@@ -80,10 +80,19 @@ class FakeClaimRepository implements ClaimRepositoryPort {
     });
   }
 
+  /** 実際に受取が成立した回数。二重受取が起きていないかを見る。 */
+  claimCount = 0;
+
+  /** 購入者の common_user が解決した、という状況を作る。 */
+  resolvePurchaser(commonUserId: string): void {
+    this.row = { ...this.row, purchaserCommonUserId: commonUserId };
+  }
+
   confirmClaim(input: { commonUserId: string }): Promise<ClaimConfirmOutcome> {
     if (this.row.status !== 'issued') {
       return Promise.resolve({ kind: 'raced' });
     }
+    this.claimCount += 1;
     this.row = {
       ...this.row,
       status: 'claimed',
@@ -153,7 +162,10 @@ async function boot(
   }).compile();
   app = moduleRef.createNestApplication({ rawBody: true });
   app.useGlobalFilters(new DomainErrorFilter());
-  await app.init();
+  // ⚠️ init ではなく listen。supertest は listen していないサーバーに対して
+  //    要求ごとに listen するため、並行して投げると互いに衝突する。
+  //    同時実行を確かめたいテストが、その衝突で落ちてしまう。
+  await app.listen(0);
 }
 
 afterEach(async () => {
@@ -260,14 +272,24 @@ describe('GET の応答', () => {
   });
 });
 
-/** `POST` を署名付きで送る。 */
-async function postConfirm(commonUserId: string, token = TOKEN) {
+let keySeq = 1;
+
+/** `POST` を署名付きで送る。冪等キーは既定で毎回新しくする。 */
+async function postConfirm(
+  commonUserId: string,
+  options: { token?: string; idempotencyKey?: string | null } = {},
+) {
+  const token = options.token ?? TOKEN;
   const path = `/api/collectible-claims/${token}/confirm`;
   const rawBody = JSON.stringify({ common_user_id: commonUserId });
-  return request(app.getHttpServer())
-    .post(path)
-    .set({ ...signed('POST', path, rawBody), 'content-type': 'application/json' })
-    .send(rawBody);
+  const headers: Record<string, string> = {
+    ...signed('POST', path, rawBody),
+    'content-type': 'application/json',
+  };
+  if (options.idempotencyKey !== null) {
+    headers['idempotency-key'] = options.idempotencyKey ?? `idem-key-${keySeq++}`;
+  }
+  return request(app.getHttpServer()).post(path).set(headers).send(rawBody);
 }
 
 describe('POST の応答', () => {
@@ -340,5 +362,119 @@ describe('POST の応答', () => {
     // ✅ Claim API だけ独自形式にしない。
     expect(response.body).toHaveProperty('error.code');
     expect(response.body).toHaveProperty('error.message');
+  });
+});
+
+describe('Idempotency-Key（正規の再送による二重受取を防ぐ）', () => {
+  beforeEach(async () => {
+    await boot();
+  });
+
+  it('ヘッダが無ければ 400', async () => {
+    // 省略を許すと、応答だけ失われた場合の再送を業務側で止められない。
+    const response = await postConfirm(PURCHASER_CU, { idempotencyKey: null });
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('同じキー・同じ内容の再送は、最初の結果をそのまま返す', async () => {
+    // ⚠️ これが nonce では防げない経路。正規の再送は新しい nonce を持つ。
+    const first = await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-reuse' });
+    expect(first.status).toBe(202);
+    const second = await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-reuse' });
+    expect(second.status).toBe(202);
+    expect(second.body).toEqual(first.body);
+  });
+
+  it('同じキーで内容が違えば 409 IDEMPOTENCY_CONFLICT', async () => {
+    await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-mixed' });
+    const response = await postConfirm(OTHER_CU, { idempotencyKey: 'idem-key-mixed' });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('同時に 8 本送っても、受取が成立するのは 1 回だけ', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        postConfirm(PURCHASER_CU, { idempotencyKey: `idem-key-parallel-${i}` }),
+      ),
+    );
+    // 冪等キーが違うので全部が処理へ進むが、受取権は 1 回しか使われない。
+    expect(responses.every((r) => r.status === 202)).toBe(true);
+    expect(claims.claimCount).toBe(1);
+  });
+
+  it('知らないトークンでは冪等キーを使い潰さない', async () => {
+    // ⚠️ 先に占有すると、存在しないトークンを送るだけで
+    //    正規の要求が同じキーを使えなくなる。
+    const bad = await postConfirm(PURCHASER_CU, {
+      token: 'unknown-token',
+      idempotencyKey: 'idem-key-not-burned',
+    });
+    expect(bad.status).toBe(404);
+    const good = await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-not-burned' });
+    expect(good.status).toBe(202);
+    expect(good.body).toEqual({ status: 'DELIVERY_PENDING' });
+  });
+
+  it('保留（未解決）は結果として記録せず、同じキーで再実行できる', async () => {
+    // ⚠️ 記録すると、解決後も同じキーで PENDING が返り続ける（指示書 §7 違反）。
+    const repo = new FakeClaimRepository({ purchaserCommonUserId: null });
+    await app.close();
+    await boot({ repo });
+
+    const pending = await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-pending' });
+    expect(pending.body).toEqual({ status: 'PENDING', reason: 'common_user_pending' });
+
+    // 解決した、という想定にする。
+    repo.resolvePurchaser(PURCHASER_CU);
+
+    const retried = await postConfirm(PURCHASER_CU, { idempotencyKey: 'idem-key-pending' });
+    expect(retried.status).toBe(202);
+    expect(retried.body).toEqual({ status: 'DELIVERY_PENDING' });
+  });
+});
+
+describe('X-Correlation-Id', () => {
+  beforeEach(async () => {
+    await boot();
+  });
+
+  it('指定された値をそのまま返す', async () => {
+    const path = `/api/collectible-claims/${TOKEN}`;
+    const response = await request(app.getHttpServer())
+      .get(path)
+      .set({ ...signed('GET', path), 'x-correlation-id': 'trace-abc-123' });
+    expect(response.headers['x-correlation-id']).toBe('trace-abc-123');
+  });
+
+  it('指定が無ければサーバー側で発番する', async () => {
+    const path = `/api/collectible-claims/${TOKEN}`;
+    const response = await request(app.getHttpServer()).get(path).set(signed('GET', path));
+    expect(response.headers['x-correlation-id']).toMatch(/^[A-Za-z0-9._-]{8,128}$/);
+  });
+
+  it('改行を含む値は採用しない（ログの行を偽装させない）', async () => {
+    const path = `/api/collectible-claims/${TOKEN}`;
+    const response = await request(app.getHttpServer())
+      .get(path)
+      .set({ ...signed('GET', path), 'x-correlation-id': 'abc injected' });
+    expect(response.headers['x-correlation-id']).not.toContain(' ');
+  });
+
+  it('長すぎる値は採用しない', async () => {
+    const path = `/api/collectible-claims/${TOKEN}`;
+    const response = await request(app.getHttpServer())
+      .get(path)
+      .set({ ...signed('GET', path), 'x-correlation-id': 'x'.repeat(500) });
+    expect(response.headers['x-correlation-id']?.length).toBeLessThanOrEqual(128);
+  });
+
+  it('署名に失敗した要求にも付く（手前で落ちた要求も追える）', async () => {
+    const response = await request(app.getHttpServer())
+      .get(`/api/collectible-claims/${TOKEN}`)
+      .set({ 'x-correlation-id': 'trace-unauthed' });
+    expect(response.status).toBe(401);
+    expect(response.headers['x-correlation-id']).toBe('trace-unauthed');
   });
 });
