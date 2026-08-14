@@ -9,6 +9,8 @@ import {
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   assertCommonUserLinkingConfig,
+  assertClaimApiConfig,
+  parseHmacKeys,
   UnsafeEnvironmentError,
 } from '../src/index';
 
@@ -242,5 +244,67 @@ describe('共通顧客HUB連携の設定ガード', () => {
     } catch (error) {
       expect(String(error)).not.toContain('super-secret-key-value');
     }
+  });
+});
+
+describe('Claim API の設定検査', () => {
+  it('既定は無効（指示書 §15: Feature Flag 既定 ON を禁止）', () => {
+    const env = parseEnv(apiEnvSchema, MINIMAL_API_ENV);
+    expect(env.ok).toBe(true);
+    if (env.ok) {
+      expect(env.env.CLAIM_API_ENABLED).toBe(false);
+    }
+  });
+
+  it('無効なら鍵が無くても通る', () => {
+    expect(() => assertClaimApiConfig({ CLAIM_API_ENABLED: false })).not.toThrow();
+  });
+
+  it('有効なのに鍵が無ければ起動を拒否する', () => {
+    // 起動させると相手の要求が全部 403 で落ち、攻撃と設定漏れの区別がつかない。
+    expect(() => assertClaimApiConfig({ CLAIM_API_ENABLED: true })).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('鍵の形が壊れていれば起動を拒否する', () => {
+    // 値はあるが 1 本も読めない、が最も気づきにくい。
+    expect(() =>
+      assertClaimApiConfig({ CLAIM_API_ENABLED: true, CLAIM_HMAC_KEYS: 'no-separator' }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('揃っていれば通る', () => {
+    expect(() =>
+      assertClaimApiConfig({ CLAIM_API_ENABLED: true, CLAIM_HMAC_KEYS: 'key-1:secret-1' }),
+    ).not.toThrow();
+  });
+
+  it('拒否の理由に秘密鍵の値を含めない', () => {
+    try {
+      assertClaimApiConfig({ CLAIM_API_ENABLED: true, CLAIM_HMAC_KEYS: 'broken super-secret' });
+    } catch (error) {
+      expect(String(error)).not.toContain('super-secret');
+    }
+  });
+});
+
+describe('HMAC 鍵の読み取り', () => {
+  it('複数の鍵を読める（入れ替え中は新旧どちらも受け取る）', () => {
+    expect(parseHmacKeys('a:1,b:2')).toEqual({ a: '1', b: '2' });
+  });
+
+  it('秘密鍵に : が含まれても壊れない', () => {
+    expect(parseHmacKeys('a:hello:world')).toEqual({ a: 'hello:world' });
+  });
+
+  it('空白や空項目を捨てる', () => {
+    expect(parseHmacKeys(' a : 1 , , b:2 ')).toEqual({ a: '1', b: '2' });
+  });
+
+  it('区切りの無い項目は採用しない', () => {
+    expect(parseHmacKeys('nokey')).toEqual({});
+  });
+
+  it('鍵IDまたは秘密鍵が空の項目は採用しない', () => {
+    expect(parseHmacKeys(':secret,key:')).toEqual({});
   });
 });

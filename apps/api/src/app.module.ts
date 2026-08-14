@@ -9,6 +9,8 @@ import express from 'express';
 import type { AccountLookupPort, TokenVerifierPort } from '@sengoku/auth';
 import type {
   ArtworkRepository,
+  ClaimRepositoryPort,
+  ClaimTokenPort,
   IdempotencyStore,
   AuditLogPort,
   ClockPort,
@@ -16,7 +18,13 @@ import type {
   ListingRepository,
   StoragePort,
 } from '@sengoku/domain';
+import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
+import type { Logger } from '@sengoku/observability';
 import { AuthGuard } from './auth/auth.guard';
+import { ClaimController } from './claim/claim.controller';
+import { ClaimService } from './claim/claim.service';
+import { CLAIM_HMAC_CONFIG, SenNoKuniHmacGuard, type ClaimHmacConfig } from './claim/hmac.guard';
+import { CorrelationMiddleware } from './common/correlation.middleware';
 import { IdempotencyService } from './common/idempotency';
 import { AdminCatalogController } from './catalog/admin-catalog.controller';
 import { AdminCatalogService } from './catalog/admin-catalog.service';
@@ -47,6 +55,19 @@ export interface AppDependencies {
   readonly storage: StoragePort;
   readonly audit: AuditLogPort;
   readonly generateStorageKey: StorageKeyFactory;
+  /**
+   * Claim（OVEW Wallet 連携）。
+   *
+   * ⚠️ **既定は無効。** 有効化するのは、相手側の署名器が v1.1 FINAL へ揃い、
+   * 固定ベクトルが両システムで一致してから。
+   */
+  readonly claim?: {
+    readonly enabled: boolean;
+    readonly claims: ClaimRepositoryPort;
+    readonly tokens: ClaimTokenPort;
+    readonly verifier: SenNoKuniHmacVerifier | null;
+    readonly logger: Logger;
+  };
 }
 
 /**
@@ -74,12 +95,20 @@ export class AppModule implements NestModule {
    * 対象を画像の MIME に限定しているので、他のエンドポイントには影響しない。
    */
   configure(consumer: MiddlewareConsumer): void {
+    // ⚠️ **すべての経路へ最初に適用する。**
+    //    ここより後に置いたミドルウェアのログにも相関IDが乗る。
+    consumer.apply(CorrelationMiddleware).forRoutes('*');
     consumer
       .apply(express.raw({ type: ['image/*', 'application/octet-stream'], limit: RAW_BODY_LIMIT }))
       .forRoutes('api/v1/admin/artworks/:id/image');
   }
 
   static register(deps: AppDependencies): DynamicModule {
+    // ⚠️ **依存が無いときは、経路ごと生やさない。**
+    //    「登録はするが呼ばれたら落ちる」形にすると、Nest は起動時に
+    //    すべての provider を作るため、Claim を使わない構成まで道連れに落ちる。
+    //    実際にそれで既存の API テストが全滅した。
+    const claim = deps.claim;
     return {
       module: AppModule,
       controllers: [
@@ -87,6 +116,7 @@ export class AppModule implements NestModule {
         CatalogController,
         PublicListingController,
         AdminCatalogController,
+        ...(claim === undefined ? [] : [ClaimController]),
       ],
       providers: [
         {
@@ -123,6 +153,27 @@ export class AppModule implements NestModule {
           provide: IdempotencyService,
           useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
         },
+        ...(claim === undefined
+          ? []
+          : [
+              {
+                provide: ClaimService,
+                useFactory: (idempotency: IdempotencyService) =>
+                  new ClaimService(claim.claims, claim.tokens, deps.clock, idempotency),
+                inject: [IdempotencyService],
+              },
+              SenNoKuniHmacGuard,
+              {
+                provide: CLAIM_HMAC_CONFIG,
+                useFactory: (): ClaimHmacConfig => ({
+                  verifier: claim.verifier,
+                  clock: deps.clock,
+                  logger: claim.logger,
+                  // 既定は無効。有効化は相手側の署名器が揃ってから。
+                  enabled: claim.enabled,
+                }),
+              },
+            ]),
         {
           // ✅ 認可はガードで一括保護する。ルート個別にチェックを書かない。
           //    グローバル登録なので、新しいエンドポイントを足しても

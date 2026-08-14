@@ -28,6 +28,10 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   ENTITLEMENT_OWNER_MISMATCH: HttpStatus.FORBIDDEN,
   // 403 にしない。有効なトークンが存在するかを攻撃者に教えないため。
   CLAIM_TOKEN_INVALID: HttpStatus.NOT_FOUND,
+  // 期限切れは「かつては有効だった」ことを伝えてよい。相手が再取得を諦められる。
+  CLAIM_EXPIRED: HttpStatus.GONE,
+  CLAIM_REVOKED: HttpStatus.CONFLICT,
+  CLAIM_PROCESSING: HttpStatus.CONFLICT,
   MINT_ALREADY_EXISTS: HttpStatus.CONFLICT,
   MINT_ATTEMPTS_EXHAUSTED: HttpStatus.CONFLICT,
   IDEMPOTENCY_CONFLICT: HttpStatus.CONFLICT,
@@ -59,6 +63,9 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ENTITLEMENT_NOT_CLAIMABLE: 'この受取り権利は現在お受け取りいただけません。',
   ENTITLEMENT_OWNER_MISMATCH: 'この受取り権利をお受け取りいただく権限がありません。',
   CLAIM_TOKEN_INVALID: 'お探しの受取りページは見つかりませんでした。',
+  CLAIM_EXPIRED: 'この受取りの期限が過ぎています。運営までお問い合わせください。',
+  CLAIM_REVOKED: 'この受取りは無効になっています。運営までお問い合わせください。',
+  CLAIM_PROCESSING: 'ただいま処理中です。しばらくしてからお試しください。',
   MINT_ALREADY_EXISTS: 'すでに発行済みです。',
   MINT_ATTEMPTS_EXHAUSTED: '発行処理が完了しませんでした。運営までお問い合わせください。',
   IDEMPOTENCY_CONFLICT: '同じ操作が別の内容で送信されました。もう一度お試しください。',

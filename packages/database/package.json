@@ -17,10 +17,10 @@
   ],
   "scripts": {
     "generate": "prisma generate",
-    "build": "pnpm run generate && tsc -p tsconfig.build.json",
-    "typecheck": "prisma generate && tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "prisma generate && vitest run",
+    "test": "vitest run",
     "test:watch": "vitest",
     "db:validate": "prisma validate",
     "db:format": "prisma format",

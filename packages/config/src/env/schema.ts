@@ -79,6 +79,28 @@ const apiEnvObject = baseEnvObject.extend({
   MEDIA_STORAGE_DIR: z.string().min(1).default('./.media'),
   /** 画像の表示URLの前置き。保存するのはキーで、URLは実行時に解決する。 */
   MEDIA_PUBLIC_PREFIX: z.string().min(1).default('/media'),
+
+  /**
+   * Claim API（OVEW Wallet 連携）。
+   *
+   * ⚠️ **既定は OFF**（指示書 §15「Feature Flag既定ON」禁止）。
+   * OVEW Wallet 側の署名器が v1.1 FINAL へ揃い、
+   * 固定ベクトルが両システムで一致してから ON にする。
+   */
+  CLAIM_API_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * HMAC の鍵。`鍵ID:秘密鍵` をカンマ区切りで並べる。
+   *
+   * ⚠️ **複数書けるようにしてあるのは、鍵の入れ替え中に新旧どちらの署名も
+   * 受け取れるようにするため。** 1 個しか持てないと、差し替えた瞬間に
+   * 相手の要求が全部落ちる（`UD-1004`）。
+   *
+   * ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけを書く。
+   */
+  CLAIM_HMAC_KEYS: z.string().min(1).optional(),
 });
 
 const workerEnvObject = baseEnvObject.extend({

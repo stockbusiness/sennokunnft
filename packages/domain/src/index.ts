@@ -97,6 +97,23 @@ export {
 } from './entitlement/claim';
 
 export {
+  PUBLIC_CLAIM_STATUSES,
+  WALLET_DELIVERY_STATUSES,
+  toPublicClaimStatus,
+  type PublicClaimStatus,
+  type WalletDeliveryStatus,
+} from './entitlement/claim-status';
+
+export type { ClaimRepositoryPort, ClaimLookupResult, ClaimConfirmOutcome } from './ports/claim';
+
+export {
+  evaluateWalletClaim,
+  type WalletClaimAttempt,
+  type WalletClaimDecision,
+  type WalletClaimableEntitlement,
+} from './entitlement/wallet-claim';
+
+export {
   availableSupply,
   reserveSupply,
   releaseReservation,
