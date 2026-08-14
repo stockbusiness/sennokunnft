@@ -4,6 +4,8 @@ import {
   ROLES,
   ANONYMOUS,
   can,
+  canAtRoleLevel,
+  requiresOwnership,
   isAllowed,
   type Action,
   type Actor,
@@ -35,6 +37,7 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },
+  'claim.reissue': { anonymous: false, buyer: true, operator: false, auditor: false },
   'collection.view': { anonymous: false, buyer: true, operator: true, auditor: true },
   'mint_job.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
   'audit_log.view': { anonymous: false, buyer: false, operator: true, auditor: true },
@@ -79,6 +82,19 @@ describe('所有権チェック（IDOR 対策）', () => {
     expect(isAllowed(actor('operator'), 'claim.accept', { ownerAccountId: SELF })).toBe(false);
   });
 
+  it('受取URLの再発行を運営が代行できない', () => {
+    // ⚠️ 再発行は旧 URL を失効させ、新しい受取口を作る操作。
+    //    代行できるなら「運営が誰かの受取先を差し替えられる」ことになる。
+    //    運営代行の可否は UD-1009 で未決定。決まるまで経路を作らない。
+    expect(isAllowed(actor('operator'), 'claim.reissue', { ownerAccountId: OTHER })).toBe(false);
+    expect(isAllowed(actor('operator'), 'claim.reissue', { ownerAccountId: SELF })).toBe(false);
+  });
+
+  it('受取URLを再発行できるのは購入者本人だけ', () => {
+    expect(isAllowed(actor('buyer'), 'claim.reissue', { ownerAccountId: SELF })).toBe(true);
+    expect(isAllowed(actor('buyer'), 'claim.reissue', { ownerAccountId: OTHER })).toBe(false);
+  });
+
   it('自分のコレクションのみ閲覧できる', () => {
     expect(isAllowed(actor('buyer'), 'collection.view', { ownerAccountId: SELF })).toBe(true);
     expect(isAllowed(actor('buyer'), 'collection.view', { ownerAccountId: OTHER })).toBe(false);
@@ -121,10 +137,44 @@ describe('管理操作（Z-5）', () => {
       'order.create',
       'checkout.create',
       'claim.accept',
+      'claim.reissue',
       'mint_job.retry',
     ];
     for (const action of writeActions) {
       expect(isAllowed(actor('auditor'), action, { ownerAccountId: SELF })).toBe(false);
     }
+  });
+});
+
+describe('ガードが使う役割段階の判定', () => {
+  it('所有権が要る操作でも、対象なしで入口を通せる', () => {
+    // ⚠️ ここを can() で判定すると、対象を知らないガードでは常に拒否になり、
+    //    エンドポイントへ永久に到達できない。実際 claim.reissue で起きた。
+    expect(canAtRoleLevel(actor('buyer'), 'claim.reissue').allowed).toBe(true);
+    expect(canAtRoleLevel(actor('buyer'), 'claim.accept').allowed).toBe(true);
+    expect(canAtRoleLevel(actor('buyer'), 'checkout.create').allowed).toBe(true);
+  });
+
+  it('ロールで許されていない操作は入口で止まる', () => {
+    expect(canAtRoleLevel(actor('operator'), 'claim.reissue').allowed).toBe(false);
+    expect(canAtRoleLevel(actor('anonymous'), 'claim.reissue').allowed).toBe(false);
+  });
+
+  it('停止中のアカウントは入口で止まる', () => {
+    const suspended = { role: 'buyer' as const, accountId: SELF, isActive: false };
+    expect(canAtRoleLevel(suspended, 'claim.reissue').allowed).toBe(false);
+  });
+
+  it('所有権が要る操作を宣言できる', () => {
+    // ハンドラ側が「対象付きで呼び直す義務」を機械的に確かめられるようにする。
+    expect(requiresOwnership('claim.reissue')).toBe(true);
+    expect(requiresOwnership('claim.accept')).toBe(true);
+    expect(requiresOwnership('artwork.manage')).toBe(false);
+  });
+
+  it('入口を通っても、対象付きの判定は別に要る', () => {
+    // ⚠️ 入口を通ったことは「呼んでよい」までしか意味しない。
+    expect(canAtRoleLevel(actor('buyer'), 'claim.reissue').allowed).toBe(true);
+    expect(isAllowed(actor('buyer'), 'claim.reissue', { ownerAccountId: OTHER })).toBe(false);
   });
 });

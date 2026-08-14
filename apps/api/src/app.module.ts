@@ -9,7 +9,6 @@ import express from 'express';
 import type { AccountLookupPort, TokenVerifierPort } from '@sengoku/auth';
 import type {
   ArtworkRepository,
-  ClaimRepositoryPort,
   ClaimTokenPort,
   RateLimiterPort,
   IdempotencyStore,
@@ -24,6 +23,8 @@ import type { Logger } from '@sengoku/observability';
 import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
 import { ClaimService } from './claim/claim.service';
+import { ClaimReissueController } from './claim/reissue.controller';
+import { ReissueService, type ClaimTokenRotationSource } from './claim/reissue.service';
 import { CLAIM_HMAC_CONFIG, SenNoKuniHmacGuard, type ClaimHmacConfig } from './claim/hmac.guard';
 import {
   CLAIM_RATE_LIMIT_CONFIG,
@@ -69,7 +70,7 @@ export interface AppDependencies {
    */
   readonly claim?: {
     readonly enabled: boolean;
-    readonly claims: ClaimRepositoryPort;
+    readonly claims: ClaimTokenRotationSource;
     readonly tokens: ClaimTokenPort;
     readonly verifier: SenNoKuniHmacVerifier | null;
     readonly logger: Logger;
@@ -77,6 +78,8 @@ export interface AppDependencies {
     /** 1 分あたりの上限（鍵IDごと）。用途で枠を分ける。 */
     readonly getPerMinute: number;
     readonly postPerMinute: number;
+    /** 受取ページの前置き。末尾のスラッシュを含めない。 */
+    readonly claimBaseUrl: string;
   };
 }
 
@@ -126,7 +129,7 @@ export class AppModule implements NestModule {
         CatalogController,
         PublicListingController,
         AdminCatalogController,
-        ...(claim === undefined ? [] : [ClaimController]),
+        ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
         {
@@ -174,6 +177,17 @@ export class AppModule implements NestModule {
               },
               SenNoKuniHmacGuard,
               ClaimRateLimitGuard,
+              {
+                provide: ReissueService,
+                useFactory: () =>
+                  new ReissueService(
+                    claim.claims,
+                    claim.tokens,
+                    deps.clock,
+                    deps.audit,
+                    claim.claimBaseUrl,
+                  ),
+              },
               {
                 provide: CLAIM_RATE_LIMIT_CONFIG,
                 useFactory: (): ClaimRateLimitConfig => ({

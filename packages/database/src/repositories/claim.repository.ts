@@ -2,6 +2,7 @@ import type {
   ClaimConfirmOutcome,
   ClaimLookupResult,
   ClaimRepositoryPort,
+  ReissuableEntitlement,
   WalletDeliveryStatus,
 } from '@sengoku/domain';
 import type { PrismaClient } from '../../generated/client';
@@ -86,5 +87,64 @@ export class PrismaClaimRepository implements ClaimRepositoryPort {
       },
     });
     return updated.count === 1 ? { kind: 'claimed' } : { kind: 'raced' };
+  }
+
+  /** 再発行の判定に必要な情報だけを引く。 */
+  async findForReissue(entitlementId: string): Promise<ReissuableEntitlement | null> {
+    const row = await this.prisma.entitlement.findUnique({
+      where: { id: entitlementId },
+      select: { id: true, accountId: true, status: true, expiresAt: true, claimTokenHash: true },
+    });
+    if (row === null) {
+      return null;
+    }
+    return {
+      id: row.id,
+      accountId: row.accountId,
+      status: row.status,
+      expiresAt: row.expiresAt,
+    };
+  }
+
+  /** 判定時に見えていたハッシュ。差し替えの条件に使う。 */
+  async currentTokenHash(entitlementId: string): Promise<string | null> {
+    const row = await this.prisma.entitlement.findUnique({
+      where: { id: entitlementId },
+      select: { claimTokenHash: true },
+    });
+    return row?.claimTokenHash ?? null;
+  }
+
+  /**
+   * 受取トークンを差し替える。
+   *
+   * ⚠️ **現在のハッシュを条件に含める。**
+   * 同時に 2 本の再発行が走ると、保存できるハッシュは 1 つだけなので、
+   * 負けた側のトークンは**作られた瞬間から無効**になる。
+   * それを「発行できました」と返すと、利用者は使えない URL を渡される。
+   * 条件付き UPDATE の更新行数で、書けた側だけが成功を名乗る。
+   *
+   * ⚠️ `status = 'issued'` も条件に含める。受取済みのものを差し替えると、
+   * 一度受け取ったあとにもう一度受け取れる経路ができる。
+   */
+  async rotateClaimToken(input: {
+    readonly entitlementId: string;
+    readonly accountId: string;
+    readonly expectedTokenHash: string;
+    readonly newTokenHash: string;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const updated = await this.prisma.entitlement.updateMany({
+      where: {
+        id: input.entitlementId,
+        // 本人以外の要求はここまで来ないが、DB でも条件にしておく。
+        // 判定と書き込みが別の場所にあるとき、条件は両方に置く。
+        accountId: input.accountId,
+        status: 'issued',
+        claimTokenHash: input.expectedTokenHash,
+      },
+      data: { claimTokenHash: input.newTokenHash, updatedAt: input.now },
+    });
+    return updated.count === 1;
   }
 }

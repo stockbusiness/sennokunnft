@@ -1,3 +1,4 @@
+import type { ReissuableEntitlement } from '../entitlement/reissue';
 import type { WalletClaimableEntitlement } from '../entitlement/wallet-claim';
 
 /** Claim の照会結果。作品名は `GET` の応答に必要なので一緒に取る。 */
@@ -44,4 +45,28 @@ export interface ClaimRepositoryPort {
     readonly accountId: string;
     readonly now: Date;
   }): Promise<ClaimConfirmOutcome>;
+
+  /** 再発行の判定に必要な情報を、受取権IDから引く。 */
+  findForReissue(entitlementId: string): Promise<ReissuableEntitlement | null>;
+
+  /**
+   * 受取トークンを差し替える。
+   *
+   * ⚠️ **差し替えられたかどうかを、呼び出し元が確実に知れること。**
+   * 同時に 2 本の再発行が走ると、保存できるハッシュは 1 つだけなので、
+   * 負けた側のトークンは**作られた瞬間から無効**になる。
+   * それを「発行できました」と返すと、利用者は使えない URL を渡される。
+   * 現在のハッシュを条件に含め、**書けた側だけが成功を名乗る**。
+   *
+   * 実装は「読んでから書く」にしてはならない。条件付き UPDATE の
+   * 更新行数で判定すること。
+   */
+  rotateClaimToken(input: {
+    readonly entitlementId: string;
+    readonly accountId: string;
+    /** 判定時に見えていたハッシュ。これと一致するときだけ差し替える。 */
+    readonly expectedTokenHash: string;
+    readonly newTokenHash: string;
+    readonly now: Date;
+  }): Promise<boolean>;
 }

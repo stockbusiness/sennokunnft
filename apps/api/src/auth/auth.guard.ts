@@ -11,7 +11,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import {
   ANONYMOUS,
-  can,
+  canAtRoleLevel,
   type AccountLookupPort,
   type Action,
   type Actor,
@@ -84,7 +84,10 @@ export class AuthGuard implements CanActivate {
       throw new ForbiddenException('required action is not declared for this endpoint');
     }
 
-    const decision = can(actor, requiredAction);
+    // ⚠️ 所有権（3 段目）はここで見ない。対象を読み込む前なので所有者が
+    //    分からず、`can()` を対象なしで呼ぶと所有権の要る操作が常に拒否になる。
+    //    **所有権は対象を読み込んだハンドラ側で必ず確かめること。**
+    const decision = canAtRoleLevel(actor, requiredAction);
     if (!decision.allowed) {
       if (decision.reason === 'unauthenticated') {
         throw new UnauthorizedException();

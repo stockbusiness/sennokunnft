@@ -138,6 +138,7 @@ async function bootstrap(): Promise<void> {
         rateLimiter: new InMemoryRateLimiter(),
         getPerMinute: env.CLAIM_RATE_LIMIT_GET_PER_MIN,
         postPerMinute: env.CLAIM_RATE_LIMIT_POST_PER_MIN,
+        claimBaseUrl: env.CLAIM_BASE_URL.replace(/\/+$/, ''),
       },
     }),
     // Webhook の署名検証には**パース前の生の本文**が必要になる（Phase 3）。
