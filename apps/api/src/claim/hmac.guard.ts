@@ -34,7 +34,18 @@ export interface ClaimHmacConfig {
 }
 
 /** `rawBody: true` で起動したときに Express の要求へ生えるフィールド。 */
-type RawBodyRequest = Request & { readonly rawBody?: Buffer };
+type RawBodyRequest = Request & { readonly rawBody?: Buffer; senNoKuniKeyId?: string };
+
+/**
+ * 検証を通った鍵ID を後続のガードへ渡すための場所。
+ *
+ * ⚠️ **ヘッダの値を直接読ませない。** ヘッダは自己申告で、
+ * 署名を確かめる前は「そう名乗っている」だけ。ここに入るのは
+ * **署名が合った鍵IDだけ**であることを型ではなく置き場所で示す。
+ */
+export function verifiedKeyId(request: Request): string | undefined {
+  return (request as RawBodyRequest).senNoKuniKeyId;
+}
 
 /**
  * 千ノ国共通 HMAC v1.1 FINAL による呼び出し元の検証。
@@ -78,6 +89,8 @@ export class SenNoKuniHmacGuard implements CanActivate {
     });
 
     if (verification.ok) {
+      // 後続のレート制限が、**検証済みの**鍵IDで数えられるようにする。
+      request.senNoKuniKeyId = verification.keyId;
       return true;
     }
 

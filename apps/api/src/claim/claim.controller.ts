@@ -13,6 +13,7 @@ import { z } from '@sengoku/validation';
 import { Public } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
 import { SenNoKuniHmacGuard } from './hmac.guard';
+import { ClaimRateLimitGuard } from './rate-limit.guard';
 import { ClaimService, type ClaimConfirmation, type ClaimView } from './claim.service';
 
 /**
@@ -37,8 +38,14 @@ const confirmBodySchema = z.object({
  * 無認証という意味ではない。身元の確認は `SenNoKuniHmacGuard` が行う。
  * クラス単位で掛けてあるので、ここへメソッドを足しても保護から外れない。
  */
+/**
+ * ⚠️ **ガードの並び順が仕様。**
+ * レート制限は HMAC 検証の**後**に置く。前に置くと自己申告の鍵IDで
+ * 数えることになり、その鍵IDを名乗って送りつけるだけで
+ * **正規の相手の枠を使い切らせられる。**
+ */
 @Controller('api/collectible-claims')
-@UseGuards(SenNoKuniHmacGuard)
+@UseGuards(SenNoKuniHmacGuard, ClaimRateLimitGuard)
 export class ClaimController {
   constructor(private readonly claims: ClaimService) {}
 

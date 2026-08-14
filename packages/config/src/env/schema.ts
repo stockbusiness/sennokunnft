@@ -101,6 +101,17 @@ const apiEnvObject = baseEnvObject.extend({
    * ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけを書く。
    */
   CLAIM_HMAC_KEYS: z.string().min(1).optional(),
+  /**
+   * Claim API のレート制限（1 分あたり・鍵IDごと）。
+   *
+   * ⚠️ **`GET` を実利用より小さくしない。**
+   * OVEW Wallet の Claim 画面は `DELIVERY_PENDING` のあいだ 5 秒間隔で
+   * ポーリングする（1 セッションあたり毎分 12 回）。絞りすぎると
+   * **攻撃ではなく正規の利用者が弾かれる。**しかも症状は
+   * 「受け取り画面が進まない」で、原因に気づきにくい。
+   */
+  CLAIM_RATE_LIMIT_GET_PER_MIN: integerFromEnv(1, 1_000_000, 3000),
+  CLAIM_RATE_LIMIT_POST_PER_MIN: integerFromEnv(1, 1_000_000, 300),
 });
 
 const workerEnvObject = baseEnvObject.extend({
