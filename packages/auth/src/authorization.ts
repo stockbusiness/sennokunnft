@@ -21,6 +21,7 @@ export const ACTIONS = [
   'checkout.create',
   'claim.inspect',
   'claim.accept',
+  'claim.reissue',
   'collection.view',
   'mint_job.retry',
   'audit_log.view',
@@ -60,6 +61,7 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'checkout.create',
     'claim.inspect',
     'claim.accept',
+    'claim.reissue',
     'collection.view',
   ],
   operator: [
@@ -98,6 +100,11 @@ const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Actio
   'checkout.create': {},
   // 受取の実行は購入者本人のみ。運営でも代行できない（UD-804 が未決定のため）。
   'claim.accept': {},
+  // ⚠️ 受取URLの再発行も**購入者本人のみ**。運営に免除を与えない。
+  //    再発行は旧 URL を失効させ、新しい受取口を作る操作であり、
+  //    代行できるなら「運営が誰かの受取先を差し替えられる」ことになる。
+  //    運営代行の可否は `UD-1009` で未決定。決まるまで経路を作らない。
+  'claim.reissue': {},
   // 運営が受取状況を見るときは /admin/entitlements（order.view_any）を使う。
   'collection.view': {},
 };
@@ -156,6 +163,40 @@ export function can(actor: Actor, action: Action, resource: Resource = {}): Auth
   }
 
   return allow();
+}
+
+/**
+ * 認証とロールだけで判定する（3 段目の所有権を見ない）。
+ *
+ * ⚠️ **ガードはこちらを使う。**
+ * ガードは対象リソースを読み込む前に走るので、所有者が分からない。
+ * そこで `can()` を対象なしで呼ぶと、**所有権が要る操作は常に拒否**になり、
+ * エンドポイントに永久に到達できない。実際 `claim.reissue` で起きた。
+ *
+ * ⚠️ **これを使う側には義務がある。**
+ * 所有権が要る操作では、対象を読み込んだあとに **`can()` を対象付きで
+ * 呼び直す**か、同等の本人確認を行うこと。ここで通ったことは
+ * 「入口を通ってよい」までしか意味しない。怠ると、他人のIDを指定して
+ * 操作できる穴（IDOR）が残る。
+ */
+export function canAtRoleLevel(actor: Actor, action: Action): AuthorizationDecision {
+  if (actor.role !== 'anonymous') {
+    if (actor.accountId === null) {
+      return deny('unauthenticated');
+    }
+    if (!actor.isActive) {
+      return deny('inactive_account');
+    }
+  }
+  if (!ROLE_ACTIONS[actor.role].includes(action)) {
+    return deny('role_not_permitted');
+  }
+  return allow();
+}
+
+/** その操作が所有権の確認を要するか。 */
+export function requiresOwnership(action: Action): boolean {
+  return OWNERSHIP_RULES[action] !== undefined;
 }
 
 /** 判定を真偽値だけで使いたい箇所のための薄い糖衣。 */

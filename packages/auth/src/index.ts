@@ -14,6 +14,8 @@
 export {
   ROLES,
   ACTIONS,
+  canAtRoleLevel,
+  requiresOwnership,
   ANONYMOUS,
   can,
   isAllowed,

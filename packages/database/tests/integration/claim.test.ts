@@ -318,3 +318,95 @@ suite('Claim の CHECK 制約', () => {
     );
   });
 });
+
+suite('受取URLの再発行（同時でも 1 本だけ）', () => {
+  it('差し替えると旧トークンでは引けなくなる', async () => {
+    // ⚠️ ここが残ると、漏れた URL がそのまま有効な受取口になる。
+    const { entitlementId, accountId, tokenHash } = await seedEntitlement();
+    const newHash = randomUUID();
+    const rotated = await repo.rotateClaimToken({
+      entitlementId,
+      accountId,
+      expectedTokenHash: tokenHash,
+      newTokenHash: newHash,
+      now: NOW,
+    });
+    expect(rotated).toBe(true);
+    expect(await repo.findByTokenHash(tokenHash)).toBeNull();
+    expect((await repo.findByTokenHash(newHash))?.entitlement.id).toBe(entitlementId);
+  });
+
+  it('同時に 8 本の再発行を試みても、成功は 1 本だけ', async () => {
+    // ⚠️ 保存できるハッシュは 1 つ。負けた側のトークンは作られた瞬間から
+    //    無効なので、「発行できました」と返してはいけない。
+    const { entitlementId, accountId, tokenHash } = await seedEntitlement();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        repo.rotateClaimToken({
+          entitlementId,
+          accountId,
+          expectedTokenHash: tokenHash,
+          newTokenHash: randomUUID(),
+          now: NOW,
+        }),
+      ),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('古いハッシュを条件にした差し替えは通らない', async () => {
+    const { entitlementId, accountId, tokenHash } = await seedEntitlement();
+    await repo.rotateClaimToken({
+      entitlementId,
+      accountId,
+      expectedTokenHash: tokenHash,
+      newTokenHash: randomUUID(),
+      now: NOW,
+    });
+    const stale = await repo.rotateClaimToken({
+      entitlementId,
+      accountId,
+      expectedTokenHash: tokenHash,
+      newTokenHash: randomUUID(),
+      now: NOW,
+    });
+    expect(stale).toBe(false);
+  });
+
+  it('別人のアカウントIDでは差し替えられない', async () => {
+    const { entitlementId, tokenHash } = await seedEntitlement();
+    const rotated = await repo.rotateClaimToken({
+      entitlementId,
+      accountId: randomUUID(),
+      expectedTokenHash: tokenHash,
+      newTokenHash: randomUUID(),
+      now: NOW,
+    });
+    expect(rotated).toBe(false);
+  });
+
+  it('受取済みのものは差し替えられない', async () => {
+    // できると、一度受け取ったあとにもう一度受け取れる経路ができる。
+    const { entitlementId, accountId, tokenHash } = await seedEntitlement();
+    await repo.confirmClaim({ entitlementId, commonUserId: PURCHASER_CU, accountId, now: NOW });
+    const rotated = await repo.rotateClaimToken({
+      entitlementId,
+      accountId,
+      expectedTokenHash: tokenHash,
+      newTokenHash: randomUUID(),
+      now: NOW,
+    });
+    expect(rotated).toBe(false);
+  });
+
+  it('再発行の判定に必要な情報を引ける', async () => {
+    const { entitlementId, accountId } = await seedEntitlement();
+    const found = await repo.findForReissue(entitlementId);
+    expect(found?.accountId).toBe(accountId);
+    expect(found?.status).toBe('issued');
+  });
+
+  it('知らない受取権IDは null', async () => {
+    expect(await repo.findForReissue(randomUUID())).toBeNull();
+  });
+});

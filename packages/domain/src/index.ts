@@ -107,6 +107,12 @@ export {
 export type { ClaimRepositoryPort, ClaimLookupResult, ClaimConfirmOutcome } from './ports/claim';
 
 export {
+  evaluateReissue,
+  type ReissuableEntitlement,
+  type ReissueAttempt,
+} from './entitlement/reissue';
+
+export {
   evaluateWalletClaim,
   type WalletClaimAttempt,
   type WalletClaimDecision,

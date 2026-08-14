@@ -6,11 +6,13 @@ import request from 'supertest';
 import type {
   ClaimConfirmOutcome,
   ClaimLookupResult,
-  ClaimRepositoryPort,
   EntitlementStatus,
+  ReissuableEntitlement,
   WalletDeliveryStatus,
 } from '@sengoku/domain';
+import type { ClaimTokenRotationSource } from '../src/claim/reissue.service';
 import {
+  createDevToken,
   DevTokenVerifier,
   InMemoryNonceStore,
   InMemoryRateLimiter,
@@ -45,7 +47,7 @@ const tokens = new Sha256ClaimTokenService();
  * ここを「読んで判定してから書く」にすると、テストだけが通って
  * 本番の競合を見逃す。実装（条件付き UPDATE）と同じ性質にしておく。
  */
-class FakeClaimRepository implements ClaimRepositoryPort {
+class FakeClaimRepository implements ClaimTokenRotationSource {
   private row: {
     id: string;
     status: EntitlementStatus;
@@ -55,10 +57,7 @@ class FakeClaimRepository implements ClaimRepositoryPort {
     claimedByCommonUserId: string | null;
   };
 
-  constructor(
-    overrides: Partial<FakeClaimRepository['row']> = {},
-    private readonly tokenHash = tokens.hash(TOKEN),
-  ) {
+  constructor(overrides: Partial<FakeClaimRepository['row']> = {}) {
     this.row = {
       id: 'ent-1',
       status: 'issued',
@@ -71,7 +70,7 @@ class FakeClaimRepository implements ClaimRepositoryPort {
   }
 
   findByTokenHash(claimTokenHash: string): Promise<ClaimLookupResult | null> {
-    if (claimTokenHash !== this.tokenHash) {
+    if (claimTokenHash !== this.hash) {
       return Promise.resolve(null);
     }
     return Promise.resolve({
@@ -87,6 +86,44 @@ class FakeClaimRepository implements ClaimRepositoryPort {
   /** 購入者の common_user が解決した、という状況を作る。 */
   resolvePurchaser(commonUserId: string): void {
     this.row = { ...this.row, purchaserCommonUserId: commonUserId };
+  }
+
+  /** 現在のトークンハッシュ。再発行で差し替わる。 */
+  private hash = tokens.hash(TOKEN);
+
+  findForReissue(entitlementId: string): Promise<ReissuableEntitlement | null> {
+    if (entitlementId !== this.row.id) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve({
+      id: this.row.id,
+      accountId: 'account-1',
+      status: this.row.status,
+      expiresAt: this.row.expiresAt,
+    });
+  }
+
+  currentTokenHash(entitlementId: string): Promise<string | null> {
+    return Promise.resolve(entitlementId === this.row.id ? this.hash : null);
+  }
+
+  rotateClaimToken(input: {
+    entitlementId: string;
+    accountId: string;
+    expectedTokenHash: string;
+    newTokenHash: string;
+  }): Promise<boolean> {
+    // 実装と同じ性質にする。現在のハッシュと一致しなければ書けない。
+    if (
+      input.entitlementId !== this.row.id ||
+      input.accountId !== 'account-1' ||
+      this.row.status !== 'issued' ||
+      input.expectedTokenHash !== this.hash
+    ) {
+      return Promise.resolve(false);
+    }
+    this.hash = input.newTokenHash;
+    return Promise.resolve(true);
   }
 
   confirmClaim(input: { commonUserId: string }): Promise<ClaimConfirmOutcome> {
@@ -163,6 +200,7 @@ async function boot(
             : null,
           logger: createLogger({ service: 'test', level: 'fatal' }),
           rateLimiter: new InMemoryRateLimiter(),
+          claimBaseUrl: 'https://example.test/claims',
           // 既定は本番と同じ値。制限そのものを見るテストだけ小さくする。
           getPerMinute: options.getPerMinute ?? 3000,
           postPerMinute: options.postPerMinute ?? 300,
@@ -545,5 +583,87 @@ describe('レート制限（完成指示書 §17）', () => {
       const res = await request(app.getHttpServer()).get(path).set(signed('GET', path));
       expect(res.status).toBe(200);
     }
+  });
+});
+
+/** 購入者としてログインした状態を作る。 */
+function buyerToken(subject = '1'): string {
+  harness.accounts.seed(subject, 'buyer');
+  return createDevToken(TEST_TOKEN_SECRET, {
+    sub: subject,
+    iss: TEST_ISSUER,
+    aud: TEST_AUDIENCE,
+    exp: Math.floor(TEST_NOW.getTime() / 1000) + 3600,
+  });
+}
+
+describe('受取URLの再発行（UD-1009）', () => {
+  beforeEach(async () => {
+    await boot();
+  });
+
+  it('本人なら再発行でき、新しい URL が 1 回だけ返る', async () => {
+    const token = buyerToken();
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-1/claim-token')
+      .set('authorization', `Bearer ${token}`);
+    expect(response.status).toBe(201);
+    expect(response.body.claim_url).toMatch(/^https:\/\/example\.test\/claims\//);
+    expect(response.body.entitlement_id).toBe('ent-1');
+  });
+
+  it('再発行すると旧トークンでは引けなくなる', async () => {
+    // ⚠️ 残ると、漏れた URL がそのまま有効な受取口になる。
+    const token = buyerToken();
+    await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-1/claim-token')
+      .set('authorization', `Bearer ${token}`);
+
+    const path = `/api/collectible-claims/${TOKEN}`;
+    const stale = await request(app.getHttpServer()).get(path).set(signed('GET', path));
+    expect(stale.status).toBe(404);
+  });
+
+  it('未認証では呼べない', async () => {
+    const response = await request(app.getHttpServer()).post(
+      '/api/v1/entitlements/ent-1/claim-token',
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('別人は再発行できない', async () => {
+    const token = buyerToken('other');
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-1/claim-token')
+      .set('authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+  });
+
+  it('存在しない受取権と他人のものを区別しない', async () => {
+    // 区別すると、IDを総当たりして実在するかを調べられる。
+    const token = buyerToken();
+    const missing = await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-unknown/claim-token')
+      .set('authorization', `Bearer ${token}`);
+    expect(missing.status).toBe(403);
+  });
+
+  it('受取済みなら再発行できない', async () => {
+    const token = buyerToken();
+    await postConfirm(PURCHASER_CU);
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-1/claim-token')
+      .set('authorization', `Bearer ${token}`);
+    expect(response.status).toBe(409);
+  });
+
+  it('監査に平文のトークンを残さない', async () => {
+    const token = buyerToken();
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/entitlements/ent-1/claim-token')
+      .set('authorization', `Bearer ${token}`);
+    const plain = String(response.body.claim_url).split('/').pop() ?? '';
+    expect(plain.length).toBeGreaterThan(10);
+    expect(JSON.stringify(harness.audit.entries ?? [])).not.toContain(plain);
   });
 });
