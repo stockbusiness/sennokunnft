@@ -227,28 +227,72 @@ ENV CI=true                                   # pnpm は CI では尋ねない
 
 ## 3. 段階2 — 画像とカタログを公開する
 
-### 3-1. R2 アダプタを実装する（実装作業）
+### 3-1. R2 を設定する
 
-⚠️ **これも実装作業。** 現状の `StoragePort` の実装は
-`LocalFileStorage` と `InMemoryStorage` の 2 つだけで、**R2 用が無い**。
+✅ **アダプタは実装済み**（`R2Storage`）。残りは Cloudflare 側の設定と環境変数だけ。
 
-段階1 の api は `MEDIA_STORAGE_DIR=/tmp/media` に書く。
-⚠️ **再起動で消える。** 段階1 で登録した画像は入れ直すことになる。
+#### ① バケットを作る
 
-必要なもの:
+Cloudflare のダッシュボード → `R2` → `Create bucket`
 
-| やること                 | 内容                                                |
-| ------------------------ | --------------------------------------------------- |
-| R2 バケット作成          | Cloudflare コンソール                               |
-| Custom Domain を割り当て | 例 `media.example.jp`。⚠️ **署名付きURLを使わない** |
-| `R2Storage` の実装       | `StoragePort` を満たす。`publicUrl` が長期URLを返す |
-| 環境変数の追加           | バケット名・アクセスキー・公開URLの前置き           |
+| 項目     | 値                          |
+| -------- | --------------------------- |
+| 名前     | `sennokunnft-media`（任意） |
+| Location | `Asia-Pacific (APAC)`       |
 
-⚠️ **期限付きURLを `publicUrl` から返さない。**
-Wallet は受け取ったURLを保存して表示に使う。期限が切れた時点で
-**過去に渡した分の画像がまとめて壊れる**。しかも壊れるのは数日後なので、
-原因に誰も気づけない。ドメイン側の `isLongLivedImageUrl` が
-署名付きURLを弾くようになっているので、実装を誤れば配送の組み立てで落ちる。
+#### ② Custom Domain を割り当てる
+
+バケット → `Settings` → `Public access` → `Connect Domain`
+
+例: `media-stg.example.jp`
+
+⚠️ **`r2.dev` の開発用URLを本番で使わない。**
+帯域が制限され、Cloudflare も本番利用を想定していない。
+
+⚠️ **`Public access` を有効にする。** 有効にしないと画像が表示できない。
+公開してよいのは**作品画像だけ**なので、このバケットに他のものを入れない。
+
+#### ③ API トークンを作る
+
+R2 → `Manage API tokens` → `Create API token`
+
+権限は **`Object Read & Write`**、対象は作成したバケットのみに絞る。
+
+`Access Key ID` と `Secret Access Key` が表示される。
+⚠️ **Secret は一度しか表示されない。** その場で保管する。
+
+#### ④ Fly に設定を入れる
+
+`https://fly.io/apps/sennokunnft-api/secrets` で 5 つ登録する。
+
+| Name                     | Value                          |
+| ------------------------ | ------------------------------ |
+| `MEDIA_STORAGE_PROVIDER` | `r2`                           |
+| `MEDIA_PUBLIC_BASE_URL`  | `https://media-stg.example.jp` |
+| `R2_ACCOUNT_ID`          | Cloudflare のアカウントID      |
+| `R2_BUCKET`              | バケット名                     |
+| `R2_ACCESS_KEY_ID`       | ③ の Access Key ID             |
+| `R2_SECRET_ACCESS_KEY`   | ③ の Secret Access Key         |
+
+⚠️ **設定が欠けていると起動時に拒否される。**
+起動させてしまうと画像のアップロードだけが失敗し、カタログの登録は
+途中まで進むため「**画像の無い作品**」ができあがる。
+それが表面化するのは Wallet へ配送する段になってから。
+
+#### 実装側で守っていること
+
+| 守っていること                      | 理由                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------- |
+| `publicUrl` が署名付きURLを返さない | 期限切れで**過去の Holding がまとめて壊れる**。壊れるのは数日後で気づけない |
+| 起動時に公開URLの形を検査           | 判定はドメイン側の `isLongLivedImageUrl` と**同じ関数**。二重に書くとずれる |
+| 存在しないキーの削除を失敗にしない  | 置換や再試行で同じキーを 2 度消しうる                                       |
+| `../` を含むキーを拒否              | `LocalFileStorage` と同じ規律。片方だけ守ると差し替えで検証が消える         |
+| 例外に応答本文を載せない            | バケット名や鍵IDが混ざりうる                                                |
+
+#### ⑤ 段階1 で登録した画像は入れ直す
+
+⚠️ 段階1 の api は `/tmp/media` に書いており、**再起動で消えている**。
+`r2` へ切り替えたら、作品画像を登録し直す。
 
 ### 3-2. web を Vercel へ
 

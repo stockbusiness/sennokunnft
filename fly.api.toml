@@ -28,7 +28,19 @@ kill_timeout = "30s"
   NODE_ENV = "production"
   LOG_LEVEL = "info"
   API_PORT = "8080"
-  # 秘密でない設定はここに置く。⚠️ 鍵と接続文字列は `fly secrets` へ。
+
+  # 画像の保存先（UD-508）。
+  #
+  # ⚠️ **秘密でない設定はここに置く。**
+  #    ダッシュボードで直接入れると、誰がいつ何に変えたかが残らない。
+  #    ここに書けば変更がレビューを通り、履歴も残る。
+  #    鍵（R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY）だけ `fly secrets` へ。
+  MEDIA_STORAGE_PROVIDER = "r2"
+  # R2 に割り当てた Custom Domain。⚠️ 署名付き・期限付きの URL を書かない。
+  MEDIA_PUBLIC_BASE_URL = "https://media.commitrev.com"
+  R2_BUCKET = "sennokunnft-media"
+  # S3 エンドポイントに含まれる公開値。鍵ではない。
+  R2_ACCOUNT_ID = "0986e8595c5a9054807e36c44fcb58c0"
 
 [processes]
   app = "node apps/api/dist/main.js"
