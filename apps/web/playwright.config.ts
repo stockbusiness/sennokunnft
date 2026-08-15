@@ -69,7 +69,9 @@ const webServer: ServerSpec = {
     NODE_ENV: 'production',
     APP_ENV: 'test',
     WEB_API_BASE_URL: apiBaseURL,
-    NEXT_PUBLIC_SITE_NAME: '千ノ国NFTマーケット',
+    // ⚠️ サイト名を渡さない。本番と同じ経路（site.ts の暫定名）を通すため。
+    //    ここだけ別名を入れると、名前の食い違いを E2E が素通りさせる。
+    //
     // 管理画面から API を呼ぶための資格情報。E2E のセットアップが発行する。
     ADMIN_DEV_TOKEN: process.env.E2E_ADMIN_TOKEN ?? '',
   },
