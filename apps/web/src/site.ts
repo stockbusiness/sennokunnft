@@ -20,6 +20,11 @@ export const SITE_COPY = {
   notFoundHint: '販売が終了しているか、URL が変更された可能性があります。',
   backToCatalog: '作品一覧へ戻る',
   purchaseComingSoon: 'お申し込み機能は準備中です。',
+  catalogTitle: '作品一覧',
+  supplyLabel: 'お求めいただける数',
+  priceLabel: '価格',
+  perOrderLabel: 'お一人あたり',
+  priceUnset: '価格は準備中です',
 } as const;
 
 /**

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
+import { SiteFooter, SiteHeader } from '@sengoku/ui';
 import './globals.css';
 import { getWebEnv } from '../src/env';
 import { resolveSiteName, SITE_COPY } from '../src/site';
@@ -35,16 +36,22 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const name = siteName();
   return (
     <html lang="ja">
       <body>
         <a href="#main" className="sengoku-skip-link">
           本文へ移動
         </a>
+        {/*
+          ⚠️ 行き先の無い項目を並べない。
+          「このサイトについて」「お問い合わせ」「特定商取引法に基づく表記」は
+          用意でき次第ここへ足す。押せるのに何も無いページへ着くと、
+          利用者は自分の操作を疑う。
+        */}
+        <SiteHeader siteName={name} />
         <main id="main">{children}</main>
-        <footer>
-          <small>{siteName()}</small>
-        </footer>
+        <SiteFooter siteName={name} />
       </body>
     </html>
   );

@@ -15,6 +15,7 @@ import {
   type ClockPort,
   type Listing,
   type ListingRepository,
+  type StoragePort,
 } from '@sengoku/domain';
 
 /**
@@ -29,6 +30,14 @@ export class CatalogService {
     private readonly artworks: ArtworkRepository,
     private readonly listings: ListingRepository,
     private readonly clock: ClockPort,
+    /**
+     * 画像URLの解決に使う。
+     *
+     * ⚠️ **管理側（`AdminCatalogService`）と同じポートを使う。**
+     * 公開側だけ別の組み立て方にすると、保存先を差し替えたときに
+     * 片方だけ古い形の URL を返し続ける。
+     */
+    private readonly storage: StoragePort,
   ) {}
 
   async listPublished(query: { limit: number; cursor?: string }): Promise<ArtworkListResponse> {
@@ -95,6 +104,7 @@ export class CatalogService {
       slug: artwork.slug,
       title: artwork.title,
       imageKey: artwork.imageKey,
+      imageUrl: artwork.imageKey === null ? null : this.storage.publicUrl(artwork.imageKey),
       availableSupply: availableSupply(artwork),
       maxSupply: artwork.maxSupply,
       price:

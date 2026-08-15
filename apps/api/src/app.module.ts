@@ -151,7 +151,8 @@ export class AppModule implements NestModule {
         },
         {
           provide: CatalogService,
-          useFactory: () => new CatalogService(deps.artworks, deps.listings, deps.clock),
+          useFactory: () =>
+            new CatalogService(deps.artworks, deps.listings, deps.clock, deps.storage),
         },
         {
           provide: AdminCatalogService,
