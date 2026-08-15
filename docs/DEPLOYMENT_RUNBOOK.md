@@ -320,27 +320,122 @@ api は R2 として起動しようとする。鍵が無ければ起動を拒否
 
 ⚠️ **鍵が正しいかどうかは、まだ確定していない。**
 デプロイが通ったことで分かるのは「**設定が揃っていて起動できた**」ことまで。
-R2 への読み書きが実際に成功するかは、**api 経由で画像を1枚アップロードするまで
-分からない**。それには管理画面（§3-2 の web デプロイ）が要る。
+R2 への読み書きが実際に成功するかは、**画像を 1 枚アップロードするまで
+分からない**。手順は次の ⑥。
 
 作業の順序としては、③ の API トークン作成 → ④ の鍵登録 → マージ、で行った。
 **先に設定ファイルをマージしてから鍵を入れると、そのあいだ api が落ちる。**
 
+#### ⑥ 実際に 1 枚上げて確かめる
+
+⚠️ **web のデプロイを待つ必要はない。** 管理画面に投稿フォームは無く、
+登録はもともと API を直接叩いて行う（画面は一覧と詳細を見るだけ）。
+
+**1. 運営の口座を作る**
+
+`AUTH_PROVIDER=dev` のトークンは HS256 の JWT で、`AUTH_DEV_SECRET` で署名する。
+初回アクセス時に口座が自動で作られるが、**役割は必ず `buyer`** になる
+（トークンの自己申告を信用しない設計のため）。運営へ上げるのは DB 側で行う。
+
+```sql
+-- Supabase の SQL Editor で。<subject> は JWT の sub と同じ値。
+UPDATE accounts SET role = 'operator'
+WHERE auth_provider = 'dev' AND auth_subject = '<subject>';
+```
+
+⚠️ **`pnpm db:seed` を本番で流さない。** 運営の口座と一緒に**サンプル作品と
+出品まで作る**。消し忘れたまま公開すると、実在しない作品が並ぶ。
+
+**2. 作品を作って画像を上げる**
+
+```bash
+API=https://sennokunnft-api.fly.dev
+TOKEN=<運営のトークン>
+
+curl -X POST "$API/api/v1/admin/artworks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d '{"slug":"r2-check","title":"疎通確認","description":"確認用","maxSupply":1}'
+
+# ⚠️ 画像は multipart ではなく生のバイト列を送る（境界の解析を増やさないため）。
+curl -X POST "$API/api/v1/admin/artworks/<作品ID>/image" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: image/png' \
+  --data-binary @sample.png
+```
+
+応答の URL が `https://media.commitrev.com/...` で始まり、そのまま開ければ
+**R2 の鍵・権限・Custom Domain のすべてが通っている**。
+
+⚠️ 確認用の作品は archive しておくこと。公開したまま忘れると一覧に出る。
+
 ### 3-2. web を Vercel へ
 
-GitHub 連携でプロジェクトを作る。ルートディレクトリは `apps/web`。
+GitHub 連携でプロジェクトを作る。**Root Directory は `apps/web`**。
 
 ⚠️ **Hobby プランは商用利用が禁止されている。** Pro（$20/人）にする。
-⚠️ **サーバー処理のリージョンを東京（`hnd1`）にする。** 既定だと api との往復が海外を経由する。
 
-環境変数:
+#### ビルド設定は `apps/web/vercel.json` に置いてある
 
-| 名前               | 値                                         |
-| ------------------ | ------------------------------------------ |
-| `WEB_API_BASE_URL` | `https://sennokunnft-api.fly.dev`          |
-| `ADMIN_DEV_TOKEN`  | 管理画面用。⚠️ `UD-801` 解決後は不要になる |
+画面で設定を変えない。**ダッシュボードで直接入れると、誰がいつ何に変えたかが残らない。**
 
-そのうえで api 側の CORS を web のドメインに向ける。
+| 設定             | 値                                                       |
+| ---------------- | -------------------------------------------------------- |
+| `installCommand` | `cd ../.. && pnpm install --frozen-lockfile`             |
+| `buildCommand`   | `cd ../.. && pnpm turbo run build --filter=@sengoku/web` |
+| `regions`        | `["hnd1"]`（東京）                                       |
+
+⚠️ **既定の設定では通らない。** 共有パッケージ（`@sengoku/config` など）は
+`dist` へビルドしてから使う。`apps/web` の中だけで install / build すると
+`dist` が無く、「モジュールが見つからない」で落ちる。
+Root Directory を `apps/web` にすると各コマンドは `apps/web` で走るので、
+**リポジトリの根まで戻してから**実行する。
+
+⚠️ **`next build` を直接呼ばない。** 共有パッケージが古いまま混ざる。
+混ざったことはビルドでは分からず、画面が出てから型の合わない値で壊れる。
+依存のビルド順は `turbo` の `--filter` に任せる。
+
+⚠️ **リージョンを東京に固定する。** 既定のままだと米国で動き、
+api（Fly の `nrt`）と DB（Supabase の Tokyo）との往復が毎回太平洋を渡る。
+**画面は出るので、遅いことにしか気づけない。**
+`regions` の指定が効くのは Pro プラン以上。
+
+✅ この構成は、キャッシュを消した状態から実際にビルドが通ることを確認済み
+（約 34 秒）。推定ではない。
+
+#### 環境変数
+
+| 名前                    | 値                                  | 備考                          |
+| ----------------------- | ----------------------------------- | ----------------------------- |
+| `WEB_API_BASE_URL`      | `https://sennokunnft-api.fly.dev`   | 必須                          |
+| `NEXT_PUBLIC_SITE_NAME` | 省略可（既定: 千ノ国NFTマーケット） |                               |
+| `ADMIN_DEV_TOKEN`       | 管理画面用                          | ⚠️ 下の注意を読んでから入れる |
+
+#### ⚠️ `ADMIN_DEV_TOKEN` を入れると、管理画面が誰にでも開く
+
+管理画面に認可判定は無い。**web が運営の資格情報をサーバー側で持ち、
+訪問者の代わりに API へ付けて送る**構造だからで、これは意図した設計
+（認可は API 側で判定する）。ただしその前提は「**管理画面へ到達できるのは
+運営だけ**」であり、公開URLに置いた瞬間にその前提が消える。
+
+`ADMIN_DEV_TOKEN` を Vercel に入れると、URL を知った人が
+`/admin/artworks` を開くだけで **未公開作品の一覧が読める**。
+`SECURITY_DESIGN.md` の「非公開作品の存在を公開APIから推測できないように
+する」に正面から反する。
+
+⚠️ **書き込みはできない**（管理画面に投稿フォームは無く、登録は API 直叩き
+の案内のみ）。**読み取りだけの漏れだが、漏れることに変わりはない。**
+
+対処は次のいずれか。**入れる前に決める。**
+
+| 案                                       | 効果                                       | 代償                               |
+| ---------------------------------------- | ------------------------------------------ | ---------------------------------- |
+| `ADMIN_DEV_TOKEN` を Vercel に入れない   | 構造的に安全（資格情報が存在しない）       | 管理画面は手元の `pnpm dev` で使う |
+| Vercel の Deployment Protection を掛ける | 管理画面も公開ページも Vercel ログイン必須 | 一般公開には使えない               |
+| `UD-801` を解決して本物の認証を入れる    | 恒久的な解決                               | 決めごとが要る                     |
+
+#### CORS
 
 ```bash
 fly secrets set --app sennokunnft-api API_PUBLIC_ORIGIN="https://<web のドメイン>"
