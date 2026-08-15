@@ -261,22 +261,36 @@ R2 → `Manage API tokens` → `Create API token`
 `Access Key ID` と `Secret Access Key` が表示される。
 ⚠️ **Secret は一度しか表示されない。** その場で保管する。
 
-#### ④ Fly に設定を入れる
+#### ④ 設定を入れる — 秘密かどうかで置き場所を分ける
 
-`https://fly.io/apps/sennokunnft-api/secrets` で 5 つ登録する。
+⚠️ **全部を `fly secrets` に入れない。**
+ダッシュボードで直接入れた値は、**誰がいつ何に変えたかが残らない**。
+秘密でないものは設定ファイルに書けば、変更がレビューを通り履歴も残る。
 
-| Name                     | Value                          |
-| ------------------------ | ------------------------------ |
-| `MEDIA_STORAGE_PROVIDER` | `r2`                           |
-| `MEDIA_PUBLIC_BASE_URL`  | `https://media-stg.example.jp` |
-| `R2_ACCOUNT_ID`          | Cloudflare のアカウントID      |
-| `R2_BUCKET`              | バケット名                     |
-| `R2_ACCESS_KEY_ID`       | ③ の Access Key ID             |
-| `R2_SECRET_ACCESS_KEY`   | ③ の Secret Access Key         |
+**`fly.api.toml` の `[env]` に書く**（秘密でない。コミットする）
 
-⚠️ **設定が欠けていると起動時に拒否される。**
-起動させてしまうと画像のアップロードだけが失敗し、カタログの登録は
-途中まで進むため「**画像の無い作品**」ができあがる。
+| 変数                     | 値                                |
+| ------------------------ | --------------------------------- |
+| `MEDIA_STORAGE_PROVIDER` | `r2`                              |
+| `MEDIA_PUBLIC_BASE_URL`  | ② で割り当てた Custom Domain      |
+| `R2_BUCKET`              | ① のバケット名                    |
+| `R2_ACCOUNT_ID`          | S3 エンドポイントに含まれる公開値 |
+
+**`fly secrets` に入れる**（`https://fly.io/apps/sennokunnft-api/secrets`）
+
+| Name                   | Value                  |
+| ---------------------- | ---------------------- |
+| `R2_ACCESS_KEY_ID`     | ③ の Access Key ID     |
+| `R2_SECRET_ACCESS_KEY` | ③ の Secret Access Key |
+
+⚠️ **順番を守る。鍵の登録が先、マージが後。**
+設定ファイルに `MEDIA_STORAGE_PROVIDER = "r2"` が入った状態でマージすると、
+api は R2 として起動しようとする。鍵が無ければ起動を拒否するので、
+**先にマージすると動いている api が落ちる**。
+
+⚠️ **設定が欠けていると起動時に拒否される。これは意図した仕様。**
+黙って `local` に落ちるほうが危険で、その場合は画像のアップロードだけが
+失敗してカタログの登録は途中まで進むため「**画像の無い作品**」ができあがる。
 それが表面化するのは Wallet へ配送する段になってから。
 
 #### 実装側で守っていること
@@ -293,6 +307,24 @@ R2 → `Manage API tokens` → `Create API token`
 
 ⚠️ 段階1 の api は `/tmp/media` に書いており、**再起動で消えている**。
 `r2` へ切り替えたら、作品画像を登録し直す。
+
+#### 実施の記録（2026-08-15）
+
+| 項目            | 値                                      |
+| --------------- | --------------------------------------- |
+| バケット        | `sennokunnft-media`（APAC）             |
+| Custom Domain   | `media.commitrev.com`                   |
+| 公開用の開発URL | 無効のまま（`r2.dev` は使わない）       |
+| API トークン    | `Object Read & Write`・当該バケットのみ |
+| 切り替え        | PR #14 のマージで `local` → `r2`        |
+
+⚠️ **鍵が正しいかどうかは、まだ確定していない。**
+デプロイが通ったことで分かるのは「**設定が揃っていて起動できた**」ことまで。
+R2 への読み書きが実際に成功するかは、**api 経由で画像を1枚アップロードするまで
+分からない**。それには管理画面（§3-2 の web デプロイ）が要る。
+
+作業の順序としては、③ の API トークン作成 → ④ の鍵登録 → マージ、で行った。
+**先に設定ファイルをマージしてから鍵を入れると、そのあいだ api が落ちる。**
 
 ### 3-2. web を Vercel へ
 
