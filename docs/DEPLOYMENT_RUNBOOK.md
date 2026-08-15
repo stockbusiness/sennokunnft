@@ -318,13 +318,27 @@ api は R2 として起動しようとする。鍵が無ければ起動を拒否
 | API トークン    | `Object Read & Write`・当該バケットのみ |
 | 切り替え        | PR #14 のマージで `local` → `r2`        |
 
-⚠️ **鍵が正しいかどうかは、まだ確定していない。**
-デプロイが通ったことで分かるのは「**設定が揃っていて起動できた**」ことまで。
-R2 への読み書きが実際に成功するかは、**画像を 1 枚アップロードするまで
-分からない**。手順は次の ⑥。
-
 作業の順序としては、③ の API トークン作成 → ④ の鍵登録 → マージ、で行った。
 **先に設定ファイルをマージしてから鍵を入れると、そのあいだ api が落ちる。**
+
+✅ **実画像 1 枚で疎通を確認済み（2026-08-15）。**
+
+⚠️ **デプロイが通ったことは疎通の証拠にならない。** それで分かるのは
+「設定が揃っていて起動できた」ことまでで、鍵の正しさは別の話。
+下は実際に 1 枚上げて確かめた結果。
+
+| 確認項目          | 結果                                                        |
+| ----------------- | ----------------------------------------------------------- |
+| R2 への PUT       | ✅ `200`                                                    |
+| 公開URL生成       | ✅ `https://media.commitrev.com/artworks/2026/08/0d61….png` |
+| HTTPS 取得        | ✅ `status=200 type=image/png size=70`                      |
+| `image_key` 保存  | ✅                                                          |
+| `image_hash` 保存 | ✅ `sha256:c414cd0e…`                                       |
+| api 再起動後      | ✅ 同じ URL で取得できる                                    |
+
+✅ **`image_hash` は保存先に依存しない。**
+同じ PNG をローカル（`local` 保存）へ上げたときと**同一の値**になった。
+Wallet 側と画像の同一性を突き合わせる前提が、実測で確かめられている。
 
 #### ⑥ 実際に 1 枚上げて確かめる
 
@@ -348,22 +362,39 @@ WHERE auth_provider = 'dev' AND auth_subject = '<subject>';
 
 **2. 作品を作って画像を上げる**
 
+⚠️ **Windows から叩かない。`fly ssh console` の中でやる。**
+実際に、Windows の PowerShell 7 からは**本文を 1 バイトも送れなかった**
+（`curl.exe` でも `Invoke-RestMethod` でも同じ）。
+症状は `VALIDATION_ERROR` / `(root)` / `invalid_type` で、
+**「本文が空」のときと同じ応答**になる。JSON の書き方を直しても変わらない。
+
+サーバーの中なら Windows の引数解釈も経路上の中継も挟まらない。
+`node` は実行イメージに入っているので、追加で入れるものは無い。
+
 ```bash
-API=https://sennokunnft-api.fly.dev
-TOKEN=<運営のトークン>
-
-curl -X POST "$API/api/v1/admin/artworks" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H 'Content-Type: application/json' \
-  -d '{"slug":"r2-check","title":"疎通確認","description":"確認用","maxSupply":1}'
-
-# ⚠️ 画像は multipart ではなく生のバイト列を送る（境界の解析を増やさないため）。
-curl -X POST "$API/api/v1/admin/artworks/<作品ID>/image" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: image/png' \
-  --data-binary @sample.png
+fly ssh console -a sennokunnft-api
 ```
+
+以降は**サーバーの中**で実行する。トークンも中で作れば、
+`AUTH_DEV_SECRET` を画面に出さずに済む（そもそも Fly からは読み出せない）。
+
+```sh
+export T=$(node -e 'const{createHmac}=require("crypto");const e=o=>Buffer.from(JSON.stringify(o)).toString("base64url");const h=e({alg:"HS256",typ:"JWT"});const p=e({sub:"ops-tanaka",iss:"sennokunnft-dev",aud:"sennokunnft",exp:Math.floor(Date.now()/1000)+86400});console.log(h+"."+p+"."+createHmac("sha256",process.env.AUTH_DEV_SECRET).update(h+"."+p).digest("base64url"))')
+
+node -e 'fetch("http://127.0.0.1:8080/api/v1/admin/artworks",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.T},body:JSON.stringify({slug:"r2-check",title:"疎通確認",description:"R2 疎通確認用",maxSupply:1})}).then(r=>r.text()).then(console.log)'
+```
+
+⚠️ 画像は multipart ではなく**生のバイト列**を送る（境界の解析を増やさないため）。
+確認用なら、その場で最小の PNG を作れる。ファイルを持ち込まなくてよい。
+
+```sh
+node -e 'const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==","base64");fetch("http://127.0.0.1:8080/api/v1/admin/artworks/<作品ID>/image",{method:"POST",headers:{"content-type":"image/png",authorization:"Bearer "+process.env.T},body:png}).then(r=>r.text()).then(console.log)'
+```
+
+⚠️ **`Content-Type` はファイルの実体に合わせる。**
+種類は**中身の先頭バイト**で判定し、ヘッダは照合にしか使わない。
+拡張子やヘッダを偽っても通らない。対応は `image/png` `image/jpeg`
+`image/webp` の 3 つ、大きさは 64 バイト〜5 MB。
 
 応答の URL が `https://media.commitrev.com/...` で始まり、そのまま開ければ
 **R2 の鍵・権限・Custom Domain のすべてが通っている**。
@@ -449,9 +480,16 @@ Free は **1 週間アクセスが無いとプロジェクトが一時停止す�
 
 ### 段階2 の完了条件
 
-- [ ] 画像が `https://media.example.jp/...` で表示される
+- [x] 画像が `https://media.commitrev.com/...` で表示される
 - [ ] カタログ画面が web で見える
 - [ ] Supabase が Pro になっている
+
+疎通確認で作った作品（`slug = r2-check`）は **`draft` のまま残してある**。
+公開ページには出ないうえ、段階3 の Fixture → Claim → Wallet 表示の
+確認にそのまま使えるため。**消さないこと。**
+
+⚠️ archive しても R2 の画像は消えない。画像を消すのは
+「別の画像で置き換えたとき」だけ（`image.service.ts`）。
 
 ---
 
@@ -472,6 +510,66 @@ GitHub のリポジトリ変数 `DEPLOY_WORKER` を `true` にして、自動デ
 共通顧客IDの解決ジョブは行をロックせずに拾うため、
 2 台にすると代理店システムを二重に呼ぶ（`create_if_missing` 付きだと
 相手側で `common_user_id` が二重発行されうる）。
+
+#### `DEPLOY_WORKER=true` にする前に要る環境変数
+
+**フラグを OFF のまま立てるなら、要るのは `DATABASE_URL` の 1 本だけ。**
+ほかは既定値で動く。フラグを ON にするときに、その段の分だけ足す。
+
+⚠️ **先に全部入れない。** 使っていない接続先や鍵を置いておくと、
+「設定してあるから繋がっているはず」という誤解が生まれる。
+実際に繋がるのはフラグを ON にした時なので、**設定と実態がずれる**。
+
+**A. いま（フラグ両方 OFF）**
+
+| 変数                      | 置き場所          | 値                                        |
+| ------------------------- | ----------------- | ----------------------------------------- |
+| `DATABASE_URL`            | `fly secrets`     | Pooler（`?pgbouncer=true` 付き）          |
+| `APP_ENV`                 | `fly.worker.toml` | `staging`（⚠️ api と必ずそろえる）        |
+| `NODE_ENV`                | `fly.worker.toml` | `production`                              |
+| `WORKER_POLL_INTERVAL_MS` | `fly.worker.toml` | `5000`                                    |
+| `ENABLE_STAGING_FIXTURES` | `fly.worker.toml` | `false`（⚠️ 本番で Fixture を許可しない） |
+
+**B. `COMMON_USER_LINKING_ENABLED` を ON にするとき**
+
+| 変数                          | 種別 | 備考                        |
+| ----------------------------- | ---- | --------------------------- |
+| `COMMON_USER_LINKING_ENABLED` | 設定 | `true`                      |
+| `COMMON_USER_API_BASE_URL`    | 設定 | 代理店システムの接続先      |
+| `COMMON_USER_API_KEY`         | 秘密 | ⚠️ `fly secrets` へ         |
+| `COMMON_USER_SYSTEM_KEY`      | 設定 | 既定 `sennokuni-nft-market` |
+| `COMMON_USER_LINK_BATCH_SIZE` | 設定 | 既定 25                     |
+
+**C. `WALLET_DELIVERY_ENABLED` を ON にするとき（いちばん最後）**
+
+| 変数                         | 種別 | 備考                               |
+| ---------------------------- | ---- | ---------------------------------- |
+| `WALLET_DELIVERY_ENABLED`    | 設定 | `true`                             |
+| `WALLET_DELIVERY_ENDPOINT`   | 設定 | ⚠️ `https://` 必須（起動時に検査） |
+| `WALLET_DELIVERY_KEY_ID`     | 設定 | Wallet が発行する鍵ID              |
+| `WALLET_DELIVERY_SECRET`     | 秘密 | ⚠️ `fly secrets` へ。8文字以上     |
+| `WALLET_DELIVERY_TIMEOUT_MS` | 設定 | 既定 10000                         |
+| `WALLET_DELIVERY_BATCH_SIZE` | 設定 | 既定 20。1 巡で送る上限            |
+
+✅ **足りない設定でフラグだけ ON にはできない。**
+`assertWalletDeliveryConfig` / `assertCommonUserLinkingConfig` が起動時に
+検査して落とす。**中途半端な状態で動き出すことはない。**
+
+⚠️ **`WALLET_DELIVERY_*` は api にも同じ値を入れる。**
+
+役割は違う。**送るのは worker だけ**で、api は送らない。
+api がするのは、受取確定と同じトランザクションで**配送待ちの行を作る**ことだけ。
+
+それでも api に同じ値が要るのは、api の起動時検査
+（`assertWalletDeliveryConfig`）が worker と同じ条件を見るため。
+`WALLET_DELIVERY_ENABLED=true` なのに接続先や鍵が無ければ、api は起動しない。
+
+⚠️ **api と worker で ON / OFF を食い違わせない。** 落ちないので気づけない。
+
+| 食い違い       | 何が起きるか                                                      |
+| -------------- | ----------------------------------------------------------------- |
+| api だけ ON    | 配送待ちの行は溜まる。**送る者がいないので永遠に届かない**        |
+| worker だけ ON | 行が作られない。**worker は正常に空回りし、ログにも異常が出ない** |
 
 ### 4-2. フラグを 1 つずつ ON にする
 
