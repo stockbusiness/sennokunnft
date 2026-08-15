@@ -10,14 +10,29 @@
 FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="/pnpm:$PATH"
+# ⚠️ **corepack の確認プロンプトを止める。**
+#    既定では pnpm を取得する前に「続けますか？」と尋ねる。
+#    ビルドには答える人がいないので、そこで失敗する。
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Prisma のクエリエンジンが openssl を必要とする。
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
+# ⚠️ **pnpm のバージョンをここで固定する。**
+#    corepack は package.json の `packageManager` を見てバージョンを決めるが、
+#    次の段では**ロックファイルだけを置いた状態で pnpm を呼ぶ**ため、
+#    そこには package.json が無い。読む先が無いまま解決させると、
+#    別のバージョンで動くか、その場で失敗する。
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 
 FROM base AS build
+# ⚠️ **pnpm の確認プロンプトを止める。**
+#    `pnpm install --prod` は node_modules を作り直す前に
+#    「消して入れ直しますか？」と尋ねる。ビルドには答える人がいない。
+#    pnpm は CI 環境では尋ねない仕様なので、それを明示する。
+ENV CI=true
+
 # ⚠️ ロックファイルだけを先に入れる。
 #    ソースを変えただけで依存の取得からやり直さないため。
 COPY pnpm-lock.yaml ./
