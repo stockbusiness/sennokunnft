@@ -100,7 +100,15 @@ Direct をアプリに使うと接続数を食い潰す。Pooler でマイグレ
 
 ### 2-3. マイグレーションを流す
 
-手元から 1 回だけ流す。
+✅ **手元で流す必要は無い。** `main` へマージすると、
+`.github/workflows/deploy.yml` の「マイグレーション適用」ジョブが
+`DIRECT_DATABASE_URL` を使って 1 回だけ流す。
+
+⚠️ **手元から流す運用にしない。**
+「誰かの手元で流し忘れた」「別の接続先へ流した」を防げない。
+本番へ触る経路を 1 本に絞ることが、この構成の要点。
+
+どうしても手元から流す場合（切り分けのときなど）は Direct 接続を使う。
 
 ```bash
 DATABASE_URL="<Direct の接続文字列>" \
@@ -183,9 +191,37 @@ GitHub の Settings → Secrets and variables → Actions に 2 つ登録する�
 
 ### 段階1 の完了条件
 
-- [ ] `/readyz` が 200 を返す
-- [ ] `main` への push で自動デプロイされる
+- [x] `/readyz` が 200 を返す（`database: pass`）
+- [x] `main` への push で自動デプロイされる
 - [ ] 管理API から作品を 1 件登録できる
+
+✅ **2026-08-15 に段階1 を構築した。**
+`https://sennokunnft-api.fly.dev/readyz` が
+`{"status":"ok","checks":[{"name":"database","status":"pass"}]}` を返している。
+
+### 2-9. 初回で実際に詰まった 2 点（記録）
+
+`Dockerfile` は実ビルドで検証せずに書いたため、初回デプロイが失敗した。
+原因は 2 つで、いずれも**「ビルドには答える人がいない」**ことに起因する。
+
+| 症状                       | 原因                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `sh: 1: prisma: not found` | corepack が pnpm のバージョンを決められず、別のバージョンで動いていた。`packageManager` を読ませる前に pnpm を呼んでいたため |
+| （その手前で停止）         | `pnpm install --prod` が「node_modules を消して入れ直しますか？ (Y/n)」と尋ねる                                              |
+
+対処:
+
+```dockerfile
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+ENV CI=true                                   # pnpm は CI では尋ねない
+```
+
+⚠️ **`packageManager` に頼ったバージョン解決は、ロックファイルだけを置く段では効かない。**
+キャッシュ効率のために `pnpm-lock.yaml` を先にコピーする構成では、
+その時点に `package.json` が無い。**バージョンは明示的に固定する。**
+
+✅ 現在の `Dockerfile` は**本番で通ったもの**であり、推定ではない。
 
 ---
 
@@ -225,22 +261,36 @@ R2 → `Manage API tokens` → `Create API token`
 `Access Key ID` と `Secret Access Key` が表示される。
 ⚠️ **Secret は一度しか表示されない。** その場で保管する。
 
-#### ④ Fly に設定を入れる
+#### ④ 設定を入れる — 秘密かどうかで置き場所を分ける
 
-`https://fly.io/apps/sennokunnft-api/secrets` で 5 つ登録する。
+⚠️ **全部を `fly secrets` に入れない。**
+ダッシュボードで直接入れた値は、**誰がいつ何に変えたかが残らない**。
+秘密でないものは設定ファイルに書けば、変更がレビューを通り履歴も残る。
 
-| Name                     | Value                          |
-| ------------------------ | ------------------------------ |
-| `MEDIA_STORAGE_PROVIDER` | `r2`                           |
-| `MEDIA_PUBLIC_BASE_URL`  | `https://media-stg.example.jp` |
-| `R2_ACCOUNT_ID`          | Cloudflare のアカウントID      |
-| `R2_BUCKET`              | バケット名                     |
-| `R2_ACCESS_KEY_ID`       | ③ の Access Key ID             |
-| `R2_SECRET_ACCESS_KEY`   | ③ の Secret Access Key         |
+**`fly.api.toml` の `[env]` に書く**（秘密でない。コミットする）
 
-⚠️ **設定が欠けていると起動時に拒否される。**
-起動させてしまうと画像のアップロードだけが失敗し、カタログの登録は
-途中まで進むため「**画像の無い作品**」ができあがる。
+| 変数                     | 値                                |
+| ------------------------ | --------------------------------- |
+| `MEDIA_STORAGE_PROVIDER` | `r2`                              |
+| `MEDIA_PUBLIC_BASE_URL`  | ② で割り当てた Custom Domain      |
+| `R2_BUCKET`              | ① のバケット名                    |
+| `R2_ACCOUNT_ID`          | S3 エンドポイントに含まれる公開値 |
+
+**`fly secrets` に入れる**（`https://fly.io/apps/sennokunnft-api/secrets`）
+
+| Name                   | Value                  |
+| ---------------------- | ---------------------- |
+| `R2_ACCESS_KEY_ID`     | ③ の Access Key ID     |
+| `R2_SECRET_ACCESS_KEY` | ③ の Secret Access Key |
+
+⚠️ **順番を守る。鍵の登録が先、マージが後。**
+設定ファイルに `MEDIA_STORAGE_PROVIDER = "r2"` が入った状態でマージすると、
+api は R2 として起動しようとする。鍵が無ければ起動を拒否するので、
+**先にマージすると動いている api が落ちる**。
+
+⚠️ **設定が欠けていると起動時に拒否される。これは意図した仕様。**
+黙って `local` に落ちるほうが危険で、その場合は画像のアップロードだけが
+失敗してカタログの登録は途中まで進むため「**画像の無い作品**」ができあがる。
 それが表面化するのは Wallet へ配送する段になってから。
 
 #### 実装側で守っていること
@@ -258,21 +308,134 @@ R2 → `Manage API tokens` → `Create API token`
 ⚠️ 段階1 の api は `/tmp/media` に書いており、**再起動で消えている**。
 `r2` へ切り替えたら、作品画像を登録し直す。
 
+#### 実施の記録（2026-08-15）
+
+| 項目            | 値                                      |
+| --------------- | --------------------------------------- |
+| バケット        | `sennokunnft-media`（APAC）             |
+| Custom Domain   | `media.commitrev.com`                   |
+| 公開用の開発URL | 無効のまま（`r2.dev` は使わない）       |
+| API トークン    | `Object Read & Write`・当該バケットのみ |
+| 切り替え        | PR #14 のマージで `local` → `r2`        |
+
+⚠️ **鍵が正しいかどうかは、まだ確定していない。**
+デプロイが通ったことで分かるのは「**設定が揃っていて起動できた**」ことまで。
+R2 への読み書きが実際に成功するかは、**画像を 1 枚アップロードするまで
+分からない**。手順は次の ⑥。
+
+作業の順序としては、③ の API トークン作成 → ④ の鍵登録 → マージ、で行った。
+**先に設定ファイルをマージしてから鍵を入れると、そのあいだ api が落ちる。**
+
+#### ⑥ 実際に 1 枚上げて確かめる
+
+⚠️ **web のデプロイを待つ必要はない。** 管理画面に投稿フォームは無く、
+登録はもともと API を直接叩いて行う（画面は一覧と詳細を見るだけ）。
+
+**1. 運営の口座を作る**
+
+`AUTH_PROVIDER=dev` のトークンは HS256 の JWT で、`AUTH_DEV_SECRET` で署名する。
+初回アクセス時に口座が自動で作られるが、**役割は必ず `buyer`** になる
+（トークンの自己申告を信用しない設計のため）。運営へ上げるのは DB 側で行う。
+
+```sql
+-- Supabase の SQL Editor で。<subject> は JWT の sub と同じ値。
+UPDATE accounts SET role = 'operator'
+WHERE auth_provider = 'dev' AND auth_subject = '<subject>';
+```
+
+⚠️ **`pnpm db:seed` を本番で流さない。** 運営の口座と一緒に**サンプル作品と
+出品まで作る**。消し忘れたまま公開すると、実在しない作品が並ぶ。
+
+**2. 作品を作って画像を上げる**
+
+```bash
+API=https://sennokunnft-api.fly.dev
+TOKEN=<運営のトークン>
+
+curl -X POST "$API/api/v1/admin/artworks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d '{"slug":"r2-check","title":"疎通確認","description":"確認用","maxSupply":1}'
+
+# ⚠️ 画像は multipart ではなく生のバイト列を送る（境界の解析を増やさないため）。
+curl -X POST "$API/api/v1/admin/artworks/<作品ID>/image" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: image/png' \
+  --data-binary @sample.png
+```
+
+応答の URL が `https://media.commitrev.com/...` で始まり、そのまま開ければ
+**R2 の鍵・権限・Custom Domain のすべてが通っている**。
+
+⚠️ 確認用の作品は archive しておくこと。公開したまま忘れると一覧に出る。
+
 ### 3-2. web を Vercel へ
 
-GitHub 連携でプロジェクトを作る。ルートディレクトリは `apps/web`。
+GitHub 連携でプロジェクトを作る。**Root Directory は `apps/web`**。
 
 ⚠️ **Hobby プランは商用利用が禁止されている。** Pro（$20/人）にする。
-⚠️ **サーバー処理のリージョンを東京（`hnd1`）にする。** 既定だと api との往復が海外を経由する。
 
-環境変数:
+#### ビルド設定は `apps/web/vercel.json` に置いてある
 
-| 名前               | 値                                         |
-| ------------------ | ------------------------------------------ |
-| `WEB_API_BASE_URL` | `https://sennokunnft-api.fly.dev`          |
-| `ADMIN_DEV_TOKEN`  | 管理画面用。⚠️ `UD-801` 解決後は不要になる |
+画面で設定を変えない。**ダッシュボードで直接入れると、誰がいつ何に変えたかが残らない。**
 
-そのうえで api 側の CORS を web のドメインに向ける。
+| 設定             | 値                                                       |
+| ---------------- | -------------------------------------------------------- |
+| `installCommand` | `cd ../.. && pnpm install --frozen-lockfile`             |
+| `buildCommand`   | `cd ../.. && pnpm turbo run build --filter=@sengoku/web` |
+| `regions`        | `["hnd1"]`（東京）                                       |
+
+⚠️ **既定の設定では通らない。** 共有パッケージ（`@sengoku/config` など）は
+`dist` へビルドしてから使う。`apps/web` の中だけで install / build すると
+`dist` が無く、「モジュールが見つからない」で落ちる。
+Root Directory を `apps/web` にすると各コマンドは `apps/web` で走るので、
+**リポジトリの根まで戻してから**実行する。
+
+⚠️ **`next build` を直接呼ばない。** 共有パッケージが古いまま混ざる。
+混ざったことはビルドでは分からず、画面が出てから型の合わない値で壊れる。
+依存のビルド順は `turbo` の `--filter` に任せる。
+
+⚠️ **リージョンを東京に固定する。** 既定のままだと米国で動き、
+api（Fly の `nrt`）と DB（Supabase の Tokyo）との往復が毎回太平洋を渡る。
+**画面は出るので、遅いことにしか気づけない。**
+`regions` の指定が効くのは Pro プラン以上。
+
+✅ この構成は、キャッシュを消した状態から実際にビルドが通ることを確認済み
+（約 34 秒）。推定ではない。
+
+#### 環境変数
+
+| 名前                    | 値                                  | 備考                          |
+| ----------------------- | ----------------------------------- | ----------------------------- |
+| `WEB_API_BASE_URL`      | `https://sennokunnft-api.fly.dev`   | 必須                          |
+| `NEXT_PUBLIC_SITE_NAME` | 省略可（既定: 千ノ国NFTマーケット） |                               |
+| `ADMIN_DEV_TOKEN`       | 管理画面用                          | ⚠️ 下の注意を読んでから入れる |
+
+#### ⚠️ `ADMIN_DEV_TOKEN` を入れると、管理画面が誰にでも開く
+
+管理画面に認可判定は無い。**web が運営の資格情報をサーバー側で持ち、
+訪問者の代わりに API へ付けて送る**構造だからで、これは意図した設計
+（認可は API 側で判定する）。ただしその前提は「**管理画面へ到達できるのは
+運営だけ**」であり、公開URLに置いた瞬間にその前提が消える。
+
+`ADMIN_DEV_TOKEN` を Vercel に入れると、URL を知った人が
+`/admin/artworks` を開くだけで **未公開作品の一覧が読める**。
+`SECURITY_DESIGN.md` の「非公開作品の存在を公開APIから推測できないように
+する」に正面から反する。
+
+⚠️ **書き込みはできない**（管理画面に投稿フォームは無く、登録は API 直叩き
+の案内のみ）。**読み取りだけの漏れだが、漏れることに変わりはない。**
+
+対処は次のいずれか。**入れる前に決める。**
+
+| 案                                       | 効果                                       | 代償                               |
+| ---------------------------------------- | ------------------------------------------ | ---------------------------------- |
+| `ADMIN_DEV_TOKEN` を Vercel に入れない   | 構造的に安全（資格情報が存在しない）       | 管理画面は手元の `pnpm dev` で使う |
+| Vercel の Deployment Protection を掛ける | 管理画面も公開ページも Vercel ログイン必須 | 一般公開には使えない               |
+| `UD-801` を解決して本物の認証を入れる    | 恒久的な解決                               | 決めごとが要る                     |
+
+#### CORS
 
 ```bash
 fly secrets set --app sennokunnft-api API_PUBLIC_ORIGIN="https://<web のドメイン>"
