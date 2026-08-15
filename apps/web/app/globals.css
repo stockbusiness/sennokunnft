@@ -5,23 +5,83 @@
  * 逆にすると、狭い画面が「削られた結果」になり、操作しづらい画面が残りやすい。
  *
  * 40代以上の利用者を想定しているため、本文の文字を小さくしない。
+ *
+ * ⚠️ **生の値をここから下に書かない。**
+ * 色・寸法・角丸・影はすべて先頭のトークンから取る。1 か所でも直接書くと、
+ * 次に色を変える人がファイル全体を探す羽目になり、必ず取りこぼす。
  */
 
 :root {
-  --sengoku-ink: #1f2328;
-  --sengoku-ink-muted: #5b6672;
-  --sengoku-surface: #ffffff;
-  --sengoku-surface-alt: #f5f6f8;
-  --sengoku-border: #d5dae0;
-  --sengoku-accent: #7a2e2e;
-  --sengoku-success-bg: #e8f3ec;
-  --sengoku-success-ink: #1f5133;
-  --sengoku-warning-bg: #fdf0e3;
-  --sengoku-warning-ink: #7a4a12;
-  --sengoku-progress-bg: #e8eef7;
-  --sengoku-progress-ink: #24446e;
-  --sengoku-space: 1rem;
-  --sengoku-radius: 8px;
+  /* --- 色 --------------------------------------------------------------
+   * 千ノ国プロジェクトのロゴシステム（桜 #E9A0B1 / 若葉 #6B8F6E /
+   * 生成り #F7F5F0）を土台にしている。
+   *
+   * ⚠️ **ブランドの桜と若葉を文字色に使わない。**
+   * 生成りの上に置くと桜は 1.90:1、若葉は 3.34:1 で、本文に必要な
+   * 4.5:1 に届かない。ロゴは大きく太いので形で読めるが、17px の本文では
+   * 読めない。想定利用者そのものが困る。
+   * 文字と操作には、同じ色相を暗くした「濃桜」「松」を使う。
+   */
+  --sengoku-washi: #f7f5f0; /* 生成り。ブランドのオフホワイトそのまま */
+  --sengoku-paper: #ffffff; /* カードなど、生成りより一段手前の面 */
+  --sengoku-sumi: #2b2724; /* 墨。生成りと 13.59:1 */
+  --sengoku-sumi-soft: #6b625d; /* 補助文字。生成りと 5.46:1 */
+  --sengoku-sakura: #e9a0b1; /* ブランド桜。⚠️ 面と罫線のみ */
+  --sengoku-wakaba: #6b8f6e; /* ブランド若葉。⚠️ 面と罫線のみ */
+  --sengoku-sakura-pale: #f7e6ea; /* 淡桜。墨文字が 12.31:1 */
+  --sengoku-wakaba-pale: #e7eee7; /* 淡若葉。墨文字が 12.54:1 */
+  --sengoku-rose: #9e4f66; /* 濃桜。主要アクション。生成りと 5.12:1 / 白文字 5.58:1 */
+  --sengoku-rose-deep: #7c3f52; /* 濃桜の押下・強調 */
+  --sengoku-matsu: #4f6b52; /* 松。状態表示。生成りと 5.42:1 */
+  --sengoku-keisen: #ddd7cc; /* 罫線 */
+  --sengoku-keisen-soft: #ece7dd; /* 薄い区切り */
+  --sengoku-shade: #f0ece3; /* 生成りより少し沈んだ面 */
+
+  /* --- 文字 ------------------------------------------------------------
+   * 見出しと価格は明朝。ロゴが明朝であることに揃えている。
+   * ⚠️ 本文まで明朝にしない。画面上では細くなり、読みづらくなる。
+   */
+  --sengoku-font-sans:
+    'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', system-ui, -apple-system, sans-serif;
+  --sengoku-font-serif: 'Yu Mincho', 'YuMincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif;
+
+  /* 本文 17px。⚠️ これより小さくしない（iOS の入力時自動ズームの閾値も超える）。 */
+  --sengoku-text-body: 1.0625rem; /* 17px */
+  --sengoku-text-small: 0.9375rem; /* 15px。補助情報まで。本文には使わない */
+  --sengoku-text-lead: 1.1875rem; /* 19px */
+  --sengoku-text-title: 1.375rem; /* 22px */
+  --sengoku-text-page: 1.75rem; /* 28px */
+  --sengoku-text-price: 1.375rem;
+  --sengoku-line-body: 1.8;
+  --sengoku-line-heading: 1.5;
+
+  /* --- 余白 ------------------------------------------------------------ */
+  --sengoku-space-1: 0.25rem;
+  --sengoku-space-2: 0.5rem;
+  --sengoku-space-3: 0.75rem;
+  --sengoku-space-4: 1rem;
+  --sengoku-space-5: 1.5rem;
+  --sengoku-space-6: 2rem;
+  --sengoku-space-7: 3rem;
+  /* 既存のスタイルが参照している名前。段階的に上の段階値へ寄せる。 */
+  --sengoku-space: var(--sengoku-space-4);
+  --sengoku-measure: 60rem; /* 版面の幅 */
+  --sengoku-measure-text: 36em; /* 本文の 1 行が長くなりすぎない幅 */
+
+  /* --- 角丸 ------------------------------------------------------------
+   * ⚠️ 大きく丸めない。直線的な形のほうが和の印象に合う。
+   */
+  --sengoku-radius-sm: 2px;
+  --sengoku-radius: 3px;
+
+  /* --- 影 --------------------------------------------------------------
+   * ⚠️ 1 段階しか用意しない。段階を増やすと画面が騒がしくなり、
+   * どれが手前なのかがかえって分からなくなる。
+   */
+  --sengoku-shadow: 0 1px 3px rgb(43 39 36 / 8%);
+
+  /* --- 最小タップ領域 -------------------------------------------------- */
+  --sengoku-touch: 44px;
 }
 
 * {
@@ -35,49 +95,59 @@ html {
 
 body {
   margin: 0;
-  color: var(--sengoku-ink);
-  background: var(--sengoku-surface);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Hiragino Sans',
-    'Noto Sans JP',
-    sans-serif;
-  /* 本文は 16px 未満にしない（iOS で入力時に自動ズームする閾値でもある）。 */
-  font-size: 1rem;
-  line-height: 1.7;
+  color: var(--sengoku-sumi);
+  background: var(--sengoku-washi);
+  font-family: var(--sengoku-font-sans);
+  font-size: var(--sengoku-text-body);
+  line-height: var(--sengoku-line-body);
+  /* 頭・本文・足を縦に積み、足が常に一番下に来るようにする。 */
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 main {
-  max-width: 60rem;
+  flex: 1;
+  width: 100%;
+  max-width: var(--sengoku-measure);
   margin: 0 auto;
-  padding: var(--sengoku-space);
-}
-
-footer {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: var(--sengoku-space);
-  color: var(--sengoku-ink-muted);
-  border-top: 1px solid var(--sengoku-border);
+  padding: var(--sengoku-space-6) var(--sengoku-space-4) var(--sengoku-space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-5);
 }
 
 a {
-  color: var(--sengoku-accent);
+  color: var(--sengoku-rose);
 }
 
 /* 操作対象は指で押せる大きさを確保する。 */
 a,
 button {
-  min-height: 44px;
+  min-height: var(--sengoku-touch);
   display: inline-flex;
   align-items: center;
 }
 
 /* キーボード操作でどこにいるか分かるようにする。 */
 :focus-visible {
-  outline: 3px solid var(--sengoku-accent);
+  outline: 3px solid var(--sengoku-rose);
   outline-offset: 2px;
+}
+
+/*
+ * ⚠️ 動きを減らす設定を尊重する。
+ * いまは動きを入れていないが、あとから足した人の分もここで止まるようにしておく。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .sengoku-skip-link {
@@ -86,29 +156,194 @@ button {
 }
 
 .sengoku-skip-link:focus {
-  left: var(--sengoku-space);
-  top: var(--sengoku-space);
-  background: var(--sengoku-surface);
-  padding: 0.5rem 1rem;
+  left: var(--sengoku-space-4);
+  top: var(--sengoku-space-4);
+  background: var(--sengoku-paper);
+  padding: var(--sengoku-space-2) var(--sengoku-space-4);
+  border-radius: var(--sengoku-radius);
   z-index: 10;
 }
 
+/* --- 共通の頭 ------------------------------------------------------------ */
+
+.sengoku-site-header {
+  background: var(--sengoku-paper);
+  border-bottom: 1px solid var(--sengoku-keisen);
+  position: relative;
+}
+
+/*
+ * 頭の下に細い帯を敷く。ブランドの 2 色をここで使う。
+ * ⚠️ 装飾なので、これ単体で意味を伝えない。読み上げにも出ない。
+ */
+.sengoku-site-header::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -3px 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--sengoku-sakura) 0 33%,
+    var(--sengoku-wakaba) 33% 66%,
+    var(--sengoku-sakura) 66% 100%
+  );
+}
+
+.sengoku-site-header__inner {
+  max-width: var(--sengoku-measure);
+  margin: 0 auto;
+  padding: var(--sengoku-space-2) var(--sengoku-space-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sengoku-space-2) var(--sengoku-space-4);
+}
+
+.sengoku-brand {
+  text-decoration: none;
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-brand__name {
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-title);
+  letter-spacing: 0.12em;
+}
+
+.sengoku-site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sengoku-space-4);
+  font-size: var(--sengoku-text-small);
+}
+
+.sengoku-site-nav a {
+  text-decoration: none;
+  color: var(--sengoku-sumi-soft);
+  border-bottom: 2px solid transparent;
+}
+
+/* ⚠️ 現在地は色だけでなく下線でも示す。色の見分けがつかない人がいる。 */
+.sengoku-site-nav a[aria-current='page'] {
+  color: var(--sengoku-rose);
+  border-bottom-color: var(--sengoku-rose);
+}
+
+/* --- 共通の足 ------------------------------------------------------------ */
+
+.sengoku-site-footer {
+  background: var(--sengoku-paper);
+  border-top: 1px solid var(--sengoku-keisen);
+}
+
+.sengoku-site-footer__inner {
+  max-width: var(--sengoku-measure);
+  margin: 0 auto;
+  padding: var(--sengoku-space-5) var(--sengoku-space-4) var(--sengoku-space-6);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sengoku-space-4) var(--sengoku-space-6);
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-small);
+}
+
+.sengoku-site-footer__name {
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-lead);
+  letter-spacing: 0.12em;
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sengoku-space-4);
+}
+
+.sengoku-site-footer nav a {
+  color: var(--sengoku-sumi-soft);
+}
+
+/* --- ページの見出し ------------------------------------------------------ */
+
+.sengoku-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-2);
+  padding-bottom: var(--sengoku-space-4);
+  border-bottom: 1px solid var(--sengoku-keisen);
+}
+
 .sengoku-page-header h1 {
-  font-size: 1.5rem;
-  line-height: 1.4;
-  margin: 0 0 0.25rem;
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-page);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: var(--sengoku-line-heading);
+  margin: 0;
+  text-wrap: balance;
+}
+
+.sengoku-page-header p {
+  margin: 0;
+  color: var(--sengoku-sumi-soft);
+  max-width: var(--sengoku-measure-text);
+}
+
+/* --- 作品画像 ------------------------------------------------------------
+ * ⚠️ 縦の寸法を先に決めておく。決めないと、画像の読み込みが終わった瞬間に
+ * 下の文字が飛び、読んでいる最中に押す場所がずれる。
+ */
+
+.sengoku-artwork-image {
+  display: block;
+  background: var(--sengoku-washi);
+  overflow: hidden;
+}
+
+.sengoku-artwork-image--wide {
+  aspect-ratio: 4 / 3;
+}
+
+.sengoku-artwork-image--square {
+  aspect-ratio: 1 / 1;
+}
+
+.sengoku-artwork-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 画像が無いときも同じ寸法を保つ。斜線で「まだ無い」ことを示す。 */
+.sengoku-artwork-image--missing {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--sengoku-washi) 0 10px,
+    var(--sengoku-shade) 10px 20px
+  );
+  display: grid;
+  place-items: center;
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-small);
+  text-align: center;
+  padding: var(--sengoku-space-4);
 }
 
 /* --- カタログ一覧 --------------------------------------------------------- */
 
 .sengoku-artwork-grid {
   list-style: none;
-  margin: var(--sengoku-space) 0 0;
+  margin: 0;
   padding: 0;
   display: grid;
   /* 狭い画面では 1 列。広くなるにつれ自動で列が増える。 */
   grid-template-columns: 1fr;
-  gap: var(--sengoku-space);
+  gap: var(--sengoku-space-5);
 }
 
 @media (min-width: 40rem) {
@@ -124,83 +359,249 @@ button {
 }
 
 .sengoku-artwork-card {
-  border: 1px solid var(--sengoku-border);
+  border: 1px solid var(--sengoku-keisen);
   border-radius: var(--sengoku-radius);
-  padding: var(--sengoku-space);
-  background: var(--sengoku-surface);
+  background: var(--sengoku-paper);
+  box-shadow: var(--sengoku-shadow);
+  overflow: hidden;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 画像と作品名で 1 つのリンク。⚠️ 高さを揃えるための最小高は外す。 */
+.sengoku-artwork-card__link {
+  display: block;
+  min-height: 0;
+  text-decoration: none;
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-artwork-card__link:hover .sengoku-artwork-card__title {
+  text-decoration: underline;
 }
 
 .sengoku-artwork-card__title {
-  font-size: 1.125rem;
-  margin: 0 0 0.5rem;
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-title);
+  font-weight: 500;
+  line-height: var(--sengoku-line-heading);
+  /* 押せる高さは、この見出しの行で確保する。 */
+  min-height: var(--sengoku-touch);
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: var(--sengoku-space-3) var(--sengoku-space-4) 0;
+}
+
+.sengoku-artwork-card__body {
+  padding: var(--sengoku-space-2) var(--sengoku-space-4) var(--sengoku-space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sengoku-space-2);
+  flex: 1;
 }
 
 .sengoku-artwork-card__supply {
-  color: var(--sengoku-ink-muted);
-  margin: 0 0 0.5rem;
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-small);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
 }
 
 .sengoku-price {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-price);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .sengoku-price__note {
-  font-size: 0.875rem;
-  font-weight: 400;
-  color: var(--sengoku-ink-muted);
-  margin-left: 0.25rem;
+  font-family: var(--sengoku-font-sans);
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+  margin-left: var(--sengoku-space-1);
+}
+
+/* --- 作品の詳細 ----------------------------------------------------------- */
+
+.sengoku-artwork-detail {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sengoku-space-5);
+  align-items: start;
+}
+
+@media (min-width: 48rem) {
+  .sengoku-artwork-detail {
+    grid-template-columns: 1.15fr 1fr;
+    gap: var(--sengoku-space-6);
+  }
+}
+
+.sengoku-artwork-detail__figure {
+  background: var(--sengoku-paper);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  box-shadow: var(--sengoku-shadow);
+  overflow: hidden;
+}
+
+.sengoku-artwork-detail__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sengoku-space-4);
+}
+
+.sengoku-artwork-detail__side h1 {
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-page);
+  font-weight: 500;
+  line-height: var(--sengoku-line-heading);
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.sengoku-artwork-detail__description {
+  margin: 0;
+  max-width: var(--sengoku-measure-text);
+}
+
+.sengoku-facts {
+  margin: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sengoku-space-1) var(--sengoku-space-5);
+  border-top: 1px solid var(--sengoku-keisen);
+  border-bottom: 1px solid var(--sengoku-keisen);
+  padding: var(--sengoku-space-3) 0;
+  font-size: var(--sengoku-text-small);
+}
+
+.sengoku-facts dt {
+  color: var(--sengoku-sumi-soft);
+}
+
+.sengoku-facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 押せない案内。
+ *
+ * ⚠️ **押せる見た目にしない。** 朱色のボタンにして何も起きないより、
+ * 最初から期待させないほうが親切。お申し込みは Phase 3。
+ */
+.sengoku-action-pending {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sengoku-space-5);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-shade);
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-body);
 }
 
 /* --- 状態バッジ ----------------------------------------------------------- */
 
 .sengoku-badge {
   display: inline-block;
-  padding: 0.125rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.875rem;
-  background: var(--sengoku-surface-alt);
-  color: var(--sengoku-ink-muted);
+  padding: var(--sengoku-space-1) var(--sengoku-space-3);
+  border-radius: var(--sengoku-radius-sm);
+  border: 1px solid var(--sengoku-keisen);
+  font-size: var(--sengoku-text-small);
+  background: var(--sengoku-shade);
+  color: var(--sengoku-sumi-soft);
 }
 
 .sengoku-badge--success {
-  background: var(--sengoku-success-bg);
-  color: var(--sengoku-success-ink);
+  background: var(--sengoku-wakaba-pale);
+  color: var(--sengoku-matsu);
+  border-color: #c5d4c6;
 }
 
 .sengoku-badge--warning {
-  background: var(--sengoku-warning-bg);
-  color: var(--sengoku-warning-ink);
+  background: var(--sengoku-sakura-pale);
+  color: var(--sengoku-rose);
+  border-color: #e8ccd4;
 }
 
 .sengoku-badge--progress {
-  background: var(--sengoku-progress-bg);
-  color: var(--sengoku-progress-ink);
+  background: var(--sengoku-sakura-pale);
+  color: var(--sengoku-rose-deep);
+  border-color: #e8ccd4;
 }
 
+/* --- 空状態・案内 --------------------------------------------------------- */
+
 .sengoku-empty-state {
-  border: 1px dashed var(--sengoku-border);
+  border: 1px dashed var(--sengoku-keisen);
   border-radius: var(--sengoku-radius);
-  padding: calc(var(--sengoku-space) * 2) var(--sengoku-space);
+  background: var(--sengoku-paper);
+  padding: var(--sengoku-space-7) var(--sengoku-space-4);
   text-align: center;
-  color: var(--sengoku-ink-muted);
+  color: var(--sengoku-sumi-soft);
 }
 
 .sengoku-empty-state__title {
-  font-weight: 700;
-  color: var(--sengoku-ink);
-  margin: 0 0 0.25rem;
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-lead);
+  font-weight: 500;
+  color: var(--sengoku-sumi);
+  margin: 0 0 var(--sengoku-space-1);
 }
 
-/* --- 管理画面 ------------------------------------------------------------- */
+.sengoku-empty-state__hint {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+}
+
+.sengoku-notice {
+  border: 1px solid var(--sengoku-keisen-soft);
+  border-left: 3px solid var(--sengoku-sakura);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-sakura-pale);
+  padding: var(--sengoku-space-3) var(--sengoku-space-4);
+}
+
+.sengoku-notice--alert {
+  border-left-color: var(--sengoku-rose);
+}
+
+.sengoku-notice__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.sengoku-notice__hint {
+  margin: var(--sengoku-space-1) 0 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-rose-deep);
+}
+
+.sengoku-back-link {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+}
+
+/* --- 管理画面 -------------------------------------------------------------
+ * ⚠️ 業務ロジックは変えない。上のトークンに追従して見た目だけ揃う。
+ */
 
 .sengoku-admin__nav {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sengoku-space);
-  padding-bottom: var(--sengoku-space);
-  border-bottom: 1px solid var(--sengoku-border);
+  gap: var(--sengoku-space-4);
+  padding-bottom: var(--sengoku-space-4);
+  border-bottom: 1px solid var(--sengoku-keisen);
 }
 
 /*
@@ -209,42 +610,44 @@ button {
  */
 .sengoku-table-scroll {
   overflow-x: auto;
-  margin-top: var(--sengoku-space);
+  margin-top: var(--sengoku-space-4);
 }
 
 .sengoku-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 32rem;
+  background: var(--sengoku-paper);
 }
 
 .sengoku-table th,
 .sengoku-table td {
   text-align: left;
-  padding: 0.75rem 0.5rem;
-  border-bottom: 1px solid var(--sengoku-border);
+  padding: var(--sengoku-space-3) var(--sengoku-space-2);
+  border-bottom: 1px solid var(--sengoku-keisen);
   vertical-align: top;
 }
 
 .sengoku-definition-list {
-  margin: var(--sengoku-space) 0;
+  margin: var(--sengoku-space-4) 0;
 }
 
 .sengoku-definition-list dt {
   font-weight: 700;
-  margin-top: var(--sengoku-space);
+  margin-top: var(--sengoku-space-4);
 }
 
 .sengoku-definition-list dd {
-  margin: 0.25rem 0 0;
+  margin: var(--sengoku-space-1) 0 0;
 }
 
 .sengoku-code {
-  background: var(--sengoku-surface-alt);
+  background: var(--sengoku-shade);
+  border: 1px solid var(--sengoku-keisen-soft);
   border-radius: var(--sengoku-radius);
-  padding: var(--sengoku-space);
+  padding: var(--sengoku-space-4);
   /* 長い行があってもページ全体を横スクロールさせない。 */
   overflow-x: auto;
-  font-size: 0.875rem;
+  font-size: var(--sengoku-text-small);
   line-height: 1.6;
 }

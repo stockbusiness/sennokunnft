@@ -37,6 +37,16 @@ export const artworkSummarySchema = z.object({
   slug: z.string(),
   title: z.string(),
   imageKey: z.string().nullable(),
+  /**
+   * 表示用の画像URL。
+   *
+   * ⚠️ **`imageKey` から画面側で組み立てさせない。**
+   * 組み立てるには公開ドメインが要り、それは保存先の設定
+   * （`MEDIA_PUBLIC_BASE_URL`）にある。画面側にも同じ値を持たせると
+   * **設定が 2 か所になってずれる**。ずれても落ちず、画像が出なくなるまで
+   * 誰も気づけない。管理APIと同じく、サーバーが解決して渡す。
+   */
+  imageUrl: z.string().nullable(),
   /** 残り枚数。仮引当中の分は「売れていない」ではなく「買えない」として引く。 */
   availableSupply: z.number().int().nonnegative(),
   maxSupply: z.number().int().positive(),

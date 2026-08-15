@@ -73,6 +73,29 @@ describe('公開カタログ GET /api/v1/artworks', () => {
     expect(response.body.items).toHaveLength(1);
   });
 
+  it('画像URLをサーバー側で解決して返す', async () => {
+    // ⚠️ キーだけを返すと、画面側が公開ドメインを持つことになる。
+    //    設定が 2 か所になり、ずれても落ちず、画像が出なくなるまで気づけない。
+    harness.artworks.seed(sampleArtwork({ imageKey: 'artworks/2026/08/abc.png' }));
+
+    const response = await request(app.getHttpServer()).get('/api/v1/artworks').expect(200);
+
+    expect(response.body.items[0].imageKey).toBe('artworks/2026/08/abc.png');
+    expect(response.body.items[0].imageUrl).toBe(
+      harness.storage.publicUrl('artworks/2026/08/abc.png'),
+    );
+  });
+
+  it('画像が無ければ画像URLも null にする', async () => {
+    // 公開には画像が要る（`publishArtwork` が拒否する）ので通常は起きないが、
+    // 保存先の障害や過去データの取りこぼしで欠けたときに画面を崩さない。
+    harness.artworks.seed(sampleArtwork({ imageKey: null }));
+
+    const response = await request(app.getHttpServer()).get('/api/v1/artworks').expect(200);
+
+    expect(response.body.items[0].imageUrl).toBeNull();
+  });
+
   it('未公開の作品を一覧に含めない', async () => {
     harness.artworks.seed(sampleArtwork({ id: 'a-1', slug: 'published', status: 'published' }));
     harness.artworks.seed(sampleArtwork({ id: 'a-2', slug: 'draft', status: 'draft' }));

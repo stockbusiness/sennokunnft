@@ -1,15 +1,8 @@
 import { notFound } from 'next/navigation';
-import { EmptyState, PageHeader, PriceTag, StatusBadge } from '@sengoku/ui';
+import { ArtworkImage, Notice, PriceTag, StatusBadge } from '@sengoku/ui';
 import { fetchArtworkDetail } from '../../../src/api-client';
+import { displayStateLabel } from '../../../src/display-state';
 import { SITE_COPY } from '../../../src/site';
-
-/** 表示状態を、利用者向けの言い回しに直す。 */
-const DISPLAY_STATE_LABEL: Record<string, string> = {
-  scheduled: '販売開始前です',
-  ended: '販売は終了しました',
-  sold_out: '完売しました',
-  not_available: 'ただいま販売しておりません',
-};
 
 export default async function ArtworkDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -21,7 +14,8 @@ export default async function ArtworkDetailPage({ params }: { params: Promise<{ 
       notFound();
     }
     return (
-      <EmptyState
+      <Notice
+        tone="alert"
         title={SITE_COPY.catalogUnavailableTitle}
         hint={SITE_COPY.catalogUnavailableHint}
       />
@@ -31,34 +25,57 @@ export default async function ArtworkDetailPage({ params }: { params: Promise<{ 
   const artwork = result.data;
 
   return (
-    <>
-      <PageHeader title={artwork.title} />
-      <p>{artwork.description}</p>
+    /*
+      画像を先に置く。買う人が最初に見るのは絵で、
+      名前や値段はその次に確かめるもの。
+      狭い画面では 1 列に落ち、画像・説明・価格の順に縦へ並ぶ。
+    */
+    <div className="sengoku-artwork-detail">
+      <div className="sengoku-artwork-detail__figure">
+        <ArtworkImage src={artwork.imageUrl} title={artwork.title} shape="square" />
+      </div>
 
-      <p>
-        残り {artwork.availableSupply} 点 / 全 {artwork.maxSupply} 点
-      </p>
+      <div className="sengoku-artwork-detail__side">
+        <h1>{artwork.title}</h1>
 
-      {artwork.price === null ? (
-        <StatusBadge label="準備中" tone="neutral" />
-      ) : (
-        <PriceTag price={artwork.price} />
-      )}
+        {artwork.purchasable ? (
+          <StatusBadge label={displayStateLabel('on_sale')} tone="success" />
+        ) : (
+          <StatusBadge label={displayStateLabel(artwork.displayState)} tone="warning" />
+        )}
 
-      {artwork.purchasable ? (
-        // お申し込みは Phase 3。ここにボタンを置かないのは、
-        // 押せるのに何も起きない導線を作らないため。
-        <p>{SITE_COPY.purchaseComingSoon}</p>
-      ) : (
-        <StatusBadge
-          label={DISPLAY_STATE_LABEL[artwork.displayState] ?? 'ただいまお求めいただけません'}
-          tone="warning"
-        />
-      )}
+        <p className="sengoku-artwork-detail__description">{artwork.description}</p>
 
-      <p>
-        <a href="/">{SITE_COPY.backToCatalog}</a>
-      </p>
-    </>
+        <dl className="sengoku-facts">
+          <dt>{SITE_COPY.supplyLabel}</dt>
+          <dd>
+            残り {artwork.availableSupply} 点 / 全 {artwork.maxSupply} 点
+          </dd>
+          <dt>{SITE_COPY.priceLabel}</dt>
+          <dd>
+            {artwork.price === null ? SITE_COPY.priceUnset : <PriceTag price={artwork.price} />}
+          </dd>
+          {artwork.maxQuantityPerOrder === null ? null : (
+            <>
+              <dt>{SITE_COPY.perOrderLabel}</dt>
+              <dd>{artwork.maxQuantityPerOrder} 点まで</dd>
+            </>
+          )}
+        </dl>
+
+        {/*
+          お申し込みは Phase 3。
+          ⚠️ 押せるボタンを置かないのは、押せるのに何も起きない導線を作らないため。
+             押せない見た目にしておけば、最初から期待させずに済む。
+        */}
+        {artwork.purchasable ? (
+          <p className="sengoku-action-pending">{SITE_COPY.purchaseComingSoon}</p>
+        ) : null}
+
+        <p className="sengoku-back-link">
+          <a href="/">← {SITE_COPY.backToCatalog}</a>
+        </p>
+      </div>
+    </div>
   );
 }
