@@ -249,6 +249,29 @@ const webEnvObject = baseEnvObject.extend({
    * 認証プロバイダへ本接続しない Phase 2 の暫定手段（UD-801）。
    */
   ADMIN_DEV_TOKEN: z.string().min(8).optional(),
+
+  /**
+   * グループ内テストのための合言葉。正式名（`UD-101`）が決まるまでの暫定。
+   *
+   * 正式名・運営主体が未決定のあいだ、サイトを関係者だけに見せるための
+   * 一時的な仕組み。**認証ではない。** 誰が見たかは分からず、
+   * 教わった人が転送するのも止められない。
+   *
+   * ⚠️ **未設定のまま公開環境へ出したら、すべて拒否する**
+   * （`assertSiteGateConfig`）。設定を忘れたときに素通しになるほうが
+   * 危険なので、閉じる側へ倒す。
+   *
+   * ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけ。
+   */
+  SITE_GATE_PASSWORD: z.string().min(8).optional(),
+  /**
+   * Vercel が自動で入れる環境の名前（`production` / `preview` / `development`）。
+   *
+   * ⚠️ **こちらで設定しない。** 手で設定できるようにすると、
+   * 「本番なのに development と名乗る」状態を作れてしまい、
+   * 合言葉の門を無効化する抜け道になる。
+   */
+  VERCEL_ENV: z.enum(['production', 'preview', 'development']).optional(),
 });
 
 export const baseEnvSchema = z.preprocess(stripEmptyValues, baseEnvObject);
