@@ -592,6 +592,65 @@ button {
   font-size: var(--sengoku-text-small);
 }
 
+/* --- 合言葉の門 ----------------------------------------------------------
+ * グループ内テストのあいだだけ使う（UD-101 が決まるまでの暫定）。
+ */
+
+.sengoku-gate-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sengoku-space-2);
+  background: var(--sengoku-paper);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  box-shadow: var(--sengoku-shadow);
+  padding: var(--sengoku-space-5) var(--sengoku-space-4);
+  max-width: 26rem;
+  width: 100%;
+}
+
+.sengoku-gate-form__label {
+  font-weight: 700;
+}
+
+.sengoku-gate-form__input {
+  width: 100%;
+  /* ⚠️ 16px 未満にすると iOS が入力時に勝手に拡大する。 */
+  font-size: var(--sengoku-text-body);
+  font-family: inherit;
+  min-height: var(--sengoku-touch);
+  padding: 0 var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-sumi-soft);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-washi);
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-gate-form__button {
+  min-height: 52px;
+  padding: 0 var(--sengoku-space-5);
+  border: 1px solid var(--sengoku-rose);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-rose);
+  /* 濃桜の上の白文字は 5.58:1。 */
+  color: #fff;
+  font-size: var(--sengoku-text-body);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sengoku-gate-form__button:hover {
+  background: var(--sengoku-rose-deep);
+  border-color: var(--sengoku-rose-deep);
+}
+
+.sengoku-gate-note {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
 /* --- 管理画面 -------------------------------------------------------------
  * ⚠️ 業務ロジックは変えない。上のトークンに追従して見た目だけ揃う。
  */
