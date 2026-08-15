@@ -230,7 +230,17 @@ const workerEnvObject = baseEnvObject.extend({
 
 const webEnvObject = baseEnvObject.extend({
   WEB_API_BASE_URL: z.url().default('http://localhost:3001'),
-  NEXT_PUBLIC_SITE_NAME: z.string().min(1).default('千ノ国NFTマーケット'),
+  /**
+   * 表示に使うサイト名。
+   *
+   * ⚠️ **ここに既定値を書かない。**
+   * 対外的なプロダクト名は未決定（`UD-101`）で、暫定名は
+   * `apps/web/src/site.ts` の 1 か所に置いてある。ここにも名前を書くと
+   * **暫定名が 2 か所になり、片方だけ直したときに画面の中で食い違う**。
+   * 実際に、見出しはこの既定値・タブ名とフッタは `site.ts` という
+   * 状態になっていた。未設定のまま `resolveSiteName` へ渡すこと。
+   */
+  NEXT_PUBLIC_SITE_NAME: z.string().min(1).optional(),
   /**
    * 管理画面がAPIを呼ぶときの資格情報。
    *
