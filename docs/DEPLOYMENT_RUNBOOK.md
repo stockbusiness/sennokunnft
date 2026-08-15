@@ -473,6 +473,66 @@ GitHub のリポジトリ変数 `DEPLOY_WORKER` を `true` にして、自動デ
 2 台にすると代理店システムを二重に呼ぶ（`create_if_missing` 付きだと
 相手側で `common_user_id` が二重発行されうる）。
 
+#### `DEPLOY_WORKER=true` にする前に要る環境変数
+
+**フラグを OFF のまま立てるなら、要るのは `DATABASE_URL` の 1 本だけ。**
+ほかは既定値で動く。フラグを ON にするときに、その段の分だけ足す。
+
+⚠️ **先に全部入れない。** 使っていない接続先や鍵を置いておくと、
+「設定してあるから繋がっているはず」という誤解が生まれる。
+実際に繋がるのはフラグを ON にした時なので、**設定と実態がずれる**。
+
+**A. いま（フラグ両方 OFF）**
+
+| 変数                      | 置き場所          | 値                                        |
+| ------------------------- | ----------------- | ----------------------------------------- |
+| `DATABASE_URL`            | `fly secrets`     | Pooler（`?pgbouncer=true` 付き）          |
+| `APP_ENV`                 | `fly.worker.toml` | `staging`（⚠️ api と必ずそろえる）        |
+| `NODE_ENV`                | `fly.worker.toml` | `production`                              |
+| `WORKER_POLL_INTERVAL_MS` | `fly.worker.toml` | `5000`                                    |
+| `ENABLE_STAGING_FIXTURES` | `fly.worker.toml` | `false`（⚠️ 本番で Fixture を許可しない） |
+
+**B. `COMMON_USER_LINKING_ENABLED` を ON にするとき**
+
+| 変数                          | 種別 | 備考                        |
+| ----------------------------- | ---- | --------------------------- |
+| `COMMON_USER_LINKING_ENABLED` | 設定 | `true`                      |
+| `COMMON_USER_API_BASE_URL`    | 設定 | 代理店システムの接続先      |
+| `COMMON_USER_API_KEY`         | 秘密 | ⚠️ `fly secrets` へ         |
+| `COMMON_USER_SYSTEM_KEY`      | 設定 | 既定 `sennokuni-nft-market` |
+| `COMMON_USER_LINK_BATCH_SIZE` | 設定 | 既定 25                     |
+
+**C. `WALLET_DELIVERY_ENABLED` を ON にするとき（いちばん最後）**
+
+| 変数                         | 種別 | 備考                               |
+| ---------------------------- | ---- | ---------------------------------- |
+| `WALLET_DELIVERY_ENABLED`    | 設定 | `true`                             |
+| `WALLET_DELIVERY_ENDPOINT`   | 設定 | ⚠️ `https://` 必須（起動時に検査） |
+| `WALLET_DELIVERY_KEY_ID`     | 設定 | Wallet が発行する鍵ID              |
+| `WALLET_DELIVERY_SECRET`     | 秘密 | ⚠️ `fly secrets` へ。8文字以上     |
+| `WALLET_DELIVERY_TIMEOUT_MS` | 設定 | 既定 10000                         |
+| `WALLET_DELIVERY_BATCH_SIZE` | 設定 | 既定 20。1 巡で送る上限            |
+
+✅ **足りない設定でフラグだけ ON にはできない。**
+`assertWalletDeliveryConfig` / `assertCommonUserLinkingConfig` が起動時に
+検査して落とす。**中途半端な状態で動き出すことはない。**
+
+⚠️ **`WALLET_DELIVERY_*` は api にも同じ値を入れる。**
+
+役割は違う。**送るのは worker だけ**で、api は送らない。
+api がするのは、受取確定と同じトランザクションで**配送待ちの行を作る**ことだけ。
+
+それでも api に同じ値が要るのは、api の起動時検査
+（`assertWalletDeliveryConfig`）が worker と同じ条件を見るため。
+`WALLET_DELIVERY_ENABLED=true` なのに接続先や鍵が無ければ、api は起動しない。
+
+⚠️ **api と worker で ON / OFF を食い違わせない。** 落ちないので気づけない。
+
+| 食い違い       | 何が起きるか                                                      |
+| -------------- | ----------------------------------------------------------------- |
+| api だけ ON    | 配送待ちの行は溜まる。**送る者がいないので永遠に届かない**        |
+| worker だけ ON | 行が作られない。**worker は正常に空回りし、ログにも異常が出ない** |
+
 ### 4-2. フラグを 1 つずつ ON にする
 
 **1 つ ON にしたら、次に進む前に動作を確かめる。**
