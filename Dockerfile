@@ -27,6 +27,12 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 
 FROM base AS build
+# ⚠️ **pnpm の確認プロンプトを止める。**
+#    `pnpm install --prod` は node_modules を作り直す前に
+#    「消して入れ直しますか？」と尋ねる。ビルドには答える人がいない。
+#    pnpm は CI 環境では尋ねない仕様なので、それを明示する。
+ENV CI=true
+
 # ⚠️ ロックファイルだけを先に入れる。
 #    ソースを変えただけで依存の取得からやり直さないため。
 COPY pnpm-lock.yaml ./
