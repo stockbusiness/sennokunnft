@@ -121,6 +121,57 @@ export function assertWalletDeliveryConfig(env: WalletDeliveryTargets): void {
   }
 }
 
+export interface MediaStorageTargets {
+  readonly MEDIA_STORAGE_PROVIDER: string;
+  readonly MEDIA_PUBLIC_BASE_URL?: string | undefined;
+  readonly R2_ACCOUNT_ID?: string | undefined;
+  readonly R2_BUCKET?: string | undefined;
+  readonly R2_ACCESS_KEY_ID?: string | undefined;
+  readonly R2_SECRET_ACCESS_KEY?: string | undefined;
+}
+
+/**
+ * 画像の保存先の設定が揃っているか（`UD-508`）。
+ *
+ * ⚠️ **`r2` なのに設定が欠けた状態で起動させない。**
+ * 起動すると画像のアップロードだけが失敗する。カタログの登録は
+ * 途中まで進むので、**画像が無い作品ができあがる**。
+ * それが Wallet へ配送される段になって初めて表面化する。
+ */
+export function assertMediaStorageConfig(env: MediaStorageTargets): void {
+  if (env.MEDIA_STORAGE_PROVIDER !== 'r2') {
+    return;
+  }
+  const reasons: string[] = [];
+  const required = [
+    ['MEDIA_PUBLIC_BASE_URL', env.MEDIA_PUBLIC_BASE_URL],
+    ['R2_ACCOUNT_ID', env.R2_ACCOUNT_ID],
+    ['R2_BUCKET', env.R2_BUCKET],
+    ['R2_ACCESS_KEY_ID', env.R2_ACCESS_KEY_ID],
+    ['R2_SECRET_ACCESS_KEY', env.R2_SECRET_ACCESS_KEY],
+  ] as const;
+
+  for (const [name, value] of required) {
+    if (value === undefined || value === '') {
+      reasons.push(`${name}: 画像の保存先が r2 なのに設定されていない`);
+    }
+  }
+
+  // ⚠️ **https に限る。** 平文で配ると、経路上で差し替えられる。
+  //    ⚠️ 値そのものは載せない。ホスト名が混ざる。
+  if (
+    env.MEDIA_PUBLIC_BASE_URL !== undefined &&
+    env.MEDIA_PUBLIC_BASE_URL !== '' &&
+    !env.MEDIA_PUBLIC_BASE_URL.startsWith('https://')
+  ) {
+    reasons.push('MEDIA_PUBLIC_BASE_URL: https でなければならない');
+  }
+
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
 export interface StagingFixtureTargets {
   readonly NODE_ENV: string;
   readonly APP_ENV: string;

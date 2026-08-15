@@ -4,6 +4,7 @@ import {
   apiEnvSchema,
   assertClaimApiConfig,
   assertWalletDeliveryConfig,
+  assertMediaStorageConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
@@ -27,6 +28,7 @@ import {
   DevTokenVerifier,
   InMemoryRateLimiter,
   LocalFileStorage,
+  R2Storage,
   SenNoKuniHmacVerifier,
   Sha256ClaimTokenService,
   SystemClock,
@@ -69,6 +71,10 @@ async function bootstrap(): Promise<void> {
     //    起動させると受取は成立し続け、配送だけが全件溜まる。
     //    利用者の画面は「お届け中」のままなので、誰も異常に気づけない。
     assertWalletDeliveryConfig(env);
+    // ⚠️ r2 なのに設定が欠けたまま起動させない。
+    //    起動すると画像のアップロードだけが失敗し、
+    //    「画像の無い作品」ができあがる。表面化するのは配送の段。
+    assertMediaStorageConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       // 理由は変数名と説明のみで、値を含まない。
@@ -117,6 +123,23 @@ async function bootstrap(): Promise<void> {
         })
       : null;
 
+  // 画像の保存先（UD-508 で Cloudflare R2 に決定）。
+  //
+  // ⚠️ **`local` は再起動で消える。** コンテナの一時領域に書くため。
+  //    本番・staging では必ず `r2` にする。設定の不足は
+  //    assertMediaStorageConfig が起動時に止めている。
+  const storage =
+    env.MEDIA_STORAGE_PROVIDER === 'r2'
+      ? new R2Storage({
+          // 上のガードで存在を確認済み。
+          accountId: env.R2_ACCOUNT_ID ?? '',
+          bucket: env.R2_BUCKET ?? '',
+          accessKeyId: env.R2_ACCESS_KEY_ID ?? '',
+          secretAccessKey: env.R2_SECRET_ACCESS_KEY ?? '',
+          publicBaseUrl: env.MEDIA_PUBLIC_BASE_URL ?? '',
+        })
+      : new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX);
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -129,8 +152,7 @@ async function bootstrap(): Promise<void> {
       tokenVerifier,
       clock: new SystemClock(),
       ids: new UuidGenerator(),
-      // ✅ 本番ストレージへは接続しない。保存先は UD-508 で未決定。
-      storage: new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX),
+      storage,
       audit: new PrismaAuditLogRepository(prisma),
       generateStorageKey,
       hashContent: contentHash,

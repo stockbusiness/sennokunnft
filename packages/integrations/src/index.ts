@@ -42,6 +42,8 @@ export {
 
 export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';
 
+export { R2Storage, type R2StorageOptions } from './r2-storage';
+
 export {
   AgencyCommonUserDirectory,
   FakeCommonUserDirectory,
