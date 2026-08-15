@@ -100,7 +100,15 @@ Direct をアプリに使うと接続数を食い潰す。Pooler でマイグレ
 
 ### 2-3. マイグレーションを流す
 
-手元から 1 回だけ流す。
+✅ **手元で流す必要は無い。** `main` へマージすると、
+`.github/workflows/deploy.yml` の「マイグレーション適用」ジョブが
+`DIRECT_DATABASE_URL` を使って 1 回だけ流す。
+
+⚠️ **手元から流す運用にしない。**
+「誰かの手元で流し忘れた」「別の接続先へ流した」を防げない。
+本番へ触る経路を 1 本に絞ることが、この構成の要点。
+
+どうしても手元から流す場合（切り分けのときなど）は Direct 接続を使う。
 
 ```bash
 DATABASE_URL="<Direct の接続文字列>" \
@@ -183,9 +191,37 @@ GitHub の Settings → Secrets and variables → Actions に 2 つ登録する�
 
 ### 段階1 の完了条件
 
-- [ ] `/readyz` が 200 を返す
-- [ ] `main` への push で自動デプロイされる
+- [x] `/readyz` が 200 を返す（`database: pass`）
+- [x] `main` への push で自動デプロイされる
 - [ ] 管理API から作品を 1 件登録できる
+
+✅ **2026-08-15 に段階1 を構築した。**
+`https://sennokunnft-api.fly.dev/readyz` が
+`{"status":"ok","checks":[{"name":"database","status":"pass"}]}` を返している。
+
+### 2-9. 初回で実際に詰まった 2 点（記録）
+
+`Dockerfile` は実ビルドで検証せずに書いたため、初回デプロイが失敗した。
+原因は 2 つで、いずれも**「ビルドには答える人がいない」**ことに起因する。
+
+| 症状                       | 原因                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `sh: 1: prisma: not found` | corepack が pnpm のバージョンを決められず、別のバージョンで動いていた。`packageManager` を読ませる前に pnpm を呼んでいたため |
+| （その手前で停止）         | `pnpm install --prod` が「node_modules を消して入れ直しますか？ (Y/n)」と尋ねる                                              |
+
+対処:
+
+```dockerfile
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+ENV CI=true                                   # pnpm は CI では尋ねない
+```
+
+⚠️ **`packageManager` に頼ったバージョン解決は、ロックファイルだけを置く段では効かない。**
+キャッシュ効率のために `pnpm-lock.yaml` を先にコピーする構成では、
+その時点に `package.json` が無い。**バージョンは明示的に固定する。**
+
+✅ 現在の `Dockerfile` は**本番で通ったもの**であり、推定ではない。
 
 ---
 
