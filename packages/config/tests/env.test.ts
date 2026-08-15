@@ -70,6 +70,24 @@ describe('parseEnv', () => {
     if (!web.ok) throw new Error('expected success');
     expect(web.env.WEB_API_BASE_URL).toBe('http://localhost:3001');
   });
+
+  it('サイト名の既定値をここに置かない（UD-101）', () => {
+    // ⚠️ 暫定名の置き場所は apps/web/src/site.ts の 1 か所だけ。
+    //    ここにも既定値を書くと、同じ画面に 2 つの製品名が同時に出る。
+    //    実際に「見出しはこの既定値・タブ名とフッタは site.ts」という
+    //    状態になっていた。落ちも警告も出ないので気づけない。
+    const web = parseEnv(webEnvSchema, {} as NodeJS.ProcessEnv);
+    if (!web.ok) throw new Error('expected success');
+    expect(web.env.NEXT_PUBLIC_SITE_NAME).toBeUndefined();
+  });
+
+  it('サイト名は設定されていればそれを使う', () => {
+    const web = parseEnv(webEnvSchema, {
+      NEXT_PUBLIC_SITE_NAME: '正式名',
+    } as unknown as NodeJS.ProcessEnv);
+    if (!web.ok) throw new Error('expected success');
+    expect(web.env.NEXT_PUBLIC_SITE_NAME).toBe('正式名');
+  });
 });
 
 describe('エラー出力に値を含めない（SECURITY_DESIGN §3.3）', () => {
