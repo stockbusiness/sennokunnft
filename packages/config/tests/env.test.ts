@@ -10,6 +10,7 @@ import {
   assertProductionSafety,
   assertCommonUserLinkingConfig,
   assertClaimApiConfig,
+  assertMediaStorageConfig,
   parseHmacKeys,
   UnsafeEnvironmentError,
 } from '../src/index';
@@ -306,5 +307,61 @@ describe('HMAC 鍵の読み取り', () => {
 
   it('鍵IDまたは秘密鍵が空の項目は採用しない', () => {
     expect(parseHmacKeys(':secret,key:')).toEqual({});
+  });
+});
+
+describe('画像の保存先の設定検査（UD-508）', () => {
+  const R2_ENV = {
+    MEDIA_STORAGE_PROVIDER: 'r2',
+    MEDIA_PUBLIC_BASE_URL: 'https://media-stg.example.jp',
+    R2_ACCOUNT_ID: 'acct',
+    R2_BUCKET: 'bucket',
+    R2_ACCESS_KEY_ID: 'key',
+    R2_SECRET_ACCESS_KEY: 'secret-value',
+  };
+
+  it('local なら何も要求しない', () => {
+    expect(() => {
+      assertMediaStorageConfig({ MEDIA_STORAGE_PROVIDER: 'local' });
+    }).not.toThrow();
+  });
+
+  it('r2 で全部そろっていれば通す', () => {
+    expect(() => {
+      assertMediaStorageConfig(R2_ENV);
+    }).not.toThrow();
+  });
+
+  // ⚠️ 欠けたまま起動すると、画像のアップロードだけが失敗する。
+  //    カタログの登録は途中まで進むので「画像の無い作品」ができ、
+  //    Wallet へ配送する段になって初めて表面化する。
+  it.each([
+    'MEDIA_PUBLIC_BASE_URL',
+    'R2_ACCOUNT_ID',
+    'R2_BUCKET',
+    'R2_ACCESS_KEY_ID',
+    'R2_SECRET_ACCESS_KEY',
+  ] as const)('r2 で %s が無ければ起動させない', (missing) => {
+    expect(() => {
+      assertMediaStorageConfig({ ...R2_ENV, [missing]: undefined });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('公開URLが https でなければ起動させない', () => {
+    expect(() => {
+      assertMediaStorageConfig({ ...R2_ENV, MEDIA_PUBLIC_BASE_URL: 'http://media.example.jp' });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('理由に値を含めない', () => {
+    try {
+      assertMediaStorageConfig({ ...R2_ENV, MEDIA_PUBLIC_BASE_URL: 'http://media.example.jp' });
+      throw new Error('should have thrown');
+    } catch (error) {
+      const text =
+        error instanceof UnsafeEnvironmentError ? error.reasons.join(' ') : String(error);
+      expect(text).not.toContain('media.example.jp');
+      expect(text).not.toContain('secret-value');
+    }
   });
 });

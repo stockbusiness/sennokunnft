@@ -75,10 +75,31 @@ const apiEnvObject = baseEnvObject.extend({
   MINT_PROVIDER: z.enum(['fake']).default('fake'),
   MINT_IDEMPOTENCY_SECRET: z.string().min(1).optional(),
   CLAIM_BASE_URL: z.url().default('http://localhost:3000/claims'),
-  /** 画像の保存先ディレクトリ。本番ストレージは未決定（UD-508）。 */
+  /**
+   * 画像の保存先（`UD-508` で Cloudflare R2 に決定）。
+   *
+   * ⚠️ **既定は `local`。** ローカル保存は**再起動で消える**ので、
+   * 本番・staging では必ず `r2` にする。`r2` にしたのに設定が
+   * 揃っていなければ、起動時に拒否する（`assertMediaStorageConfig`）。
+   */
+  MEDIA_STORAGE_PROVIDER: z.enum(['local', 'r2']).default('local'),
+  /** `local` のときの保存先ディレクトリ。 */
   MEDIA_STORAGE_DIR: z.string().min(1).default('./.media'),
-  /** 画像の表示URLの前置き。保存するのはキーで、URLは実行時に解決する。 */
+  /** `local` のときの表示URLの前置き。保存するのはキーで、URLは実行時に解決する。 */
   MEDIA_PUBLIC_PREFIX: z.string().min(1).default('/media'),
+  /**
+   * `r2` のときの公開URLの前置き。R2 に割り当てた Custom Domain。
+   *
+   * ⚠️ **署名付き・期限付きの URL を指定しない。**
+   * Wallet は受け取った URL を保存して表示に使うため、期限が切れると
+   * **過去に渡した分の画像がまとめて壊れる**。
+   */
+  MEDIA_PUBLIC_BASE_URL: z.url().optional(),
+  R2_ACCOUNT_ID: z.string().min(1).optional(),
+  R2_BUCKET: z.string().min(1).optional(),
+  R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+  /** ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけ。 */
+  R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
 
   /**
    * Claim API（OVEW Wallet 連携）。
