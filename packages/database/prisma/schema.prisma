@@ -83,6 +83,9 @@ model Account {
   createdArtworks      Artwork[]            @relation("ArtworkCreator")
   sentInvitations      StaffInvitation[]    @relation("StaffInvitationInviter")
   acceptedInvitations  StaffInvitation[]    @relation("StaffInvitationAcceptor")
+  integrationSettings  IntegrationSetting[] @relation("IntegrationSettingEditor")
+  integrationSecrets   IntegrationSecret[]  @relation("IntegrationSecretCreator")
+  integrationChecks    IntegrationConnectionCheck[] @relation("IntegrationCheckExecutor")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -120,6 +123,88 @@ model StaffInvitation {
   @@index([status, expiresAt])
   @@index([invitedByAccountId, createdAt])
   @@map("staff_invitations")
+}
+
+/// 外部連携の公開してよい設定（指示書 §5）。
+///
+/// ⚠️ **秘密の列を作らない。** CHECK では「秘密が入っていないこと」を
+/// 表現できない。列そのものを用意しないことでしか担保できない。
+model IntegrationSetting {
+  id                 String   @id @default(uuid()) @db.Uuid
+  /// ovew_wallet / storage / auth
+  service            String
+  /// staging / production。⚠️ `APP_ENV` とは別物（どの環境向けの設定か）。
+  environment        String
+  endpointUrl        String?  @map("endpoint_url")
+  apiVersion         String?  @map("api_version")
+  timeoutMs          Int      @default(10000) @map("timeout_ms")
+  maxAttempts        Int      @default(5) @map("max_attempts")
+  enabled            Boolean  @default(false)
+  /// 楽観ロック。古い画面からの上書きを弾く（指示書 §12）。
+  rowVersion         Int      @default(1) @map("row_version")
+  updatedByAccountId String?  @map("updated_by_account_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  updatedBy Account? @relation("IntegrationSettingEditor", fields: [updatedByAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([service, environment])
+  @@map("integration_settings")
+}
+
+/// 暗号化した資格情報（指示書 §6）。
+///
+/// ⚠️ **平文を戻す経路を作らない。** 復号してよいのは送信アダプタだけで、
+/// 一覧や詳細から呼べる形にしない。
+model IntegrationSecret {
+  id                 String    @id @default(uuid()) @db.Uuid
+  service            String
+  environment        String
+  /// 同じサービスで複数持てるようにする（鍵ID と 署名鍵 など）。
+  purpose            String
+  ciphertext         String
+  nonce              String
+  authTag            String    @map("auth_tag")
+  /// どの暗号鍵で包んだか。鍵の交換に備えて必ず持つ。
+  keyVersion         String    @map("key_version")
+  /// 画面での見分け用。⚠️ **平文の一部**。DB 側で 4 文字に縛ってある。
+  lastFour           String    @default("") @map("last_four")
+  /// pending / active / retired
+  status             String    @default("pending")
+  createdByAccountId String?   @map("created_by_account_id") @db.Uuid
+  activatedAt        DateTime? @map("activated_at") @db.Timestamptz(6)
+  retiredAt          DateTime? @map("retired_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy Account?                     @relation("IntegrationSecretCreator", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+  checks    IntegrationConnectionCheck[]
+
+  @@index([service, environment, status])
+  @@map("integration_secrets")
+}
+
+/// 接続テストの記録（指示書 §9）。
+///
+/// ⚠️ **外部の生の応答本文を入れない。** 秘匿値が混ざりうる。
+/// 残すのは分類コードだけ。
+model IntegrationConnectionCheck {
+  id                  String   @id @default(uuid()) @db.Uuid
+  service             String
+  environment         String
+  succeeded           Boolean
+  failureCode         String?  @map("failure_code")
+  durationMs          Int      @map("duration_ms")
+  secretId            String?  @map("secret_id") @db.Uuid
+  executedByAccountId String?  @map("executed_by_account_id") @db.Uuid
+  correlationId       String?  @map("correlation_id")
+  executedAt          DateTime @default(now()) @map("executed_at") @db.Timestamptz(6)
+
+  secret     IntegrationSecret? @relation(fields: [secretId], references: [id], onDelete: SetNull)
+  executedBy Account?           @relation("IntegrationCheckExecutor", fields: [executedByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([service, environment, executedAt(sort: Desc)])
+  @@map("integration_connection_checks")
 }
 
 // ============================================================================

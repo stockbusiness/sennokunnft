@@ -48,6 +48,15 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   STAFF_SELF_CHANGE: HttpStatus.CONFLICT,
   STAFF_LAST_OWNER: HttpStatus.CONFLICT,
   STAFF_OWNER_MUST_BE_OPERATOR: HttpStatus.CONFLICT,
+  // --- 外部連携 ---
+  INTEGRATION_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
+  // 古い画面からの上書き。もう一度読み直してもらう。
+  INTEGRATION_SETTINGS_CONFLICT: HttpStatus.CONFLICT,
+  INTEGRATION_ENDPOINT_INSECURE: HttpStatus.BAD_REQUEST,
+  INTEGRATION_SECRET_MISSING: HttpStatus.CONFLICT,
+  INTEGRATION_SECRET_NOT_PENDING: HttpStatus.CONFLICT,
+  INTEGRATION_CHECK_REQUIRED: HttpStatus.CONFLICT,
+  INTEGRATION_CHECK_STALE: HttpStatus.CONFLICT,
   IMAGE_INVALID: HttpStatus.BAD_REQUEST,
   IMAGE_TOO_LARGE: HttpStatus.PAYLOAD_TOO_LARGE,
   IMAGE_UNSUPPORTED_TYPE: HttpStatus.UNSUPPORTED_MEDIA_TYPE,
@@ -98,6 +107,15 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   STAFF_LAST_OWNER:
     'オーナーが居なくなるため、この変更はできません。先にもうひとりオーナーを立ててください。',
   STAFF_OWNER_MUST_BE_OPERATOR: 'オーナーにできるのは運営の方だけです。',
+  INTEGRATION_SETTINGS_INVALID: 'この内容では保存できません。入力をご確認ください。',
+  INTEGRATION_SETTINGS_CONFLICT:
+    'ほかの方が先に変更されました。画面を読み込み直してから、もう一度お試しください。',
+  INTEGRATION_ENDPOINT_INSECURE: '接続先は https から始まるものだけをご登録いただけます。',
+  INTEGRATION_SECRET_MISSING: '有効な資格情報がありません。先にご登録ください。',
+  INTEGRATION_SECRET_NOT_PENDING: 'この資格情報は、いまその操作を行える状態ではありません。',
+  INTEGRATION_CHECK_REQUIRED: '先に接続テストを行い、成功させてください。',
+  INTEGRATION_CHECK_STALE:
+    '接続テストの結果が古くなっています。もう一度テストしてからお試しください。',
   IMAGE_INVALID: '画像ファイルとして読み取れませんでした。',
   IMAGE_TOO_LARGE: '画像のサイズが大きすぎます。',
   IMAGE_UNSUPPORTED_TYPE: 'この形式の画像は登録できません。JPEG・PNG・WebP をご利用ください。',

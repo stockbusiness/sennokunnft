@@ -52,6 +52,13 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'staff.view': { anonymous: false, buyer: false, operator: false, auditor: false },
   'staff.invite': { anonymous: false, buyer: false, operator: false, auditor: false },
   'staff.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
+  // --- 外部連携（指示書 §8）---
+  'integration.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ 印が無い operator は通らない。印を持つ場合は下の別の組で確かめる。
+  'integration.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'integration.manage_secret': { anonymous: false, buyer: false, operator: false, auditor: false },
+  // 再送は印を要らない。運営の日常業務。
+  'wallet_delivery.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
 };
 
 describe('権限マトリクスの全セル検証（Z-1）', () => {
@@ -229,7 +236,13 @@ describe('ガードが使う役割段階の判定', () => {
  * ここが緩むと、運営の 1 人が乗っ取られただけで全権限を配り直される。
  */
 describe('オーナーの印', () => {
-  const STAFF_ACTIONS = ['staff.view', 'staff.invite', 'staff.manage'] as const;
+  const STAFF_ACTIONS = [
+    'staff.view',
+    'staff.invite',
+    'staff.manage',
+    'integration.manage',
+    'integration.manage_secret',
+  ] as const;
 
   for (const action of STAFF_ACTIONS) {
     it(`印を持つ operator は ${action} を行える`, () => {
@@ -269,5 +282,40 @@ describe('オーナーの印', () => {
     // 人事の軸を足したことで、作品の権限まで広がっていないこと。
     expect(isAllowed(actor('auditor', { isOwner: true }), 'artwork.manage')).toBe(false);
     expect(isAllowed(actor('buyer', { isOwner: true }), 'artwork.manage')).toBe(false);
+  });
+});
+
+/**
+ * 外部連携（指示書 §8）。
+ *
+ * ⚠️ **閲覧と変更で線を引く場所が違う。** 状態は運営と閲覧者にも見せ、
+ * 接続先と資格情報はオーナーだけにする。ここを一括で「運営なら可」に
+ * すると、運営の 1 人が乗っ取られただけで送信先ごと差し替えられる。
+ */
+describe('外部連携の線引き', () => {
+  it('印の無い operator も状態は見られる', () => {
+    expect(isAllowed(actor('operator'), 'integration.view')).toBe(true);
+  });
+
+  it('auditor も状態は見られる', () => {
+    expect(isAllowed(actor('auditor'), 'integration.view')).toBe(true);
+  });
+
+  it('auditor は再送できない', () => {
+    expect(isAllowed(actor('auditor'), 'wallet_delivery.retry')).toBe(false);
+  });
+
+  it('印の無い operator は再送できる（日常業務のため）', () => {
+    expect(isAllowed(actor('operator'), 'wallet_delivery.retry')).toBe(true);
+  });
+
+  it('buyer は状態すら見られない', () => {
+    expect(isAllowed(actor('buyer'), 'integration.view')).toBe(false);
+    expect(isAllowed(actor('buyer', { isOwner: true }), 'integration.manage')).toBe(false);
+  });
+
+  it('印を持っていても auditor は設定を変えられない', () => {
+    expect(isAllowed(actor('auditor', { isOwner: true }), 'integration.manage')).toBe(false);
+    expect(isAllowed(actor('auditor', { isOwner: true }), 'integration.manage_secret')).toBe(false);
   });
 });

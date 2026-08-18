@@ -41,3 +41,4 @@ export {
   PrismaStaffInvitationRepository,
   PrismaStaffMemberRepository,
 } from './repositories/staff.repository';
+export { PrismaIntegrationRepository } from './repositories/integration.repository';

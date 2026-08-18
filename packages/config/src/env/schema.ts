@@ -113,6 +113,18 @@ const apiEnvObject = baseEnvObject.extend({
   R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
 
   /**
+   * 外部連携の資格情報を包む暗号鍵（管理画面・外部連携 指示書 §6.2）。
+   *
+   * 形式は `version:base64鍵,version:base64鍵`。鍵は 32 バイト。
+   * ⚠️ **DB へ置かない。** 配備環境の Secret に置く。DB へ置くと、
+   * DB を取られた時点で暗号化の意味が無くなる。
+   * ⚠️ **消さない。** 消すと、包んだ資格情報を二度と開けない。
+   */
+  INTEGRATION_ENCRYPTION_KEYS: z.string().min(1).optional(),
+  /** 新しく包むときに使う version。既定は `v1`。 */
+  INTEGRATION_ENCRYPTION_ACTIVE_VERSION: z.string().min(1).default('v1'),
+
+  /**
    * Claim API（OVEW Wallet 連携）。
    *
    * ⚠️ **既定は OFF**（指示書 §15「Feature Flag既定ON」禁止）。

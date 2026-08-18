@@ -102,6 +102,45 @@ export {
 export { type StaffInvitationRepository, type StaffMemberRepository } from './ports/staff';
 
 export {
+  INTEGRATION_ENVIRONMENTS,
+  INTEGRATION_SERVICES,
+  integrationScope,
+  isIntegrationEnvironment,
+  isIntegrationService,
+  type IntegrationEnvironment,
+  type IntegrationService,
+} from './integration/service';
+export {
+  type ConnectionCheckRecord,
+  type IntegrationRepository,
+  type SealedSecret,
+  type SecretCipherPort,
+  type SecretScope,
+} from './ports/integration';
+export {
+  SECRET_PURPOSES,
+  activateSecret,
+  discardPendingSecret,
+  isSecretPurpose,
+  type ActivateSecretInput,
+  type ActivatedSecrets,
+  type IntegrationSecret,
+  type SecretPurpose,
+  type SecretStatus,
+} from './integration/secret';
+export {
+  CHECK_FRESHNESS_MS,
+  disableIntegration,
+  enableIntegration,
+  isCheckFresh,
+  updateSettings,
+  type EnableInput,
+  type IntegrationSettings,
+  type UpdateSettingsInput,
+  type UpdatedSettings,
+} from './integration/settings';
+
+export {
   createListing,
   updateListing,
   activateListing,

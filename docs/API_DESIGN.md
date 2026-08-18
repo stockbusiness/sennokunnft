@@ -442,6 +442,37 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | DELETE   | `/api/v1/admin/staff/invitations/{id}` | 招待を取り消す       |
 | PATCH    | `/api/v1/admin/staff/{accountId}`      | 役割・オーナー・在籍 |
 
+#### 外部連携の設定（管理画面・外部連携 指示書 §12）
+
+| メソッド | パス                                               | 必要な権限                      |
+| -------- | -------------------------------------------------- | ------------------------------- |
+| GET      | `/api/v1/admin/integrations`                       | `integration.view`              |
+| GET      | `/api/v1/admin/integrations/{service}`             | `integration.view`              |
+| PATCH    | `/api/v1/admin/integrations/{service}`             | `integration.manage`＋印        |
+| POST     | `/api/v1/admin/integrations/{service}/enable`      | `integration.manage`＋印        |
+| POST     | `/api/v1/admin/integrations/{service}/disable`     | `integration.manage`＋印        |
+| POST     | `/api/v1/admin/integrations/{service}/secrets`     | `integration.manage_secret`＋印 |
+| POST     | `/api/v1/admin/integrations/secrets/{id}/activate` | `integration.manage_secret`＋印 |
+| POST     | `/api/v1/admin/integrations/secrets/{id}/discard`  | `integration.manage_secret`＋印 |
+
+✅ **事実:** 登録済みの資格情報を返す経路は**無い**。応答に含まれるのは
+`status` / `lastFour`（末尾 4 文字）/ `keyVersion` / `activatedAt` まで。
+
+✅ **事実:** 環境（staging / production）を要求から受け取らない。
+このプロセスの `APP_ENV` に対応するものだけを扱う。
+受け取れるようにすると、本番のプロセスから staging の設定を書き換えられる。
+
+✅ **事実:** サービスごとに入力スキーマを固定し、**未知の設定名を拒否する**
+（`z.strict()`）。綴り違いが黙って保存されると、どれが効いているのか
+分からなくなる。
+
+✅ **事実:** 設定の更新は `rowVersion` を必須とし、一致しなければ 409。
+古い画面からの上書きを弾く。
+
+⚠️ **CSRF は該当しない。** この API は Cookie ではなく `Authorization`
+ヘッダーで認証する。ブラウザが自動で付ける資格情報が無いため、
+他サイトからの誘導では認証が通らない。
+
 #### 招待の引き取り（会員なら誰でも）
 
 | メソッド | パス                                 | 説明                   |
