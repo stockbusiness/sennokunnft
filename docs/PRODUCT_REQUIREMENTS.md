@@ -206,5 +206,6 @@ Turborepo のキャッシュと相性がよい。NestJS 既定の Jest からは
 | UD-109 | 出品者への売上分配（手数料率）            |
 | UD-110 | 出品者への送金の仕組み                    |
 | UD-111 | 出品者ごとの特商法表記                    |
+| UD-112 | 会員登録の手段（メール / LINE / その他）  |
 
 マスタ一覧は [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md)。

@@ -46,6 +46,7 @@ export {
   assertClaimApiConfig,
   assertWalletDeliveryConfig,
   assertMediaStorageConfig,
+  assertSupabaseAuthConfig,
   assertStagingFixtureAllowed,
   parseHmacKeys,
   type IntegrationTargets,
@@ -53,5 +54,6 @@ export {
   type ClaimApiTargets,
   type WalletDeliveryTargets,
   type MediaStorageTargets,
+  type SupabaseAuthTargets,
   type StagingFixtureTargets,
 } from './env/guards';

@@ -22,6 +22,55 @@ export interface IntegrationTargets {
   readonly DATABASE_URL?: string;
 }
 
+export interface SupabaseAuthTargets {
+  readonly AUTH_PROVIDER?: string;
+  readonly SUPABASE_JWT_ISSUER?: string | undefined;
+  readonly SUPABASE_JWT_AUDIENCE?: string | undefined;
+  readonly SUPABASE_JWKS_URL?: string | undefined;
+}
+
+/**
+ * Supabase での検証に必要な設定が揃っているか（`UD-801`）。
+ *
+ * ⚠️ **設定が欠けたまま起動させない。** 起動すると、
+ * **すべてのログインが 401 になる**。利用者からは「自分の入力が悪い」
+ * ようにしか見えず、何度もやり直したうえで諦める。
+ * 気付けない失敗は、止まる失敗より重い。
+ */
+export function assertSupabaseAuthConfig(env: SupabaseAuthTargets): void {
+  if (env.AUTH_PROVIDER !== 'supabase') {
+    return;
+  }
+  const reasons: string[] = [];
+  const required = [
+    ['SUPABASE_JWT_ISSUER', env.SUPABASE_JWT_ISSUER],
+    ['SUPABASE_JWT_AUDIENCE', env.SUPABASE_JWT_AUDIENCE],
+    ['SUPABASE_JWKS_URL', env.SUPABASE_JWKS_URL],
+  ] as const;
+
+  for (const [name, value] of required) {
+    if (value === undefined || value === '') {
+      reasons.push(`${name}: AUTH_PROVIDER が supabase なのに設定されていない`);
+    }
+  }
+
+  // ⚠️ **https に限る。** 平文で鍵束を取りに行くと、経路上で差し替えられる。
+  //    差し替えられた鍵で検証が通れば、偽のトークンを本物として受け入れる。
+  //    ⚠️ 値そのものは理由に載せない。ホスト名が混ざる。
+  for (const [name, value] of [
+    ['SUPABASE_JWKS_URL', env.SUPABASE_JWKS_URL],
+    ['SUPABASE_JWT_ISSUER', env.SUPABASE_JWT_ISSUER],
+  ] as const) {
+    if (value !== undefined && value !== '' && !value.startsWith('https://')) {
+      reasons.push(`${name}: https でなければならない`);
+    }
+  }
+
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
 export interface CommonUserLinkingTargets {
   readonly COMMON_USER_LINKING_ENABLED: boolean;
   readonly COMMON_USER_API_BASE_URL?: string | undefined;
