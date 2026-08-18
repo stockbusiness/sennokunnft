@@ -274,11 +274,7 @@ export {
   type WalletDeliveryResendResult,
 } from './wallet-delivery/admin';
 
-export {
-  encodeListCursor,
-  decodeListCursor,
-  type ListCursor,
-} from './shared/cursor';
+export { encodeListCursor, decodeListCursor, type ListCursor } from './shared/cursor';
 
 export {
   AUDIT_LOG_PAGE_SIZE,

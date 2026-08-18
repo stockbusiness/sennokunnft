@@ -131,7 +131,14 @@ describe('送信履歴の中身（指示書 §5）', () => {
       .expect(200);
 
     const body = JSON.stringify(response.body);
-    for (const forbidden of ['payload"', 'authorization', 'apiKey', 'api_key', 'signature', 'hmac']) {
+    for (const forbidden of [
+      'payload"',
+      'authorization',
+      'apiKey',
+      'api_key',
+      'signature',
+      'hmac',
+    ]) {
       expect(body.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
     // 相手方と突き合わせるのに要るものは返っている。

@@ -64,7 +64,10 @@ export class WalletDeliveryController {
    */
   @Post('resend')
   @RequireAction('wallet_delivery.retry')
-  resend(@CurrentActor() actor: Actor, @Body() body: unknown): Promise<ResendWalletDeliveriesResponse> {
+  resend(
+    @CurrentActor() actor: Actor,
+    @Body() body: unknown,
+  ): Promise<ResendWalletDeliveriesResponse> {
     return this.deliveries.resend(actor, parseOrThrow(resendWalletDeliveriesRequestSchema, body));
   }
 }

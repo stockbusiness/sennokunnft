@@ -126,10 +126,7 @@ function whereFor(query: WalletDeliveryAdminQuery): Prisma.WalletDeliveryOutboxW
          その並びの途中から続きを読むことになり、残りが飛ばされる。
          「時刻が古い」または「時刻が同じで行IDが小さい」で続きを取る。
     */
-    where.OR = [
-      { createdAt: { lt: cursor.at } },
-      { createdAt: cursor.at, id: { lt: cursor.id } },
-    ];
+    where.OR = [{ createdAt: { lt: cursor.at } }, { createdAt: cursor.at, id: { lt: cursor.id } }];
   }
 
   return where;

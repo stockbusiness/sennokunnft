@@ -60,11 +60,7 @@ export default async function AdminWalletDeliveriesPage({
       <PageHeader title={DELIVERY_COPY.title} description={DELIVERY_COPY.description} />
 
       {/* ⚠️ 本文を出さない理由を、画面にも書く。 */}
-      <Notice
-        tone="info"
-        title={DELIVERY_COPY.payloadNote}
-        hint={DELIVERY_COPY.payloadNoteHint}
-      />
+      <Notice tone="info" title={DELIVERY_COPY.payloadNote} hint={DELIVERY_COPY.payloadNoteHint} />
 
       <h2>{DELIVERY_COPY.countsHeading}</h2>
       {/*

@@ -99,4 +99,3 @@ export interface WalletDeliveryResendResult {
   readonly id: string;
   readonly outcome: WalletDeliveryResendOutcome;
 }
-
