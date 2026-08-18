@@ -45,6 +45,7 @@ import {
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
+  ReachabilityProbe,
 } from '@sengoku/integrations';
 import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
@@ -197,6 +198,13 @@ async function bootstrap(): Promise<void> {
 
     logger.info({ keyCount: Object.keys(keys).length }, '外部連携の設定機能を有効化しました');
     return {
+      /*
+        ⚠️ **業務データを送らない確認だけを渡す**（指示書 §4.3・要決定 06）。
+           相手は受取権を作る口で、試し打ちしてよい相手ではない。
+           安全なテスト手段が先方で確認できるまで、実送信は作らない。
+      */
+      probe: (endpointUrl, timeoutMs) =>
+        new ReachabilityProbe({ clock: new SystemClock(), timeoutMs }).probe(endpointUrl),
       repository: new PrismaIntegrationRepository(
         prisma,
         new AeadSecretBox({ keys, activeKeyVersion: version }),

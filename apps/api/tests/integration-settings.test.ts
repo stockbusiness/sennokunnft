@@ -58,14 +58,31 @@ async function recordSuccessfulCheck(offsetMs = 0): Promise<void> {
     id: `check-${String(offsetMs)}`,
     service: 'ovew_wallet',
     environment: 'production',
+    kind: 'reachability' as const,
     succeeded: true,
     failureCode: null,
+    httpStatus: 405,
     durationMs: 120,
     secretId: null,
     executedByAccountId: OWNER_ID,
     correlationId: null,
     executedAt: new Date(TEST_NOW.getTime() - offsetMs),
   });
+}
+
+/**
+ * 資格情報を登録して有効にするところまで進める。
+ *
+ * ⚠️ **有効化そのものが接続確認の成功を要る**（PR 1 の規則）。
+ * ここではその前提を整えるだけで、確認の成否はこの関数の主題ではない。
+ */
+async function registerAndActivateSecret(token: string): Promise<void> {
+  await recordSuccessfulCheck();
+  const secretId = await registerSecret(token);
+  await request(app.getHttpServer())
+    .post(`/api/v1/admin/integrations/secrets/${secretId}/activate`)
+    .set(auth(token))
+    .expect(201);
 }
 
 async function registerSecret(token: string): Promise<string> {
@@ -302,7 +319,7 @@ describe('有効化', () => {
     await request(app.getHttpServer())
       .patch('/api/v1/admin/integrations/ovew_wallet')
       .set(auth(token))
-      .send({ endpointUrl: 'https://wallet.example.com', rowVersion: 1 })
+      .send({ endpointUrl: 'https://wallet.example.com', keyId: 'market-1', rowVersion: 1 })
       .expect(200);
 
     await request(app.getHttpServer())
@@ -316,7 +333,7 @@ describe('有効化', () => {
     await request(app.getHttpServer())
       .patch('/api/v1/admin/integrations/ovew_wallet')
       .set(auth(token))
-      .send({ endpointUrl: 'https://wallet.example.com', rowVersion: 1 })
+      .send({ endpointUrl: 'https://wallet.example.com', keyId: 'market-1', rowVersion: 1 })
       .expect(200);
     await recordSuccessfulCheck();
 
@@ -331,7 +348,7 @@ describe('有効化', () => {
     await request(app.getHttpServer())
       .patch('/api/v1/admin/integrations/ovew_wallet')
       .set(auth(token))
-      .send({ endpointUrl: 'https://wallet.example.com', rowVersion: 1 })
+      .send({ endpointUrl: 'https://wallet.example.com', keyId: 'market-1', rowVersion: 1 })
       .expect(200);
 
     const secretId = await registerSecret(token);
@@ -353,7 +370,7 @@ describe('有効化', () => {
     await request(app.getHttpServer())
       .patch('/api/v1/admin/integrations/ovew_wallet')
       .set(auth(token))
-      .send({ endpointUrl: 'https://wallet.example.com', rowVersion: 1 })
+      .send({ endpointUrl: 'https://wallet.example.com', keyId: 'market-1', rowVersion: 1 })
       .expect(200);
     const secretId = await registerSecret(token);
     await recordSuccessfulCheck();
@@ -510,5 +527,164 @@ describe('環境の取り違え', () => {
     for (const item of response.body.items as { environment: string }[]) {
       expect(item.environment).toBe('production');
     }
+  });
+});
+
+/**
+ * 接続確認（指示書 §4.3・要決定 06）。
+ *
+ * ⚠️ **この試験の主題は「何を確かめていないかが伝わること」。**
+ * 到達性しか見ていないのに「テスト成功」だけを返すと、
+ * 資格情報まで確かめた気にさせる。
+ */
+describe('接続確認', () => {
+  async function configureEndpoint(token: string): Promise<void> {
+    await request(app.getHttpServer())
+      .patch('/api/v1/admin/integrations/ovew_wallet')
+      .set(auth(token))
+      .send({ endpointUrl: 'https://wallet.example.com', keyId: 'market-1', rowVersion: 1 })
+      .expect(200);
+  }
+
+  it('接続先を入れていなければ、試させない', async () => {
+    const token = ownerToken();
+
+    // ⚠️ 「試したが失敗した」と「接続先を入れていない」を混ぜない。
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(400);
+  });
+
+  it('届けば成功として記録し、何を確かめたかを残す', async () => {
+    const token = ownerToken();
+    await configureEndpoint(token);
+    harness.setProbe({ kind: 'response', statusCode: 405 });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    expect(response.body.lastCheck.succeeded).toBe(true);
+    // ⚠️ 到達性しか確かめていないことを、応答に残す。
+    expect(response.body.lastCheck.kind).toBe('reachability');
+    expect(response.body.lastCheck.httpStatus).toBe(405);
+    expect(response.body.checkFresh).toBe(true);
+  });
+
+  it('5xx は届いていても失敗にする', async () => {
+    const token = ownerToken();
+    await configureEndpoint(token);
+    harness.setProbe({ kind: 'response', statusCode: 503 });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    expect(response.body.lastCheck.succeeded).toBe(false);
+    expect(response.body.lastCheck.failureCode).toBe('http_5xx');
+    expect(response.body.canEnable).toBe(false);
+  });
+
+  it('接続できなければ失敗として記録する', async () => {
+    const token = ownerToken();
+    await configureEndpoint(token);
+    harness.setProbe({ kind: 'network', code: 'ENOTFOUND' });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    expect(response.body.lastCheck.succeeded).toBe(false);
+    expect(response.body.lastCheck.failureCode).toBe('ENOTFOUND');
+  });
+
+  /*
+    ⚠️ **失敗のあとに有効化できないこと。** PR 2 の完了条件そのもの。
+  */
+  it('接続確認に失敗したら、本番を有効にできない', async () => {
+    const token = ownerToken();
+    await configureEndpoint(token);
+    await registerAndActivateSecret(token);
+    harness.setProbe({ kind: 'timeout' });
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/enable')
+      .set(auth(token))
+      .expect(409);
+  });
+
+  it('確認は履歴に積み上がる（失敗も残る）', async () => {
+    const token = ownerToken();
+    await configureEndpoint(token);
+
+    harness.setProbe({ kind: 'timeout' });
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    harness.setProbe({ kind: 'response', statusCode: 204 });
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(token))
+      .expect(201);
+
+    // ⚠️ 成功だけを残さない。「何度も失敗したあとの 1 回の成功」が見えなくなる。
+    expect(response.body.recentChecks).toHaveLength(2);
+    /*
+      ⚠️ **時計を止めた試験なので、2 件は同じ時刻に並ぶ。**
+         同時刻のときは失敗を先に採る規則にしてある（迷ったら閉じるほう）。
+         その規則が画面の並びにも効いていることを、ここで固定する。
+    */
+    expect(response.body.recentChecks.map((c: { succeeded: boolean }) => c.succeeded)).toEqual([
+      false,
+      true,
+    ]);
+    // 同時刻に成功と失敗が並んだら、判定は失敗のほうを見る。
+    expect(response.body.lastCheck.succeeded).toBe(false);
+    expect(response.body.canEnable).toBe(false);
+  });
+
+  it('閲覧者は確認を実行できない', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(actorToken('auditor', 'audit-1', false)))
+      .expect(403);
+  });
+
+  it('印の無い運営は確認を実行できない', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/check')
+      .set(auth(actorToken('operator', 'ops-1', false)))
+      .expect(403);
+  });
+
+  /*
+    ⚠️ **鍵の識別子が無ければ有効化させない。** 署名ヘッダに載る値で、
+       欠けていれば相手は必ず断る。有効化してから毎回断られるより、手前で止める。
+  */
+  it('鍵の識別子が無ければ有効にできない', async () => {
+    const token = ownerToken();
+    await request(app.getHttpServer())
+      .patch('/api/v1/admin/integrations/ovew_wallet')
+      .set(auth(token))
+      .send({ endpointUrl: 'https://wallet.example.com', rowVersion: 1 })
+      .expect(200);
+    await registerAndActivateSecret(token);
+    await recordSuccessfulCheck();
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/ovew_wallet/enable')
+      .set(auth(token))
+      .expect(400);
   });
 });

@@ -6,6 +6,7 @@ function silentLogger(): RunnerLogger & { errors: Record<string, unknown>[] } {
   return {
     errors,
     info: () => undefined,
+    warn: () => undefined,
     error: (payload) => {
       errors.push(payload);
     },

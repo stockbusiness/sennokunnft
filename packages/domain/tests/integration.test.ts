@@ -30,6 +30,7 @@ function settings(overrides: Partial<IntegrationSettings> = {}): IntegrationSett
     service: 'ovew_wallet',
     environment: 'production',
     endpointUrl: 'https://wallet.example.com/api',
+    keyId: 'market-1',
     apiVersion: 'v1.1',
     timeoutMs: 10_000,
     maxAttempts: 5,
@@ -294,5 +295,38 @@ describe('結び付け情報', () => {
     expect(integrationScope('ovew_wallet', 'staging')).not.toBe(
       integrationScope('ovew_wallet', 'production'),
     );
+  });
+});
+
+/**
+ * 鍵の識別子（`keyId`）。
+ *
+ * ⚠️ **秘密ではないが、欠けていれば必ず断られる。** 署名ヘッダに載る名前で、
+ * 相手はこれで鍵を引く。有効化してから毎回断られるより、手前で止める。
+ */
+describe('鍵の識別子', () => {
+  it('欠けていれば有効にできない', () => {
+    const result = enableIntegration({
+      settings: settings({ keyId: null }),
+      hasActiveSecret: true,
+      lastCheck: { succeeded: true, executedAt: FRESH },
+      freshnessMs: CHECK_FRESHNESS_MS,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe('INTEGRATION_SETTINGS_INVALID');
+  });
+
+  it('空白だけの入力は「入れていない」として扱う', () => {
+    const result = updateSettings(settings({ keyId: 'market-1' }), { keyId: '   ' });
+
+    expect(result.ok && result.value.settings.keyId).toBeNull();
+  });
+
+  it('前後の空白は落として保存する', () => {
+    const result = updateSettings(settings(), { keyId: '  market-2  ' });
+
+    expect(result.ok && result.value.settings.keyId).toBe('market-2');
   });
 });

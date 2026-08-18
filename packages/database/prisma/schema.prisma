@@ -136,6 +136,10 @@ model IntegrationSetting {
   /// staging / production。⚠️ `APP_ENV` とは別物（どの環境向けの設定か）。
   environment        String
   endpointUrl        String?  @map("endpoint_url")
+  /// 署名に使う鍵の識別子。⚠️ **秘密ではない。** 鍵そのものは
+  /// `integration_secrets` に暗号化して置く。ここに置くのは
+  /// 「どの鍵か」を相手へ伝える名前で、署名ヘッダにそのまま載る値。
+  keyId              String?  @map("key_id")
   apiVersion         String?  @map("api_version")
   timeoutMs          Int      @default(10000) @map("timeout_ms")
   maxAttempts        Int      @default(5) @map("max_attempts")
@@ -192,8 +196,13 @@ model IntegrationConnectionCheck {
   id                  String   @id @default(uuid()) @db.Uuid
   service             String
   environment         String
+  /// 何を確かめたか。いまは到達性のみ（`reachability`）。
+  /// ⚠️ 資格情報が正しいかどうかは、この確認では分からない（要決定 06）。
+  kind                String
   succeeded           Boolean
   failureCode         String?  @map("failure_code")
+  /// 相手が返した HTTP の状態コード。⚠️ 応答本文は保存しない。
+  httpStatus          Int?     @map("http_status")
   durationMs          Int      @map("duration_ms")
   secretId            String?  @map("secret_id") @db.Uuid
   executedByAccountId String?  @map("executed_by_account_id") @db.Uuid

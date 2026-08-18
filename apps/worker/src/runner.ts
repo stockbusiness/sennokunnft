@@ -19,6 +19,8 @@ export interface JobHandler {
 
 export interface RunnerLogger {
   info(payload: Record<string, unknown>, message: string): void;
+  /** 人が意図してそうしたが、報せておきたいこと（例: 配送の停止）。 */
+  warn(payload: Record<string, unknown>, message: string): void;
   error(payload: Record<string, unknown>, message: string): void;
 }
 

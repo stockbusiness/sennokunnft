@@ -77,3 +77,9 @@ export {
   parseEncryptionKeys,
   type AeadSecretBoxOptions,
 } from './aead-secret-box';
+
+export {
+  ReachabilityProbe,
+  type ReachabilityProbeOptions,
+  type ProbeResult,
+} from './reachability-probe';

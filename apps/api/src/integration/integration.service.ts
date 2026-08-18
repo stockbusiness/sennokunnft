@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  ConnectionCheckView,
   IntegrationListResponse,
   IntegrationStatusView,
   RegisterSecretRequest,
@@ -9,6 +10,8 @@ import type { Actor } from '@sengoku/auth';
 import {
   CHECK_FRESHNESS_MS,
   INTEGRATION_SERVICES,
+  canRunCheck,
+  classifyProbe,
   activateSecret,
   disableIntegration,
   discardPendingSecret,
@@ -25,6 +28,8 @@ import {
   type IntegrationSecret,
   type IntegrationService,
   type IntegrationSettings,
+  type ConnectionCheckKind,
+  type ProbeOutcome,
   type Result,
   type SecretPurpose,
 } from '@sengoku/domain';
@@ -54,6 +59,17 @@ export class IntegrationService_ {
     private readonly audit: AuditLogPort,
     /** このプロセスがどの環境か。⚠️ 設定の `environment` とは別物。 */
     private readonly appEnvironment: IntegrationEnvironment,
+    /**
+     * 接続先へ届くかどうかを確かめる手段。
+     *
+     * ⚠️ **ここに「どうやって確かめるか」を書かない。** 相手ごとに
+     * 安全な確かめ方が違う。いまは本文を持たない `OPTIONS` だけで、
+     * それ以上を送ってよいかは要決定 06 のまま。
+     */
+    private readonly probe: (
+      endpointUrl: string,
+      timeoutMs: number,
+    ) => Promise<{ readonly outcome: ProbeOutcome; readonly durationMs: number }>,
   ) {}
 
   /**
@@ -83,9 +99,12 @@ export class IntegrationService_ {
       service,
       environment,
     );
-    const [secrets, lastCheck] = await Promise.all([
+    const [secrets, lastCheck, recentChecks] = await Promise.all([
       this.repository.listSecrets(service, environment),
       this.repository.findLatestConnectionCheck(service, environment),
+      // ⚠️ 成功だけを残さない。失敗も並べないと、
+      //    「何度も失敗したあとの 1 回の成功」が見えなくなる。
+      this.repository.listConnectionChecks(service, environment, RECENT_CHECK_LIMIT),
     ]);
 
     const now = this.clock.now();
@@ -96,6 +115,7 @@ export class IntegrationService_ {
       service,
       environment,
       endpointUrl: settings.endpointUrl,
+      keyId: settings.keyId,
       apiVersion: settings.apiVersion,
       timeoutMs: settings.timeoutMs,
       maxAttempts: settings.maxAttempts,
@@ -106,7 +126,9 @@ export class IntegrationService_ {
       lastCheck: lastCheck === null ? null : toCheckView(lastCheck),
       checkFresh: fresh,
       // 画面のボタンを出し分けるための値。⚠️ **これは保護ではない。**
-      canEnable: fresh && hasActive && settings.endpointUrl !== null,
+      canEnable: fresh && hasActive && settings.endpointUrl !== null && settings.keyId !== null,
+      canCheck: canRunCheck(settings),
+      recentChecks: recentChecks.map(toCheckView),
     };
   }
 
@@ -117,6 +139,53 @@ export class IntegrationService_ {
    * 別の相手に対する成功なので、そのまま有効化を許すと
    * 「テスト済み」の顔をした未確認の接続先が本番に載る。
    */
+  /**
+   * 接続先へ届くかどうかを確かめる（指示書 §4.3・要決定 06）。
+   *
+   * ⚠️ **業務データを送らない。** 送るのは本文を持たない `OPTIONS` だけ。
+   * 相手は受取権を作る口で、試し打ちしてよい相手ではない。
+   *
+   * ⚠️ **この確認で分かるのは到達性まで。** 資格情報が正しいかどうかは
+   * 確かめていない。応答にもその区別（`kind`）を載せる。
+   */
+  async runCheck(
+    actor: Actor,
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<IntegrationStatusView> {
+    const actorId = requireActorId(actor);
+    const settings = await this.repository.ensureSettings(
+      this.ids.generate(),
+      service,
+      environment,
+    );
+
+    if (!canRunCheck(settings)) {
+      // ⚠️ 「試したが失敗した」と「接続先を入れていない」を混ぜない。
+      //    直し方がまったく違う。
+      throw new DomainErrorException('INTEGRATION_SETTINGS_INVALID');
+    }
+
+    const probe = await this.probe(settings.endpointUrl ?? '', settings.timeoutMs);
+    const verdict = classifyProbe(probe.outcome);
+
+    await this.recordCheck({
+      service,
+      environment,
+      kind: 'reachability',
+      succeeded: verdict.succeeded,
+      failureCode: verdict.failureCode,
+      httpStatus: verdict.httpStatus,
+      durationMs: probe.durationMs,
+      // ⚠️ この確認は資格情報を使っていない。使ったことにしない。
+      secretId: null,
+      actorAccountId: actorId,
+      correlationId: null,
+    });
+
+    return this.status(service, environment);
+  }
+
   async update(
     actor: Actor,
     service: IntegrationService,
@@ -133,6 +202,7 @@ export class IntegrationService_ {
     const updated = unwrapDomain(
       updateSettings(settings, {
         endpointUrl: request.endpointUrl,
+        keyId: request.keyId,
         apiVersion: request.apiVersion,
         timeoutMs: request.timeoutMs,
         maxAttempts: request.maxAttempts,
@@ -337,8 +407,10 @@ export class IntegrationService_ {
   async recordCheck(input: {
     readonly service: IntegrationService;
     readonly environment: IntegrationEnvironment;
+    readonly kind: ConnectionCheckKind;
     readonly succeeded: boolean;
     readonly failureCode: string | null;
+    readonly httpStatus: number | null;
     readonly durationMs: number;
     readonly secretId: string | null;
     readonly actorAccountId: string;
@@ -348,8 +420,10 @@ export class IntegrationService_ {
       id: this.ids.generate(),
       service: input.service,
       environment: input.environment,
+      kind: input.kind,
       succeeded: input.succeeded,
       failureCode: input.failureCode,
+      httpStatus: input.httpStatus,
       durationMs: input.durationMs,
       secretId: input.secretId,
       executedByAccountId: input.actorAccountId,
@@ -366,8 +440,10 @@ export class IntegrationService_ {
       summary: {
         service: input.service,
         environment: input.environment,
+        kind: input.kind,
         succeeded: input.succeeded,
         failureCode: input.failureCode,
+        httpStatus: input.httpStatus,
       },
     });
     return record;
@@ -402,21 +478,20 @@ function toSecretView(secret: IntegrationSecret): {
   };
 }
 
-function toCheckView(check: ConnectionCheckRecord): {
-  id: string;
-  succeeded: boolean;
-  failureCode: string | null;
-  durationMs: number;
-  executedAt: string;
-} {
+function toCheckView(check: ConnectionCheckRecord): ConnectionCheckView {
   return {
     id: check.id,
+    kind: check.kind,
     succeeded: check.succeeded,
     failureCode: check.failureCode,
+    httpStatus: check.httpStatus,
     durationMs: check.durationMs,
     executedAt: check.executedAt.toISOString(),
   };
 }
+
+/** 画面に並べる履歴の件数。多くしても読まれない。 */
+const RECENT_CHECK_LIMIT = 10;
 
 function unwrapDomain<T>(result: Result<T, DomainError>): T {
   if (!result.ok) {

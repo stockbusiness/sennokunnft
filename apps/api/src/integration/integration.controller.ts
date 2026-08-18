@@ -78,6 +78,25 @@ export class IntegrationController {
   }
 
   /**
+   * 接続先へ届くかどうかを確かめる（指示書 §4.3・要決定 06）。
+   *
+   * ⚠️ **`integration.manage` を要求する（オーナーの印つき）。**
+   * 外部へ通信が出る操作で、接続先も自由に指定できてはならない。
+   * 使うのは保存済みの接続先だけで、本文では受け取らない。
+   *
+   * ⚠️ **業務データを送らない。** 本文を持たない確認だけを行う。
+   * 相手は受取権を作る口で、試し打ちしてよい相手ではない。
+   */
+  @Post(':service/check')
+  @RequireAction('integration.manage')
+  check(
+    @CurrentActor() actor: Actor,
+    @Param('service') service: string,
+  ): Promise<IntegrationStatusView> {
+    return this.integrations.runCheck(actor, parseService(service), this.environment());
+  }
+
+  /**
    * 資格情報を登録する。**待機中として保存し、いきなり有効にしない。**
    *
    * ⚠️ 本文の値をログにも監査ログにも出さない。残るのは末尾 4 文字だけ。
