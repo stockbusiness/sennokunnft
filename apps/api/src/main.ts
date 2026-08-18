@@ -47,6 +47,7 @@ import {
   parseEncryptionKeys,
   ReachabilityProbe,
 } from '@sengoku/integrations';
+import { describeIntegrationEnvironment } from './integration/environment-summary';
 import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
 import { NestStructuredLogger } from './common/nest-logger';
@@ -205,6 +206,11 @@ async function bootstrap(): Promise<void> {
       */
       probe: (endpointUrl, timeoutMs) =>
         new ReachabilityProbe({ clock: new SystemClock(), timeoutMs }).probe(endpointUrl),
+      /*
+        画像の保管先とログインは、配備環境が正（`UD-508` と指示書 §14）。
+        ⚠️ **値を渡さない。** 渡すのは方式と、欠けている設定の名前まで。
+      */
+      describeEnvironment: describeIntegrationEnvironment(env),
       repository: new PrismaIntegrationRepository(
         prisma,
         new AeadSecretBox({ keys, activeKeyVersion: version }),

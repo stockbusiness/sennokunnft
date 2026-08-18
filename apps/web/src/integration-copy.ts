@@ -86,6 +86,18 @@ export const INTEGRATION_COPY = {
   submitCheck: '接続を確かめる',
   checkNeedsEndpoint: '先に接続先を保存してください',
 
+  /*
+    ⚠️ **管理外の連携では、言い方を変える。** あちらで確かめているのは
+       公開されている場所への到達性で、Wallet の「鍵」は関係が無い。
+       同じ文言を使い回すと、確かめていないものの名前を取り違える。
+  */
+  checkIntroUnmanaged: '公開されている場所へ届くかどうかを確かめます。',
+  checkLimitationUnmanaged: 'この確認で分かるのは、その場所へ届くことだけです',
+  checkLimitationUnmanagedHint:
+    '保管先への書き込みや、ログインの検証がうまくいくかどうかは分かりません。それらは配備環境の設定として管理しています。',
+  /** ⚠️ 「保存してください」と書かない。この画面からは保存できない。 */
+  checkNoTarget: 'いまの方式では、確かめる先がありません',
+
   historyHeading: '確かめた記録',
   columnCheckedAt: '日時',
   columnResult: '結果',
@@ -95,6 +107,29 @@ export const INTEGRATION_COPY = {
   noChecksHint: '上の「接続を確かめる」を押してください。',
   checkOk: '届きました',
   checkNg: '届きませんでした',
+
+  // --- 管理外の連携（画像の保管先・ログイン）---------------------------------
+  /**
+   * ⚠️ **「権限がありません」と書かない。** オーナーでも変えられない。
+   * 権限の話だと思われると、権限を足せば変えられると誤解される。
+   */
+  unmanagedNotice: 'この設定は、この画面からは変更できません',
+  unmanagedHint:
+    '配備環境の設定として管理しています。変更するには配備の設定を直し、入れ直す必要があります。ここでは、いまどうなっているかだけをご確認いただけます。',
+  unmanagedStorageReason:
+    '画像の保管先は、起動時に一度だけ読み込みます。ここで変えても切り替わりません。本番の保管先自体もまだ決まっていません（UD-508）。',
+  unmanagedAuthReason:
+    'ログインの設定は、誤ると全員が入れなくなります。しかも直す手段がログインの先にあるため、この画面には置いていません。',
+
+  envHeading: 'いまの設定',
+  envProvider: '使っている方式',
+  envComplete: '設定はそろっています',
+  envIncomplete: '設定が足りません',
+  envIncompleteHint: '下の項目が配備環境に設定されていません。設定してから入れ直してください。',
+  envMissingHeading: '足りない設定',
+  /** ⚠️ 出すのは名前だけ。値は API が返していない。 */
+  envMissingNote: '設定の名前だけを表示しています。値は表示しません。',
+  envPublicUrl: '公開されている場所',
 
   enableHeading: 'お届けの開始と停止',
   submitEnable: 'お届けを始める',

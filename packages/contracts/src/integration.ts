@@ -48,6 +48,20 @@ export const connectionCheckSchema = z.object({
 });
 export type ConnectionCheckView = z.infer<typeof connectionCheckSchema>;
 
+/**
+ * 配備環境から読める、その連携の姿。
+ *
+ * ⚠️ **値を持たない。** 持つのは方式と、欠けている設定の**名前**まで。
+ * 名前は秘密ではなく、直すために要る。値は秘密でありうる。
+ */
+export const environmentSummarySchema = z.object({
+  provider: z.string(),
+  complete: z.boolean(),
+  missing: z.array(z.string()),
+  publicUrl: z.string().nullable(),
+});
+export type EnvironmentSummaryView = z.infer<typeof environmentSummarySchema>;
+
 export const integrationStatusSchema = z.object({
   service: z.enum(INTEGRATION_SERVICE_VALUES),
   environment: z.enum(INTEGRATION_ENVIRONMENT_VALUES),
@@ -77,6 +91,19 @@ export const integrationStatusSchema = z.object({
   canEnable: z.boolean(),
   /** いま接続確認を行えるか（接続先が入っているか）。 */
   canCheck: z.boolean(),
+  /**
+   * この画面から設定を変えられるか。
+   *
+   * ⚠️ **偽のときは、保存の口そのものが断る。** 画面で隠すだけにすると、
+   * 直接叩けば「誰も読まない設定」が保存できてしまう。
+   */
+  manageable: z.boolean(),
+  /**
+   * 配備環境（環境変数）から読める姿。管理外の連携ではこちらが正。
+   *
+   * ⚠️ **管理できる連携では `null`。** 2 つの正を並べない。
+   */
+  environmentSummary: environmentSummarySchema.nullable(),
   /**
    * 直近の接続確認の履歴。
    *

@@ -52,6 +52,13 @@ export const DOMAIN_ERROR_CODES = [
   'INTEGRATION_SECRET_MISSING',
   'INTEGRATION_SECRET_NOT_PENDING',
   /**
+   * この連携は管理画面から変えられない。
+   *
+   * ⚠️ **「権限が無い」ではない。** オーナーでも変えられない。
+   * 変えても誰も読まないため、受け付けること自体が嘘になる。
+   */
+  'INTEGRATION_NOT_MANAGED',
+  /**
    * 接続テストの成功が要る。
    *
    * ⚠️ **「保存できた」と「繋がった」を分けるための符号。**
