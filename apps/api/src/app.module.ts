@@ -20,6 +20,9 @@ import type {
   StaffInvitationRepository,
   StaffMemberRepository,
   IntegrationRepository,
+  AuditLogReadPort,
+  WalletDeliveryAdminPort,
+  WalletDeliveryOutboxPort,
   IntegrationEnvironment,
   IntegrationSettings,
   IntegrationService as IntegrationServiceName,
@@ -52,6 +55,10 @@ import { StaffController, StaffInvitationAcceptController } from './staff/staff.
 import { StaffService } from './staff/staff.service';
 import { IntegrationController } from './integration/integration.controller';
 import { IntegrationService_ } from './integration/integration.service';
+import { WalletDeliveryController } from './wallet-delivery/wallet-delivery.controller';
+import { WalletDeliveryAdminService } from './wallet-delivery/wallet-delivery.service';
+import { AuditLogController } from './audit/audit.controller';
+import { AuditLogQueryService } from './audit/audit.service';
 import { HealthController } from './health/health.controller';
 import { HealthService, type DependencyProbe } from './health/health.service';
 
@@ -90,6 +97,22 @@ export interface AppDependencies {
     /** このプロセスがどの環境か。⚠️ 設定の `environment` とは別物。 */
     readonly appEnvironment: IntegrationEnvironment;
   };
+  /**
+   * 送信の運用画面（管理画面・外部連携 指示書 §5）。
+   *
+   * ⚠️ **読む口と送り直す口を分けて受け取る。** 読む口は本文を返さない型で、
+   * 送り直す口は状態を戻すだけ。ひとつにまとめると、画面向けの経路から
+   * 本文へ手が届いてしまう。
+   *
+   * ⚠️ **無い環境では経路ごと生やさない。** 「渡すが中で落ちる」形にすると、
+   * 開いた人に 500 が返るだけで、原因が配線の欠けだと分からない。
+   */
+  readonly walletDeliveries?: {
+    readonly admin: WalletDeliveryAdminPort;
+    readonly outbox: Pick<WalletDeliveryOutboxPort, 'requeue'>;
+  };
+  /** 監査ログの閲覧（指示書 §5）。 */
+  readonly auditLogs?: AuditLogReadPort;
   readonly idempotency: IdempotencyStore;
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
@@ -169,6 +192,8 @@ export class AppModule implements NestModule {
     //    実際にそれで既存の API テストが全滅した。
     const claim = deps.claim;
     const integrations = deps.integrations;
+    const walletDeliveries = deps.walletDeliveries;
+    const auditLogs = deps.auditLogs;
     return {
       module: AppModule,
       controllers: [
@@ -180,6 +205,8 @@ export class AppModule implements NestModule {
         StaffController,
         StaffInvitationAcceptController,
         ...(integrations === undefined ? [] : [IntegrationController]),
+        ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
+        ...(auditLogs === undefined ? [] : [AuditLogController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -239,6 +266,28 @@ export class AppModule implements NestModule {
                     deps.audit,
                     integrations.appEnvironment,
                   ),
+              },
+            ]),
+        ...(walletDeliveries === undefined
+          ? []
+          : [
+              {
+                provide: WalletDeliveryAdminService,
+                useFactory: () =>
+                  new WalletDeliveryAdminService(
+                    walletDeliveries.admin,
+                    walletDeliveries.outbox,
+                    deps.clock,
+                    deps.audit,
+                  ),
+              },
+            ]),
+        ...(auditLogs === undefined
+          ? []
+          : [
+              {
+                provide: AuditLogQueryService,
+                useFactory: () => new AuditLogQueryService(auditLogs),
               },
             ]),
         {

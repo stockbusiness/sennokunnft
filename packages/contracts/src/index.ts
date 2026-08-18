@@ -128,3 +128,23 @@ export {
   type RegisterSecretRequest,
   type UpdateIntegrationRequest,
 } from './integration';
+
+export {
+  WALLET_DELIVERY_STATUS_VALUES,
+  walletDeliverySchema,
+  walletDeliveryListResponseSchema,
+  resendWalletDeliveriesRequestSchema,
+  resendWalletDeliveriesResponseSchema,
+  walletDeliveryResendResultSchema,
+  type WalletDeliveryView,
+  type WalletDeliveryListResponse,
+  type ResendWalletDeliveriesRequest,
+  type ResendWalletDeliveriesResponse,
+} from './wallet-delivery';
+
+export {
+  auditLogEntrySchema,
+  auditLogListResponseSchema,
+  type AuditLogEntryView,
+  type AuditLogListResponse,
+} from './audit';

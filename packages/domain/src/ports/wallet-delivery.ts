@@ -2,6 +2,12 @@ import type {
   DeliveryAttemptOutcome,
   WalletDeliveryOutboxStatus,
 } from '../wallet-delivery/dispatch';
+import type {
+  WalletDeliveryAdminPage,
+  WalletDeliveryAdminQuery,
+  WalletDeliveryAdminRecord,
+  WalletDeliveryStatusCounts,
+} from '../wallet-delivery/admin';
 import type { WalletDeliveryEventType } from '../wallet-delivery/event';
 
 /** 配送待ち行列の 1 行。送信に必要なものだけを持つ。 */
@@ -127,4 +133,31 @@ export interface WalletDeliverySenderPort {
     /** 署名対象であり、送信本文でもある同一の文字列。 */
     readonly payload: string;
   }): Promise<DeliveryAttemptOutcome>;
+}
+
+/**
+ * 送信の運用画面が読む口（管理画面・外部連携 指示書 §5）。
+ *
+ * ⚠️ **`WalletDeliveryOutboxPort` と分けてある。** あちらはワーカーが
+ * 「送る」ために使う口で、本文を持ち出す。こちらは人が「様子を見る」ための口で、
+ * 本文を持ち出さない。同じ口にまとめると、画面側の 1 行の書き忘れで
+ * 本文が表示されうる。**返す型そのものを分けておけば、書き忘れようがない。**
+ *
+ * 再送（`requeue`）は `WalletDeliveryOutboxPort` の側にある。
+ * 状態遷移の規則はひとつしかないため、二重に定義しない。
+ */
+export interface WalletDeliveryAdminPort {
+  /** 新しい順に一覧する。 */
+  list(query: WalletDeliveryAdminQuery): Promise<WalletDeliveryAdminPage>;
+
+  /**
+   * 状態ごとの件数。
+   *
+   * ⚠️ **絞り込みの影響を受けない全体の件数を返す。** 絞り込んだ結果の
+   * 件数を出すと、「失敗 0 件」と書かれた画面が、実は失敗を除外した
+   * 絞り込みの結果だった、ということが起きる。
+   */
+  countByStatus(): Promise<WalletDeliveryStatusCounts>;
+
+  findById(id: string): Promise<WalletDeliveryAdminRecord | null>;
 }

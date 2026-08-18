@@ -258,7 +258,38 @@ export type {
   WalletDeliveryFailureInput,
   WalletDeliveryOutboxPort,
   WalletDeliverySenderPort,
+  WalletDeliveryAdminPort,
 } from './ports/wallet-delivery';
+
+export {
+  WALLET_DELIVERY_PAGE_SIZE,
+  WALLET_DELIVERY_MAX_PAGE_SIZE,
+  WALLET_DELIVERY_MAX_BULK_RESEND,
+  type WalletDeliveryAdminRecord,
+  type WalletDeliveryAdminQuery,
+  type WalletDeliveryAdminCursor,
+  type WalletDeliveryAdminPage,
+  type WalletDeliveryStatusCounts,
+  type WalletDeliveryResendOutcome,
+  type WalletDeliveryResendResult,
+} from './wallet-delivery/admin';
+
+export {
+  encodeListCursor,
+  decodeListCursor,
+  type ListCursor,
+} from './shared/cursor';
+
+export {
+  AUDIT_LOG_PAGE_SIZE,
+  AUDIT_LOG_MAX_PAGE_SIZE,
+  REDACTED_MARK,
+  redactAuditSummary,
+  type AuditLogEntryRecord,
+  type AuditLogQuery,
+  type AuditLogCursor,
+  type AuditLogPage,
+} from './audit/read';
 
 export {
   BACKOFF_MINUTES,
@@ -361,4 +392,5 @@ export type {
   PutObjectInput,
   AuditEntry,
   AuditLogPort,
+  AuditLogReadPort,
 } from './ports/index';

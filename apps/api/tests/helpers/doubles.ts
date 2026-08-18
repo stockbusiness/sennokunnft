@@ -28,7 +28,17 @@ import type {
   StaffInvitationRepository,
   StaffMember,
   StaffMemberRepository,
+  AuditLogEntryRecord,
+  AuditLogPage,
+  AuditLogQuery,
+  AuditLogReadPort,
+  WalletDeliveryAdminPage,
+  WalletDeliveryAdminPort,
+  WalletDeliveryAdminQuery,
+  WalletDeliveryAdminRecord,
+  WalletDeliveryStatusCounts,
 } from '@sengoku/domain';
+import { canManuallyResend } from '@sengoku/domain';
 import { contentHash, InMemoryStorage } from '@sengoku/integrations';
 import type { AppDependencies } from '../../src/app.module';
 
@@ -664,6 +674,134 @@ export class InMemoryAuditLog implements AuditLogPort {
   }
 }
 
+/**
+ * 配送待ち行列（テスト用）。
+ *
+ * ⚠️ **本文をこの二重体にも持たせない。** 実装は `payload` 列を
+ * SELECT しない。テスト側だけが本文を持てる形にすると、
+ * 「本文を返していないこと」の試験が二重体の都合で通ってしまう。
+ */
+export class InMemoryWalletDeliveries implements WalletDeliveryAdminPort {
+  private readonly rows = new Map<string, WalletDeliveryAdminRecord>();
+
+  seed(overrides: Partial<WalletDeliveryAdminRecord> & { id: string }): WalletDeliveryAdminRecord {
+    const row: WalletDeliveryAdminRecord = {
+      eventId: `evt_${overrides.id}`,
+      eventType: 'entitlement.granted',
+      entitlementId: 'entitlement-1',
+      targetSiteKey: 'ovew-wallet',
+      payloadHash: `sha256:${'0'.repeat(64)}`,
+      status: 'PENDING',
+      attemptCount: 0,
+      maxAttempts: 5,
+      nextRetryAt: TEST_NOW,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      correlationId: 'corr_test',
+      createdAt: TEST_NOW,
+      updatedAt: TEST_NOW,
+      deliveredAt: null,
+      ...overrides,
+    };
+    this.rows.set(row.id, row);
+    return row;
+  }
+
+  list(query: WalletDeliveryAdminQuery): Promise<WalletDeliveryAdminPage> {
+    let items = [...this.rows.values()].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    if (query.statuses.length > 0) {
+      items = items.filter((row) => query.statuses.includes(row.status));
+    }
+    if (query.eventId !== null) {
+      items = items.filter((row) => row.eventId === query.eventId);
+    }
+    if (query.entitlementId !== null) {
+      items = items.filter((row) => row.entitlementId === query.entitlementId);
+    }
+    return Promise.resolve({ items: items.slice(0, query.limit), nextCursor: null });
+  }
+
+  countByStatus(): Promise<WalletDeliveryStatusCounts> {
+    const counts = { PENDING: 0, PROCESSING: 0, DELIVERED: 0, FAILED: 0, DEAD: 0 };
+    for (const row of this.rows.values()) {
+      counts[row.status] += 1;
+    }
+    return Promise.resolve(counts);
+  }
+
+  findById(id: string): Promise<WalletDeliveryAdminRecord | null> {
+    return Promise.resolve(this.rows.get(id) ?? null);
+  }
+
+  /**
+   * 手で送り直す。
+   *
+   * ⚠️ **状態の条件を実装と揃える。** 実装は `WHERE status IN ('FAILED','DEAD')`
+   * の条件付き UPDATE で戻す。ここを無条件にすると、
+   * 「送信中の行を戻さない」試験が二重体の都合で通ってしまう。
+   */
+  requeue(input: { readonly id: string; readonly now: Date }): Promise<boolean> {
+    const row = this.rows.get(input.id);
+    if (row === undefined || !canManuallyResend(row.status)) {
+      return Promise.resolve(false);
+    }
+    this.rows.set(input.id, {
+      ...row,
+      status: 'PENDING',
+      attemptCount: 0,
+      nextRetryAt: input.now,
+      updatedAt: input.now,
+    });
+    return Promise.resolve(true);
+  }
+}
+
+/**
+ * 監査ログの閲覧（テスト用）。
+ *
+ * 記録側（`InMemoryAuditLog`）が貯めたものをそのまま読む。
+ * 「操作したら監査に残り、その画面から見える」までを 1 本で確かめられる。
+ */
+export class InMemoryAuditLogReader implements AuditLogReadPort {
+  constructor(
+    private readonly source: InMemoryAuditLog,
+    /** アカウントIDから連絡先を引く。実装の JOIN にあたる。 */
+    private readonly emails: Map<string, string> = new Map(),
+  ) {}
+
+  setEmail(accountId: string, email: string): void {
+    this.emails.set(accountId, email);
+  }
+
+  list(query: AuditLogQuery): Promise<AuditLogPage> {
+    let items: AuditLogEntryRecord[] = this.source.entries.map((entry, index) => ({
+      id: `audit-${String(index)}`,
+      actorAccountId: entry.actorAccountId,
+      actorEmail:
+        query.includeActorContact && entry.actorAccountId !== null
+          ? (this.emails.get(entry.actorAccountId) ?? null)
+          : null,
+      action: entry.action,
+      targetType: entry.targetType,
+      targetId: entry.targetId,
+      summary: entry.summary,
+      occurredAt: TEST_NOW,
+    }));
+    items = items.reverse();
+
+    if (query.actionPrefix !== null) {
+      const prefix = query.actionPrefix;
+      items = items.filter((item) => item.action.startsWith(prefix));
+    }
+    if (query.targetType !== null) {
+      items = items.filter((item) => item.targetType === query.targetType);
+    }
+    return Promise.resolve({ items: items.slice(0, query.limit), nextCursor: null });
+  }
+}
+
 export interface TestHarness extends AppDependencies {
   readonly artworks: InMemoryArtworkRepository;
   readonly listings: InMemoryListingRepository;
@@ -673,6 +811,8 @@ export interface TestHarness extends AppDependencies {
   readonly staffMembers: InMemoryStaffMemberRepository;
   readonly staffInvitations: InMemoryStaffInvitationRepository;
   readonly integrationRepository: InMemoryIntegrationRepository;
+  readonly deliveries: InMemoryWalletDeliveries;
+  readonly auditLogReader: InMemoryAuditLogReader;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -771,6 +911,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const accounts = new InMemoryAccountRepository();
   const staffMembers = new InMemoryStaffMemberRepository(accounts);
   const integrationRepository = new InMemoryIntegrationRepository();
+  const audit = new InMemoryAuditLog();
+  const deliveries = new InMemoryWalletDeliveries();
+  const auditLogReader = new InMemoryAuditLogReader(audit);
   return {
     version: '0.1.0',
     probes: [],
@@ -786,7 +929,11 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     clock: new FixedClock(TEST_NOW),
     ids: new SequentialIds(),
     storage: new InMemoryStorage(),
-    audit: new InMemoryAuditLog(),
+    audit,
+    walletDeliveries: { admin: deliveries, outbox: deliveries },
+    deliveries,
+    auditLogs: auditLogReader,
+    auditLogReader,
     // テストでは決定論的なキーにする。実装は CSPRNG を使う。
     generateStorageKey: (prefix, extension) =>
       `${prefix}/test/${String(keyCounter++)}.${extension}`,

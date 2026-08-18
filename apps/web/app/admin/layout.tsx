@@ -37,6 +37,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
              ほかの人には「権限がありません」と出る。隠すことは保護ではない。
         */}
         <a href="/admin/staff">スタッフ</a>
+        <a href="/admin/wallet-deliveries">お届け</a>
+        <a href="/admin/audit-logs">操作の記録</a>
         <a href="/">公開ページ</a>
       </nav>
       {children}
