@@ -16,6 +16,7 @@ import {
   createArtworkDraft,
   createListing,
   endListing,
+  prepareArtworkDeletion,
   publishArtwork,
   resolveDisplayState,
   suspendListing,
@@ -145,6 +146,52 @@ export class AdminCatalogService {
       },
     });
     return this.toAdminArtwork(saved);
+  }
+
+  /**
+   * 作品を**完全に消す**。作品に紐づく出品も一緒に消える。
+   *
+   * ⚠️ **非公開化（`archiveArtwork`）と混同しない。** あちらは表示を
+   * 止めるだけで元に戻せる。こちらは行そのものが無くなり、戻せない。
+   *
+   * ⚠️ **消してよいかの判定はドメインが持つ**（`prepareArtworkDeletion`）。
+   * 条件をここに書き足さない。書き足すと、判定が 2 か所に散る。
+   *
+   * ⚠️ **画像は DB を消したあとで消す。** 逆にすると、DB 側が外部キーで
+   * 拒否されたときに「作品は残っているのに画像だけ消えた」状態になる。
+   * 画像の削除に失敗しても作品の削除は取り消さない。残った画像は
+   * どこからも参照されないゴミで、消し損ねても実害が無いため。
+   */
+  async deleteArtwork(id: string, actorId: string): Promise<void> {
+    const artwork = await this.loadArtwork(id);
+    const listings = await this.listings.listByArtwork(artwork.id);
+    const plan = unwrapDomain(prepareArtworkDeletion(artwork, listings));
+
+    await this.artworks.deleteWithListings(
+      plan.artwork.id,
+      plan.deletedListings.map((listing) => listing.id),
+    );
+
+    if (artwork.imageKey !== null) {
+      // 消せなくても失敗にしない（上のコメント参照）。
+      await this.storage.remove(artwork.imageKey).catch(() => undefined);
+    }
+
+    // ⚠️ 消したあとに記録する。先に記録すると、外部キーで拒否されたときに
+    //    「消した」という嘘の証跡だけが残る。
+    await this.audit.record({
+      actorAccountId: actorId,
+      action: 'artwork.delete',
+      targetType: 'artwork',
+      targetId: artwork.id,
+      // 行が消えるので、あとから辿れる手掛かりをここに残す。
+      // ⚠️ 題名は入れない。出品者が入れた文字がそのまま長期に残るため。
+      summary: {
+        slug: artwork.slug,
+        creatorAccountId: artwork.creatorAccountId,
+        deletedListingIds: plan.deletedListings.map((listing) => listing.id),
+      },
+    });
   }
 
   /** 出品の一覧。作品で絞り込める。 */

@@ -71,6 +71,7 @@ export {
 } from './catalog/artwork';
 
 export { archiveArtworkAndEndListings, type ArchivedCatalogEntry } from './catalog/archive';
+export { prepareArtworkDeletion, type DeletableCatalogEntry } from './catalog/deletion';
 
 export {
   createListing,

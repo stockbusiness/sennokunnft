@@ -13,6 +13,7 @@ import {
   createListing,
   evaluatePurchasability,
   listingStateMachine,
+  prepareArtworkDeletion,
   resolveDisplayState,
   suspendListing,
   publishArtwork,
@@ -633,6 +634,63 @@ describe('非公開化と出品の終了（非公開なのに販売中、を作�
   it('下書きの作品も非公開にできる（遷移表どおり）', () => {
     // draft -> archived は許されている。公開しないまま取り下げる経路。
     const result = archiveArtworkAndEndListings(artwork({ status: 'draft' }), []);
+    expect(result.ok).toBe(true);
+  });
+});
+
+/**
+ * 作品を消してよいかの判定（`UD-113` 仮決定）。
+ *
+ * ⚠️ **消せる条件が広がっていないことを確かめる試験。**
+ * 「消せた」ことより「消せなかった」ことを厚く見る。
+ * 消す操作は取り消せないので、条件が緩む方向のずれだけが事故になる。
+ */
+describe('prepareArtworkDeletion', () => {
+  it('公開中の作品は消せない（先に公開をやめさせる）', () => {
+    const result = prepareArtworkDeletion(artwork({ status: 'published' }), []);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ARTWORK_NOT_DELETABLE');
+  });
+
+  it('お支払い待ちがあると消せない', () => {
+    // 買おうとしている最中の作品を足元から消すことになる。
+    const result = prepareArtworkDeletion(
+      artwork({ status: 'archived', reservedCount: 1, issuedCount: 0 }),
+      [],
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('発行済みがあると消せない', () => {
+    // 買った人の手元にある物の出どころが消える。
+    const result = prepareArtworkDeletion(
+      artwork({ status: 'archived', reservedCount: 0, issuedCount: 1 }),
+      [],
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('別の作品の出品が混ざっていたら拒否する', () => {
+    // 巻き込みで他作品の販売設定を消すのは取り返しがつかない。
+    const result = prepareArtworkDeletion(artwork({ id: 'artwork-1', status: 'draft' }), [
+      listing({ id: 'l-other', artworkId: 'artwork-2' }),
+    ]);
+    expect(result.ok).toBe(false);
+  });
+
+  it('下書きは、出品ごと消せる', () => {
+    const result = prepareArtworkDeletion(artwork({ id: 'artwork-1', status: 'draft' }), [
+      listing({ id: 'l-1', artworkId: 'artwork-1', status: 'draft' }),
+      listing({ id: 'l-2', artworkId: 'artwork-1', status: 'ended' }),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.deletedListings.map((item) => item.id)).toEqual(['l-1', 'l-2']);
+  });
+
+  it('公開をやめた作品も、売れていなければ消せる', () => {
+    const result = prepareArtworkDeletion(artwork({ status: 'archived' }), []);
     expect(result.ok).toBe(true);
   });
 });
