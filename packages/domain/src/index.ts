@@ -400,3 +400,6 @@ export {
   type ProbeOutcome,
   type CheckVerdict,
 } from './integration/connection-check';
+
+export { MANAGED_INTEGRATION_SERVICES, isManagedFromAdmin } from './integration/service';
+export type { EnvIntegrationSummary } from './ports/integration';

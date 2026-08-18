@@ -20,6 +20,35 @@ export type IntegrationService = (typeof INTEGRATION_SERVICES)[number];
 export const INTEGRATION_ENVIRONMENTS = ['staging', 'production'] as const;
 export type IntegrationEnvironment = (typeof INTEGRATION_ENVIRONMENTS)[number];
 
+/**
+ * 管理画面から設定を変えられるサービス。
+ *
+ * ⚠️ **ここに無いサービスは、画面から保存できない。**
+ * 保存できても誰も読まない設定を受け付けるのは、嘘をつくのと同じ。
+ * 「保存できたのに効かない」は、効かない理由を誰も説明できない状態を作る。
+ *
+ * `storage`（Cloudflare R2）を入れていない理由:
+ *  - 保存先のアダプタは api の起動時に 1 個作る。DB を変えても効かない。
+ *    効かせるには送信ごとに解決する作りへ変える必要があり、それは
+ *    指示書 §14 の「R2 アダプターの無断変更」にあたる。
+ *  - 本番のストレージ自体がまだ決まっていない（`UD-508`）。
+ *    決まる前に切り替えの口を作ると、決めたときに作り直しになる。
+ *
+ * `auth`（Supabase Auth）を入れていない理由:
+ *  - 誤ると**全員が締め出される**。しかも直す経路がログインの先にある。
+ *    取り返しのつかなさが、ほかの設定と桁違い。
+ *  - 指示書 §14 が「Supabase の認証方式変更」を禁じている。
+ *
+ * ⚠️ **どちらも「状態を見る」ことはできる。** 見えないと、
+ * 設定が欠けていることに配備してから気づくことになる。
+ */
+export const MANAGED_INTEGRATION_SERVICES = ['ovew_wallet'] as const;
+
+/** その連携を管理画面から変えてよいか。 */
+export function isManagedFromAdmin(service: IntegrationService): boolean {
+  return (MANAGED_INTEGRATION_SERVICES as readonly string[]).includes(service);
+}
+
 export function isIntegrationService(value: string): value is IntegrationService {
   return (INTEGRATION_SERVICES as readonly string[]).includes(value);
 }

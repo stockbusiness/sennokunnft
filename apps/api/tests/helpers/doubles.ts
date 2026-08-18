@@ -38,6 +38,7 @@ import type {
   WalletDeliveryAdminRecord,
   WalletDeliveryStatusCounts,
   ProbeOutcome,
+  EnvIntegrationSummary,
 } from '@sengoku/domain';
 import { canManuallyResend } from '@sengoku/domain';
 import { contentHash, InMemoryStorage } from '@sengoku/integrations';
@@ -836,6 +837,11 @@ export interface TestHarness extends AppDependencies {
   readonly deliveries: InMemoryWalletDeliveries;
   /** 接続確認の結果を差し替える。 */
   readonly setProbe: (outcome: ProbeOutcome, durationMs?: number) => void;
+  /** 配備環境から読める姿を差し替える。 */
+  readonly setEnvironmentSummary: (
+    service: IntegrationService,
+    summary: EnvIntegrationSummary,
+  ) => void;
   readonly auditLogReader: InMemoryAuditLogReader;
 }
 
@@ -944,6 +950,25 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     outcome: { kind: 'response', statusCode: 405 },
     durationMs: 12,
   };
+  /*
+    配備環境から読める姿。⚠️ **値を持たない。**
+    既定は「そろっている」。欠けを試す試験だけ `setEnvironmentSummary` で差し替える。
+  */
+  const environmentSummaries: Record<IntegrationService, EnvIntegrationSummary> = {
+    ovew_wallet: { provider: 'database', complete: false, missing: [], publicUrl: null },
+    storage: {
+      provider: 'r2',
+      complete: true,
+      missing: [],
+      publicUrl: 'https://images.example.com',
+    },
+    auth: {
+      provider: 'supabase',
+      complete: true,
+      missing: [],
+      publicUrl: 'https://auth.example.com/.well-known/jwks.json',
+    },
+  };
   const deliveries = new InMemoryWalletDeliveries();
   const auditLogReader = new InMemoryAuditLogReader(audit);
   return {
@@ -960,6 +985,10 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       appEnvironment: 'production',
       // 既定は「届いた（405）」。試験ごとに `harness.probeOutcome` で差し替える。
       probe: () => Promise.resolve(probeResult),
+      describeEnvironment: (service) => environmentSummaries[service],
+    },
+    setEnvironmentSummary: (service, summary) => {
+      environmentSummaries[service] = summary;
     },
     setProbe: (outcome: ProbeOutcome, durationMs = 12) => {
       probeResult = { outcome, durationMs };

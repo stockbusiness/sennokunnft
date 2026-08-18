@@ -55,6 +55,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   INTEGRATION_ENDPOINT_INSECURE: HttpStatus.BAD_REQUEST,
   INTEGRATION_SECRET_MISSING: HttpStatus.CONFLICT,
   INTEGRATION_SECRET_NOT_PENDING: HttpStatus.CONFLICT,
+  // ⚠️ 403 にしない。権限の話ではなく、そもそも変えられない対象。
+  INTEGRATION_NOT_MANAGED: HttpStatus.CONFLICT,
   INTEGRATION_CHECK_REQUIRED: HttpStatus.CONFLICT,
   INTEGRATION_CHECK_STALE: HttpStatus.CONFLICT,
   IMAGE_INVALID: HttpStatus.BAD_REQUEST,
@@ -113,6 +115,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   INTEGRATION_ENDPOINT_INSECURE: '接続先は https から始まるものだけをご登録いただけます。',
   INTEGRATION_SECRET_MISSING: '有効な資格情報がありません。先にご登録ください。',
   INTEGRATION_SECRET_NOT_PENDING: 'この資格情報は、いまその操作を行える状態ではありません。',
+  INTEGRATION_NOT_MANAGED:
+    'この連携は、この画面からは変更できません。配備環境の設定として管理しています。',
   INTEGRATION_CHECK_REQUIRED: '先に接続テストを行い、成功させてください。',
   INTEGRATION_CHECK_STALE:
     '接続テストの結果が古くなっています。もう一度テストしてからお試しください。',

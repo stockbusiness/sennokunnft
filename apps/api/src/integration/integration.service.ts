@@ -12,6 +12,7 @@ import {
   INTEGRATION_SERVICES,
   canRunCheck,
   classifyProbe,
+  isManagedFromAdmin,
   activateSecret,
   disableIntegration,
   discardPendingSecret,
@@ -29,6 +30,7 @@ import {
   type IntegrationService,
   type IntegrationSettings,
   type ConnectionCheckKind,
+  type EnvIntegrationSummary,
   type ProbeOutcome,
   type Result,
   type SecretPurpose,
@@ -70,6 +72,13 @@ export class IntegrationService_ {
       endpointUrl: string,
       timeoutMs: number,
     ) => Promise<{ readonly outcome: ProbeOutcome; readonly durationMs: number }>,
+    /**
+     * 配備環境から読める姿を返す。
+     *
+     * ⚠️ **値を返させない。** 返すのは方式と、欠けている設定の名前まで。
+     * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
+     */
+    private readonly describeEnvironment: (service: IntegrationService) => EnvIntegrationSummary,
   ) {}
 
   /**
@@ -94,6 +103,15 @@ export class IntegrationService_ {
     service: IntegrationService,
     environment: IntegrationEnvironment,
   ): Promise<IntegrationStatusView> {
+    /*
+      ⚠️ **管理外の連携では DB の行を作らない。** 作ると、誰も読まない
+         設定が「保存できる場所」として残る。読まれない値を持てる場所は、
+         いつか誰かが埋めて、効かないことに悩む。
+    */
+    if (!isManagedFromAdmin(service)) {
+      return this.environmentStatus(service, environment);
+    }
+
     const settings = await this.repository.ensureSettings(
       this.ids.generate(),
       service,
@@ -128,6 +146,52 @@ export class IntegrationService_ {
       // 画面のボタンを出し分けるための値。⚠️ **これは保護ではない。**
       canEnable: fresh && hasActive && settings.endpointUrl !== null && settings.keyId !== null,
       canCheck: canRunCheck(settings),
+      manageable: true,
+      // ⚠️ 管理できる連携では、正は DB。2 つの正を並べない。
+      environmentSummary: null,
+      recentChecks: recentChecks.map(toCheckView),
+    };
+  }
+
+  /**
+   * 管理外の連携（画像の保管先・ログイン）の姿。
+   *
+   * ⚠️ **DB ではなく配備環境が正。** これらは起動時に環境変数から
+   * 読んで組み立てる。DB に値を置いても効かないので、置かない。
+   *
+   * ⚠️ **それでも「見る」ことはできるようにする。** 見えないと、
+   * 設定が欠けていることに配備してから気づくことになる。
+   */
+  private async environmentStatus(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<IntegrationStatusView> {
+    const summary = this.describeEnvironment(service);
+    const [lastCheck, recentChecks] = await Promise.all([
+      this.repository.findLatestConnectionCheck(service, environment),
+      this.repository.listConnectionChecks(service, environment, RECENT_CHECK_LIMIT),
+    ]);
+
+    return {
+      service,
+      environment,
+      // 到達性を確かめられる公開 URL。⚠️ 資格情報を含む URL は入らない。
+      endpointUrl: summary.publicUrl,
+      keyId: null,
+      apiVersion: null,
+      timeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+      maxAttempts: 0,
+      // ⚠️ 「有効か」は配備環境が決める。画面から切り替えられない。
+      enabled: summary.complete,
+      rowVersion: 0,
+      // ⚠️ 資格情報は配備環境の Secret にある。ここには出てこない。
+      secrets: [],
+      lastCheck: lastCheck === null ? null : toCheckView(lastCheck),
+      checkFresh: isCheckFresh(lastCheck, CHECK_FRESHNESS_MS, this.clock.now()),
+      canEnable: false,
+      canCheck: summary.publicUrl !== null,
+      manageable: false,
+      environmentSummary: { ...summary, missing: [...summary.missing] },
       recentChecks: recentChecks.map(toCheckView),
     };
   }
@@ -154,12 +218,25 @@ export class IntegrationService_ {
     environment: IntegrationEnvironment,
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
-    const settings = await this.repository.ensureSettings(
-      this.ids.generate(),
-      service,
-      environment,
-    );
 
+    /*
+      管理外の連携でも、届くかどうかは確かめられる。
+      ⚠️ 確かめるのは**公開 URL**だけ（画像の配信元・鍵束の置き場）。
+         どちらもブラウザから見えるもので、資格情報を含まない。
+    */
+    const target = isManagedFromAdmin(service)
+      ? await this.repository
+          .ensureSettings(this.ids.generate(), service, environment)
+          .then((settings) => ({
+            endpointUrl: settings.endpointUrl,
+            timeoutMs: settings.timeoutMs,
+          }))
+      : {
+          endpointUrl: this.describeEnvironment(service).publicUrl,
+          timeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+        };
+
+    const settings = target;
     if (!canRunCheck(settings)) {
       // ⚠️ 「試したが失敗した」と「接続先を入れていない」を混ぜない。
       //    直し方がまったく違う。
@@ -193,6 +270,13 @@ export class IntegrationService_ {
     request: UpdateIntegrationRequest,
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
+    /*
+      ⚠️ **管理外の連携は、そもそも受け付けない。** 画面で隠すだけにすると、
+         直接叩けば「誰も読まない設定」が保存できてしまう。
+         保存できたのに効かない、は理由を誰も説明できない状態を作る。
+    */
+    this.requireManaged(service);
+
     const settings = await this.repository.ensureSettings(
       this.ids.generate(),
       service,
@@ -243,6 +327,8 @@ export class IntegrationService_ {
     enabled: boolean,
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
+    this.requireManaged(service);
+
     const settings = await this.repository.ensureSettings(
       this.ids.generate(),
       service,
@@ -300,6 +386,7 @@ export class IntegrationService_ {
     request: RegisterSecretRequest,
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
+    this.requireManaged(service);
 
     const created = await this.repository.createSecret({
       id: this.ids.generate(),
@@ -449,6 +536,18 @@ export class IntegrationService_ {
     return record;
   }
 
+  /**
+   * 管理画面から変えてよい連携か。
+   *
+   * ⚠️ **変えられない理由は `isManagedFromAdmin` のコメントにある。**
+   * ここに書き写さない。2 か所に書くと、片方だけ直されて食い違う。
+   */
+  private requireManaged(service: IntegrationService): void {
+    if (!isManagedFromAdmin(service)) {
+      throw new DomainErrorException('INTEGRATION_NOT_MANAGED');
+    }
+  }
+
   private async loadSecret(secretId: string): Promise<IntegrationSecret> {
     const secret = await this.repository.findSecretById(secretId);
     if (secret === null) {
@@ -492,6 +591,13 @@ function toCheckView(check: ConnectionCheckRecord): ConnectionCheckView {
 
 /** 画面に並べる履歴の件数。多くしても読まれない。 */
 const RECENT_CHECK_LIMIT = 10;
+
+/**
+ * 管理外の連携を確かめるときの待ち上限。
+ *
+ * ⚠️ **短くしておく。** 人が押して待つ操作なので、長いと画面が止まる。
+ */
+const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 
 function unwrapDomain<T>(result: Result<T, DomainError>): T {
   if (!result.ok) {

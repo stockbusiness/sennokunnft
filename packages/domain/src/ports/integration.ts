@@ -50,6 +50,27 @@ export interface SecretCipherPort {
   open(sealed: SealedSecret, scope: SecretScope): string | null;
 }
 
+/**
+ * 配備環境（環境変数）から読める、その連携の姿。
+ *
+ * ⚠️ **値を持たない。** 持つのは「どの方式か」「そろっているか」
+ * 「何という名前の設定が欠けているか」まで。設定の**名前**は秘密ではなく、
+ * 直すために要る。値は秘密でありうるので、一切持ち出さない。
+ *
+ * ⚠️ **`publicUrl` は公開してよい URL だけ。** 画像の配信元や鍵束の置き場は
+ * ブラウザからも見える。ここへ資格情報を含む URL を入れない。
+ */
+export interface EnvIntegrationSummary {
+  /** いま効いている方式（例: `r2` / `local` / `supabase` / `dev`）。 */
+  readonly provider: string;
+  /** 必要な設定がすべてそろっているか。 */
+  readonly complete: boolean;
+  /** 欠けている設定の**名前**。⚠️ 値は入れない。 */
+  readonly missing: readonly string[];
+  /** 到達性を確かめられる公開 URL。無ければ `null`。 */
+  readonly publicUrl: string | null;
+}
+
 export interface ConnectionCheckRecord {
   readonly id: string;
   readonly service: IntegrationService;

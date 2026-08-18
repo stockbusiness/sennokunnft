@@ -688,3 +688,115 @@ describe('接続確認', () => {
       .expect(400);
   });
 });
+
+/**
+ * 画像の保管先とログイン（管理画面・外部連携 指示書 §4・§11・§14）。
+ *
+ * ⚠️ **この試験の主題は「保存できないこと」。**
+ * これらは配備環境が正で、DB に置いても誰も読まない。
+ * 保存できてしまうと、「保存できたのに効かない」を誰も説明できなくなる。
+ */
+describe('管理外の連携（画像の保管先・ログイン）', () => {
+  for (const service of ['storage', 'auth'] as const) {
+    it(`${service}: 状態は見られる`, async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/admin/integrations/${service}`)
+        .set(auth(ownerToken()))
+        .expect(200);
+
+      expect(response.body.manageable).toBe(false);
+      expect(response.body.environmentSummary).not.toBeNull();
+      expect(response.body.environmentSummary.complete).toBe(true);
+    });
+
+    it(`${service}: 設定は保存できない`, async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/integrations/${service}`)
+        .set(auth(ownerToken()))
+        .send({ endpointUrl: 'https://evil.example.com', rowVersion: 0 })
+        .expect(409);
+    });
+
+    it(`${service}: 資格情報は登録できない`, async () => {
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/integrations/${service}/secrets`)
+        .set(auth(ownerToken()))
+        .send({ purpose: 'hmac_secret', value: 'some-secret-value' })
+        .expect(409);
+    });
+
+    it(`${service}: 有効化も停止もできない`, async () => {
+      const token = ownerToken();
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/integrations/${service}/enable`)
+        .set(auth(token))
+        .expect(409);
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/integrations/${service}/disable`)
+        .set(auth(token))
+        .expect(409);
+    });
+
+    /*
+      ⚠️ **DB に行を作らない。** 作ると「保存できる場所」として残る。
+         読まれない値を持てる場所は、いつか誰かが埋めて、効かないことに悩む。
+    */
+    it(`${service}: 見ても設定の行を作らない`, async () => {
+      await request(app.getHttpServer())
+        .get(`/api/v1/admin/integrations/${service}`)
+        .set(auth(ownerToken()))
+        .expect(200);
+
+      expect(await harness.integrationRepository.findSettings(service, 'production')).toBeNull();
+    });
+  }
+
+  it('欠けている設定の名前は出すが、値は出さない', async () => {
+    harness.setEnvironmentSummary('storage', {
+      provider: 'r2',
+      complete: false,
+      missing: ['R2_SECRET_ACCESS_KEY'],
+      publicUrl: null,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/integrations/storage')
+      .set(auth(ownerToken()))
+      .expect(200);
+
+    expect(response.body.environmentSummary.missing).toEqual(['R2_SECRET_ACCESS_KEY']);
+    expect(response.body.environmentSummary.complete).toBe(false);
+    // 設定の名前は秘密ではない。値のほうは、そもそも渡していない。
+    expect(response.body.secrets).toEqual([]);
+  });
+
+  /*
+    ⚠️ **確かめられるのは公開 URL だけ。** 画像の配信元と鍵束の置き場は
+       ブラウザからも見えるもので、資格情報を含まない。
+  */
+  it('公開 URL があれば、届くかどうかは確かめられる', async () => {
+    harness.setProbe({ kind: 'response', statusCode: 200 });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/storage/check')
+      .set(auth(ownerToken()))
+      .expect(201);
+
+    expect(response.body.lastCheck.succeeded).toBe(true);
+    expect(response.body.lastCheck.kind).toBe('reachability');
+  });
+
+  it('公開 URL が無ければ、確かめようがないので断る', async () => {
+    harness.setEnvironmentSummary('storage', {
+      provider: 'local',
+      complete: true,
+      missing: [],
+      publicUrl: null,
+    });
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/integrations/storage/check')
+      .set(auth(ownerToken()))
+      .expect(400);
+  });
+});

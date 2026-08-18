@@ -26,6 +26,7 @@ import type {
   IntegrationEnvironment,
   IntegrationSettings,
   IntegrationService as IntegrationServiceName,
+  EnvIntegrationSummary,
   ProbeOutcome,
 } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
@@ -99,6 +100,13 @@ export interface AppDependencies {
       endpointUrl: string,
       timeoutMs: number,
     ) => Promise<{ readonly outcome: ProbeOutcome; readonly durationMs: number }>;
+    /**
+     * 配備環境から読める、その連携の姿。
+     *
+     * ⚠️ **値を返させない。** 返すのは方式と、欠けている設定の**名前**まで。
+     * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
+     */
+    readonly describeEnvironment: (service: IntegrationServiceName) => EnvIntegrationSummary;
     readonly repository: IntegrationRepository & {
       ensureSettings(
         id: string,
@@ -278,6 +286,7 @@ export class AppModule implements NestModule {
                     deps.audit,
                     integrations.appEnvironment,
                     integrations.probe,
+                    integrations.describeEnvironment,
                   ),
               },
             ]),
