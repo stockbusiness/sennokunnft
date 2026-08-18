@@ -606,9 +606,27 @@ Supabase の **Authentication → Emails → Magic Link** を開き、
 
 ### 3-4-4. Fly（api）に環境変数を入れる
 
+⚠️ **この手順だけは、ログイン対応の api が本番へ出てからにする。**
+それより前の api は `AUTH_PROVIDER` に `dev` しか受け付けない。先に入れると
+**設定の検査で弾かれて起動しなくなる**（`Waiting for ... to become healthy: 0/1`
+のまま止まる）。3-4-1〜3-4-3 は先に済ませてよい。
+
+⚠️ **`<ref>` を置き換えるのを忘れない。実際にこれで api を落とした。**
+そのまま貼ると、存在しないホストへ鍵を取りに行く設定になる。
+`<ref>` はダッシュボードの住所に入っている文字列
+（`supabase.com/dashboard/project/<ref>/...`）。
+
 ```bash
-fly secrets set --app sennokunnft-api   AUTH_PROVIDER=supabase   SUPABASE_JWT_ISSUER=https://<ref>.supabase.co/auth/v1   SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json
+fly secrets set --app sennokunnft-api AUTH_PROVIDER=supabase SUPABASE_JWT_ISSUER=https://<ref>.supabase.co/auth/v1 SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json
 ```
+
+**起動しなくなったら、消せば戻る。**
+
+```bash
+fly secrets unset --app sennokunnft-api AUTH_PROVIDER SUPABASE_JWT_ISSUER SUPABASE_JWKS_URL
+```
+
+戻ったかどうかは `curl https://sennokunnft-api.fly.dev/healthz` で確かめる。
 
 ⚠️ **設定が欠けたまま `AUTH_PROVIDER=supabase` にすると起動しない。**
 これは意図した動作。起動させると**すべてのログインが 401 になり**、
