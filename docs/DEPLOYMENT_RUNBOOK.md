@@ -36,23 +36,42 @@
 ⚠️ **これはインフラ作業ではなく実装作業。** サーバーを借りても解決しない。
 
 `APP_ENV=production` で起動すると、`assertProductionSafety` が
-`AUTH_PROVIDER=dev` を拒否する。候補は現状 `dev` しか無いので、
-**本番として起動できない**（`UD-801`）。
+`AUTH_PROVIDER=dev` を拒否する。
 
-### 段階1〜2 のあいだの扱い
+### `APP_ENV` の現在の値
 
-段階1〜2 は**実質 staging** である。本物の利用者がおらず、決済も無い。
-そこで `APP_ENV=staging` で立てる。これは迂回ではなく、実態に合わせた宣言。
+✅ **`production`（2026-08-18 に `staging` から変更）。**
 
-```
-APP_ENV=staging   ← 段階1〜2
-APP_ENV=production ← カタログを一般公開する時点。UD-801 の解決が前提
-```
+段階1〜2 のあいだは `staging` で立てていた。当時は `AUTH_PROVIDER` の候補が
+`dev` しか無く、`production` にすると起動できなかったため（`UD-801`）。
+`UD-801` が解決して `AUTH_PROVIDER=supabase` になり、その制約は外れた。
 
-⚠️ **`APP_ENV=staging` のまま一般公開しない。**
-公開した瞬間からそれは本番であり、開発用の認証は許されない。
-`production` へ切り替えると起動しなくなるので、**順序は仕組みで守られている。**
-守られていないのは「切り替えないまま公開する」経路だけ。ここは人が守る。
+⚠️ **この値は「どの環境か」の唯一の根拠。**
+管理画面が staging と production を出し分けるときも、ここを見る。
+本番なのに `staging` と名乗っていると、危険な操作の前に出す確認が
+「これは staging だから大丈夫」という誤解を生む。
+
+⚠️ **`production` にすると起動条件が厳しくなる。**
+次のどれかを崩すと**起動せずに終了する**。
+
+| 条件                                    | 現在                        |
+| --------------------------------------- | --------------------------- |
+| `LOG_LEVEL` が `trace` / `debug` でない | `info`（`fly.api.toml`）    |
+| `DATABASE_URL` がローカルを指していない | Supabase の Pooler          |
+| `AUTH_PROVIDER` が `dev` でない         | `supabase`（`fly secrets`） |
+
+⚠️ **`AUTH_PROVIDER` を `fly secrets unset` しない。**
+既定値は `dev` なので、消すと本番として起動できなくなる。
+
+### staging Fixture は使えなくなった
+
+`assertStagingFixtureAllowed` は `APP_ENV=production` を拒否する。
+worker が繋ぐのは**本番の DB** なので、そこへ偽の受取権を作れる状態を
+残しておくほうが危険だった。
+
+⚠️ **`APP_ENV` を `staging` へ戻して Fixture を通さないこと。**
+OVEW Wallet の staging 接続を試すときは、本当に分離された staging 環境を
+用意する（`UD-1101`、未決定）。
 
 ⚠️ **`AUTH_DEV_SECRET` は本物の秘密として扱う。**
 32 バイト以上の乱数を使う。`openssl rand -base64 32` で作る。
@@ -767,7 +786,7 @@ GitHub のリポジトリ変数 `DEPLOY_WORKER` を `true` にして、自動デ
 | 変数                      | 置き場所          | 値                                        |
 | ------------------------- | ----------------- | ----------------------------------------- |
 | `DATABASE_URL`            | `fly secrets`     | Pooler（`?pgbouncer=true` 付き）          |
-| `APP_ENV`                 | `fly.worker.toml` | `staging`（⚠️ api と必ずそろえる）        |
+| `APP_ENV`                 | `fly.worker.toml` | `production`（⚠️ api と必ずそろえる）     |
 | `NODE_ENV`                | `fly.worker.toml` | `production`                              |
 | `WORKER_POLL_INTERVAL_MS` | `fly.worker.toml` | `5000`                                    |
 | `ENABLE_STAGING_FIXTURES` | `fly.worker.toml` | `false`（⚠️ 本番で Fixture を許可しない） |
@@ -871,15 +890,15 @@ ON にする直前に、載せ直す手順を用意しておくこと。検出�
 
 ## 7. 詰まりやすいところ
 
-| 症状                            | 原因                                                     |
-| ------------------------------- | -------------------------------------------------------- |
-| 起動せず「AUTH_PROVIDER」と出る | `APP_ENV=production` にした。`UD-801` の解決が要る（§1） |
-| `/readyz` が 503                | 接続文字列。Pooler と Direct を取り違えていないか        |
-| たまに DB エラーが出る          | `?pgbouncer=true` の付け忘れ                             |
-| デプロイが「たまに」失敗する    | マイグレーションが同時に流れている。`concurrency` を確認 |
-| worker が動いていない気がする   | フラグが両方 OFF なら**正常**。何もしないのが正しい      |
-| 画像が消えた                    | R2 未導入。`/tmp` は再起動で消える（§3-1）               |
-| Supabase に繋がらなくなった     | Free プランの一時停止。Pro へ上げる（§3-3）              |
+| 症状                            | 原因                                                               |
+| ------------------------------- | ------------------------------------------------------------------ |
+| 起動せず「AUTH_PROVIDER」と出る | `AUTH_PROVIDER` が `dev` か未設定。`production` では使えない（§1） |
+| `/readyz` が 503                | 接続文字列。Pooler と Direct を取り違えていないか                  |
+| たまに DB エラーが出る          | `?pgbouncer=true` の付け忘れ                                       |
+| デプロイが「たまに」失敗する    | マイグレーションが同時に流れている。`concurrency` を確認           |
+| worker が動いていない気がする   | フラグが両方 OFF なら**正常**。何もしないのが正しい                |
+| 画像が消えた                    | R2 未導入。`/tmp` は再起動で消える（§3-1）                         |
+| Supabase に繋がらなくなった     | Free プランの一時停止。Pro へ上げる（§3-3）                        |
 
 ---
 

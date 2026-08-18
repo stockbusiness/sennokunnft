@@ -22,7 +22,16 @@ kill_timeout = "60s"
   # ⚠️ api と必ずそろえる（段階1〜2 は staging）。
   #    片方だけ production にすると、同じ DB を見ているのに
   #    起動できる側とできない側ができ、原因の切り分けに時間を使う。
-  APP_ENV = "staging"
+  # ✅ **api とそろえて `production`（2026-08-18 に変更）。**
+  #
+  # ⚠️ **これにより staging Fixture が実行できなくなる。**
+  #    `assertStagingFixtureAllowed` は APP_ENV=production を拒否する。
+  #    これは正しい。worker が繋ぐのは**本番の DB** であり、
+  #    そこへ偽の受取権を作れる状態を残しておくほうが危険だった。
+  #    OVEW Wallet の staging 接続を試すときは、本当に分離された
+  #    staging 環境を用意する（UD-1101、未決定）。
+  #    ここを `staging` へ戻して本番DBに偽データを作らないこと。
+  APP_ENV = "production"
   # Node の最適化のためのもので、APP_ENV とは別物。こちらは production でよい。
   NODE_ENV = "production"
   LOG_LEVEL = "info"
