@@ -9,7 +9,7 @@ import type { StaffInvitationView, StaffMemberView } from '@sengoku/contracts';
 export const STAFF_COPY = {
   title: 'スタッフの管理',
   description:
-    '運営を手伝う方を招待し、できることを決めます。招待した方には、いつものログイン用のメールが届きます。',
+    '運営を手伝う方を招待し、できることを決めます。招待すると、その宛先にログイン用のメールをお送りします。',
 
   membersHeading: 'いまのスタッフ',
   invitationsHeading: '招待の状況',
@@ -17,7 +17,7 @@ export const STAFF_COPY = {
 
   fieldEmail: '招待する方のメールアドレス',
   fieldEmailHint:
-    'この宛先にログイン用のメールが届きます。そのメールから入っていただくと、スタッフになります。',
+    'この宛先にログイン用のメールをお送りします。そのメールから入っていただくと、スタッフになります。',
   fieldRole: 'お任せすること',
   fieldRoleHint: 'あとから変更できます。',
   submitInvite: 'この内容で招待する',
@@ -54,6 +54,21 @@ export const STAFF_COPY = {
     'オーナーが居なくなると、以後どなたも権限を変更できなくなります。交代するときは、先に新しいオーナーを立ててください。',
 
   ownerBadge: 'オーナー',
+
+  /**
+   * 招待したあとに出す言葉。
+   *
+   * ⚠️ **「送りました」と「記録しました」を言い分ける。** メールが
+   * 出ていないのに送ったと伝えると、相手が来ないことに気づけない。
+   */
+  inviteSent: (email: string): string => `${email} にログイン用のメールをお送りしました`,
+  inviteMailFailed: (email: string): string =>
+    `招待は登録しましたが、${email} へメールをお送りできませんでした。少し時間をおいて招待を取り消し、もう一度お送りいただくか、下のご案内を直接お伝えください。`,
+  inviteMailDisabled: (email: string): string =>
+    `招待を登録しました。メールの送信が有効になっていないため、${email} の方へ下のご案内を直接お伝えください。`,
+  /** 送れなかったときに、運営が相手へ伝える内容。 */
+  inviteManualHint:
+    'ログイン画面（/login）を開いて、招待した宛先のメールアドレスを入れてログインしてください。そのままスタッフになります。',
 } as const;
 
 export function memberRoleLabel(role: StaffMemberView['role']): string {

@@ -27,6 +27,16 @@ import { ADMIN_COPY, adminErrorMessage } from '../../src/admin-copy';
 
 export interface AdminActionState {
   readonly error?: string;
+  /**
+   * 通ったときに伝えること。
+   *
+   * ⚠️ **「成功したかどうか」だけでは足りない操作がある。** 招待は、
+   * 記録できてもメールを送れないことがある。そのとき何も出さないと、
+   * 送った側は届いたつもりで待ち続ける。
+   */
+  readonly notice?: string;
+  /** 通知に添える補足。文言から判定させないため、別の項目で持つ。 */
+  readonly noticeHint?: string;
 }
 
 /** 画像として受け取ってよい種別。判定は API 側が中身で行う（ここは足切り）。 */

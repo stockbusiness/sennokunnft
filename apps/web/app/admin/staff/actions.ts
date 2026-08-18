@@ -8,6 +8,8 @@ import {
   type AdminResult,
 } from '../../../src/admin-client';
 import { adminErrorMessage } from '../../../src/admin-copy';
+import { sendLoginLink } from '../../../src/auth/send-link';
+import { STAFF_COPY } from '../../../src/staff-copy';
 import type { AdminActionState } from '../actions';
 
 /**
@@ -48,8 +50,32 @@ export async function inviteStaffAction(
   if (!result.ok) {
     return fail(result);
   }
+
+  /*
+    招待を記録できたので、ログイン用のリンクを送る。
+
+    ⚠️ **送れなくても招待は取り消さない。** 記録は正しくできており、
+       相手が自分で `/login` から入れば、その場でスタッフになる。
+       消してしまうと、その道まで塞ぐことになる。
+
+    ⚠️ **送れなかったことを黙らない。** 何も出さないと、送った側は
+       届いたつもりで待ち続ける。実際に、送信そのものを書き忘れて
+       「一通も届かないのに画面上は成功」という状態を作ってしまった。
+  */
+  const sent = await sendLoginLink(email);
   refresh();
-  return {};
+
+  if (sent.ok) {
+    return { notice: STAFF_COPY.inviteSent(email) };
+  }
+  return {
+    notice:
+      sent.reason === 'disabled'
+        ? STAFF_COPY.inviteMailDisabled(email)
+        : STAFF_COPY.inviteMailFailed(email),
+    // 送れなかったときだけ、相手へ直接伝える文面を添える。
+    noticeHint: STAFF_COPY.inviteManualHint,
+  };
 }
 
 export async function revokeInvitationAction(

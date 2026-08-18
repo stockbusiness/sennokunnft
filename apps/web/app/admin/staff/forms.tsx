@@ -19,6 +19,14 @@ export function InviteForm() {
   return (
     <form className="sengoku-form" action={action}>
       {state.error === undefined ? null : <Notice tone="alert" title={state.error} />}
+      {/*
+        ⚠️ 「招待を登録できたこと」と「メールを送れたこと」は別。
+           送れなかったときに黙ると、送った側は届いたつもりで待ち続ける。
+           そのときは、相手へ直接伝える文面も一緒に出す。
+      */}
+      {state.notice === undefined ? null : (
+        <Notice tone="alert" title={state.notice} hint={state.noticeHint ?? ''} />
+      )}
 
       <div className="sengoku-form__field">
         <label className="sengoku-form__label" htmlFor="staff-email">
