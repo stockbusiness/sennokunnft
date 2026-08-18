@@ -27,6 +27,15 @@ export interface ArtworkRepository {
   listPublished(query: PageQuery): Promise<Page<Artwork>>;
   /** 状態を問わず一覧する（運営用）。 */
   listAll(query: PageQuery): Promise<Page<Artwork>>;
+  /**
+   * 指定した出品者の作品だけを、状態を問わず一覧する。
+   *
+   * ⚠️ **`listAll` を取ってから絞り込ませない。** それだと 1 ページ目に
+   * 他人の作品が並び、自分の作品が 2 ページ目以降に押し出される。
+   * 「自分の作品が消えた」に見えるうえ、他人の件数から本数が推測できる。
+   * 絞り込みは DB に任せる。
+   */
+  listByCreator(creatorAccountId: string, query: PageQuery): Promise<Page<Artwork>>;
   create(artwork: Artwork): Promise<Artwork>;
   /** 在庫カウンタ以外の属性を更新する。カウンタは在庫操作専用の経路で扱う。 */
   update(artwork: Artwork): Promise<Artwork>;

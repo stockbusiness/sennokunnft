@@ -131,6 +131,8 @@ export type UpdateArtworkRequest = z.infer<typeof updateArtworkRequestSchema>;
 
 export const adminArtworkSchema = z.object({
   id: z.string(),
+  /** 登録した人（`UD-102` 決定変更 2026-08-18）。 */
+  creatorAccountId: z.string(),
   slug: z.string(),
   title: z.string(),
   description: z.string(),
@@ -145,6 +147,18 @@ export const adminArtworkSchema = z.object({
   status: z.enum(ARTWORK_STATUS_VALUES),
 });
 export type AdminArtwork = z.infer<typeof adminArtworkSchema>;
+
+/**
+ * 出品者が自分の作品を見るときの形。
+ *
+ * ⚠️ **運営向けと**同じ**にしてある。** 見せる相手は違うが、見せる中身は
+ * どちらも「その作品の全部」で同じ。別々に定義すると、片方に列を足した
+ * ときにもう片方が置いていかれる。
+ *
+ * 違うのは**どの作品を返すか**であって、1 件の形ではない。
+ * 絞り込みは API 側（所有権チェック）の責務。
+ */
+export type CreatorArtwork = AdminArtwork;
 
 export const adminArtworkListResponseSchema = z.object({
   items: z.array(adminArtworkSchema),
@@ -189,6 +203,9 @@ export const adminListingSchema = z.object({
   endsAt: z.string().nullable(),
 });
 export type AdminListing = z.infer<typeof adminListingSchema>;
+
+/** 出品者が自分の出品を見るときの形（`CreatorArtwork` と同じ考え方）。 */
+export type CreatorListing = AdminListing;
 
 export const adminListingListResponseSchema = z.object({
   items: z.array(adminListingSchema),

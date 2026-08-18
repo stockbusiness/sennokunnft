@@ -15,6 +15,12 @@ export const ACTIONS = [
   'artwork.view_unpublished',
   'artwork.manage',
   'listing.manage',
+  // --- 出品者が「自分の作品」に対して行う操作（UD-102 決定変更 2026-08-18）---
+  // ⚠️ **`artwork.manage` を buyer に渡さない。** それは他人の作品も含む権限。
+  //    自分のものだけを触れる操作として、別の名前で分ける。
+  'artwork.create_own',
+  'artwork.manage_own',
+  'listing.manage_own',
   'order.create',
   'order.view',
   'order.view_any',
@@ -56,6 +62,12 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
   anonymous: ['artwork.view_public'],
   buyer: [
     'artwork.view_public',
+    // 会員なら誰でも出品できる（`UD-806`、暫定）。
+    // ⚠️ 合言葉の門が実質の入場制限として働いていることが前提。
+    //    門を外して一般公開する前に、ここを締め直す。
+    'artwork.create_own',
+    'artwork.manage_own',
+    'listing.manage_own',
     'order.create',
     'order.view',
     'checkout.create',
@@ -69,6 +81,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'artwork.view_unpublished',
     'artwork.manage',
     'listing.manage',
+    // 運営も自分名義で登録できる。所有権は下の bypass で免除される。
+    'artwork.create_own',
+    'artwork.manage_own',
+    'listing.manage_own',
     'order.view',
     'order.view_any',
     'collection.view',
@@ -97,6 +113,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
  */
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {
   'order.view': { bypass: 'order.view_any' },
+  // ⚠️ **`artwork.create_own` は所有権を要らない。** まだ作品が無いため。
+  //    「作った人が持ち主になる」は作成時に決まる話で、判定ではない。
+  'artwork.manage_own': { bypass: 'artwork.manage' },
+  'listing.manage_own': { bypass: 'listing.manage' },
   'checkout.create': {},
   // 受取の実行は購入者本人のみ。運営でも代行できない（UD-804 が未決定のため）。
   'claim.accept': {},

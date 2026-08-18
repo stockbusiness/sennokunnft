@@ -81,6 +81,8 @@ export {
   type UpdateArtworkRequest,
   type AdminArtwork,
   type AdminArtworkListResponse,
+  type CreatorArtwork,
+  type CreatorListing,
   type CreateListingRequest,
   type UpdateListingRequest,
   type AdminListing,

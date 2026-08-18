@@ -11,6 +11,17 @@ import { availableSupply, type SupplyCounters } from '../supply/supply';
  */
 export interface Artwork extends SupplyCounters {
   readonly id: string;
+  /**
+   * 登録した人のアカウントID（`UD-102` 決定変更 2026-08-18）。
+   *
+   * ⚠️ **`null` を許さない。** 「持ち主が決まっていない作品」を作ると、
+   * 誰が触ってよいのかを判定できない行が生まれる。判定できない行は
+   * 「とりあえず通す」に倒れやすく、それは他人の作品を触れる穴になる。
+   *
+   * ⚠️ **後から付け替えない。** 出品者の入れ替えは、売上の受取先が
+   * 変わるということ。取引の履歴と食い違う。
+   */
+  readonly creatorAccountId: string;
   readonly slug: string;
   readonly title: string;
   readonly description: string;
@@ -39,6 +50,8 @@ export const ARTWORK_MAX_SUPPLY_LIMIT = 1_000_000;
 
 export interface CreateArtworkInput {
   readonly id: string;
+  /** 登録した人。呼び出し側が「いま操作している人」を渡す。 */
+  readonly creatorAccountId: string;
   readonly slug: string;
   readonly title: string;
   readonly description?: string;
@@ -81,8 +94,13 @@ export function createArtworkDraft(input: CreateArtworkInput): Result<Artwork, D
     return err(domainError('ARTWORK_NOT_AVAILABLE', 'description is too long'));
   }
 
+  if (input.creatorAccountId.trim().length === 0) {
+    return err(domainError('ARTWORK_NOT_AVAILABLE', 'creatorAccountId must not be empty'));
+  }
+
   return ok({
     id: input.id,
+    creatorAccountId: input.creatorAccountId,
     slug: input.slug,
     title: input.title.trim(),
     description: input.description ?? '',

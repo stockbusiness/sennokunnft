@@ -710,3 +710,115 @@ button {
   font-size: var(--sengoku-text-small);
   line-height: 1.6;
 }
+
+/* --- 出品者の画面 ---------------------------------------------------------
+ * ⚠️ トークンだけで組む。ここに色や余白の実値を書かない。
+ *    書くと、上の定義を変えてもここだけ取り残される。
+ */
+
+.sengoku-creator-actions {
+  margin: var(--sengoku-space-4) 0;
+}
+
+.sengoku-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sengoku-space-3);
+  background: var(--sengoku-paper);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  box-shadow: var(--sengoku-shadow);
+  padding: var(--sengoku-space-4);
+  margin: var(--sengoku-space-4) 0;
+  max-width: 34rem;
+  width: 100%;
+}
+
+.sengoku-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-1);
+  width: 100%;
+}
+
+.sengoku-form__label {
+  font-weight: 700;
+}
+
+.sengoku-form__hint {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
+.sengoku-form__input,
+.sengoku-form__textarea {
+  width: 100%;
+  /* ⚠️ 16px 未満にすると iOS が入力時に勝手に拡大する。 */
+  font-size: var(--sengoku-text-body);
+  font-family: inherit;
+  padding: var(--sengoku-space-2) var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-sumi-soft);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-washi);
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-form__input {
+  min-height: var(--sengoku-touch);
+}
+
+.sengoku-form__textarea {
+  resize: vertical;
+  line-height: 1.8;
+}
+
+.sengoku-form__file {
+  font-size: var(--sengoku-text-body);
+  font-family: inherit;
+  /* 指で押せる高さを確保する。ブラウザ既定のままだと小さい。 */
+  min-height: var(--sengoku-touch);
+  padding: var(--sengoku-space-2) 0;
+  max-width: 100%;
+}
+
+.sengoku-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0 var(--sengoku-space-5);
+  border: 1px solid var(--sengoku-rose);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-rose);
+  /* 濃桜の上の白文字は 5.58:1。 */
+  color: #fff;
+  font-size: var(--sengoku-text-body);
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sengoku-button:hover {
+  background: var(--sengoku-rose-deep);
+  border-color: var(--sengoku-rose-deep);
+}
+
+.sengoku-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* 取り消し側の操作。押し間違えを誘わないよう、地の色を持たせない。 */
+.sengoku-button--quiet {
+  background: var(--sengoku-paper);
+  color: var(--sengoku-rose);
+  border-color: var(--sengoku-keisen);
+}
+
+.sengoku-button--quiet:hover {
+  background: var(--sengoku-sakura-pale);
+  border-color: var(--sengoku-rose);
+  color: var(--sengoku-rose-deep);
+}

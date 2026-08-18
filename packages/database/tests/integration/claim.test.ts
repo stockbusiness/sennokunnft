@@ -68,8 +68,10 @@ async function seedEntitlement(
     },
   });
 
+  // 作品には持ち主が要る。この試験の関心事ではないので購入者と同じ人にしておく。
   const artwork = await prisma.artwork.create({
     data: {
+      creatorAccountId: accountId,
       slug: `artwork-${randomUUID()}`,
       title: '天下布武の陣羽織',
       description: '',

@@ -70,6 +70,7 @@ async function main(): Promise<void> {
       const artwork = await prisma.artwork.upsert({
         where: { slug: sample.slug },
         create: {
+          creatorAccountId: operator.id,
           slug: sample.slug,
           title: sample.title,
           description: sample.description,

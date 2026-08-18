@@ -29,6 +29,7 @@ const NOW = new Date('2026-06-01T00:00:00.000Z');
 function artwork(overrides: Partial<Artwork> = {}): Artwork {
   return {
     id: 'artwork-1',
+    creatorAccountId: 'account-creator',
     slug: 'sample-artwork',
     title: '作品名',
     description: '説明',
@@ -91,6 +92,7 @@ describe('createArtworkDraft', () => {
   it('下書きとして作られる（いきなり公開されない）', () => {
     const result = createArtworkDraft({
       id: 'a-1',
+      creatorAccountId: 'account-creator',
       slug: 'slug',
       title: '作品',
       maxSupply: 10,
@@ -102,28 +104,43 @@ describe('createArtworkDraft', () => {
   });
 
   it('タイトルの前後の空白を落とす', () => {
-    const result = createArtworkDraft({ id: 'a', slug: 's', title: '  作品  ', maxSupply: 1 });
+    const result = createArtworkDraft({
+      id: 'a',
+      creatorAccountId: 'c',
+      slug: 's',
+      title: '  作品  ',
+      maxSupply: 1,
+    });
     if (!result.ok) throw new Error('expected success');
     expect(result.value.title).toBe('作品');
   });
 
   it('空のタイトルを拒否する', () => {
-    expect(createArtworkDraft({ id: 'a', slug: 's', title: '   ', maxSupply: 1 }).ok).toBe(false);
+    expect(
+      createArtworkDraft({ id: 'a', creatorAccountId: 'c', slug: 's', title: '   ', maxSupply: 1 })
+        .ok,
+    ).toBe(false);
   });
 
   it('長すぎるタイトルを拒否する', () => {
     const title = 'あ'.repeat(ARTWORK_TITLE_MAX + 1);
-    expect(createArtworkDraft({ id: 'a', slug: 's', title, maxSupply: 1 }).ok).toBe(false);
+    expect(
+      createArtworkDraft({ id: 'a', creatorAccountId: 'c', slug: 's', title, maxSupply: 1 }).ok,
+    ).toBe(false);
   });
 
   it.each([0, -1, 1.5])('発行上限 %s を拒否する', (maxSupply) => {
-    expect(createArtworkDraft({ id: 'a', slug: 's', title: '作品', maxSupply }).ok).toBe(false);
+    expect(
+      createArtworkDraft({ id: 'a', creatorAccountId: 'c', slug: 's', title: '作品', maxSupply })
+        .ok,
+    ).toBe(false);
   });
 
   it('発行上限の上限を超える値を拒否する', () => {
     // 受取権は 1 枚 1 レコードなので、発行上限がそのまま書き込み量の上限になる。
     const result = createArtworkDraft({
       id: 'a',
+      creatorAccountId: 'c',
       slug: 's',
       title: '作品',
       maxSupply: ARTWORK_MAX_SUPPLY_LIMIT + 1,

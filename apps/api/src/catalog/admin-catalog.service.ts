@@ -68,6 +68,8 @@ export class AdminCatalogService {
     const draft = unwrapDomain(
       createArtworkDraft({
         id: this.ids.generate(),
+        // 運営が登録した作品は運営名義になる。
+        creatorAccountId: actorId,
         slug: request.slug,
         title: request.title,
         description: request.description,
@@ -296,6 +298,7 @@ export class AdminCatalogService {
   private toAdminArtwork(artwork: Artwork): AdminArtwork {
     return {
       id: artwork.id,
+      creatorAccountId: artwork.creatorAccountId,
       slug: artwork.slug,
       title: artwork.title,
       description: artwork.description,

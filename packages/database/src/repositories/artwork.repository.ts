@@ -35,10 +35,16 @@ export class PrismaArtworkRepository implements ArtworkRepository {
     return this.list(query, {});
   }
 
+  /** 指定した出品者の作品のみ。絞り込みは DB に任せる（ポートの注記を参照）。 */
+  listByCreator(creatorAccountId: string, query: PageQuery): Promise<Page<Artwork>> {
+    return this.list(query, { creatorAccountId });
+  }
+
   async create(artwork: Artwork): Promise<Artwork> {
     const row = await this.prisma.artwork.create({
       data: {
         id: artwork.id,
+        creatorAccountId: artwork.creatorAccountId,
         slug: artwork.slug,
         title: artwork.title,
         description: artwork.description,
@@ -98,7 +104,10 @@ export class PrismaArtworkRepository implements ArtworkRepository {
   }
 
   /** キーセットページング。新しい順に返す。 */
-  private async list(query: PageQuery, where: { status?: 'published' }): Promise<Page<Artwork>> {
+  private async list(
+    query: PageQuery,
+    where: { status?: 'published'; creatorAccountId?: string },
+  ): Promise<Page<Artwork>> {
     const limit = Math.min(Math.max(query.limit, 1), MAX_PAGE_SIZE);
     const cursor = decodeCursor(query.cursor);
 

@@ -37,11 +37,19 @@ beforeEach(async () => {
   await resetDatabase(prisma);
 });
 
+/** 作品には持ち主が要る。制約の試験では中身を問わないので、器を1つ用意する。 */
+async function seedAccount(): Promise<string> {
+  const id = randomUUID();
+  await prisma.account.create({ data: { id, authProvider: 'fake', authSubject: id } });
+  return id;
+}
+
 async function seedArtwork(overrides: Record<string, unknown> = {}): Promise<string> {
   const id = randomUUID();
   await prisma.artwork.create({
     data: {
       id,
+      creatorAccountId: await seedAccount(),
       slug: `artwork-${id.slice(0, 8)}`,
       title: 'テスト作品',
       maxSupply: 10,
@@ -147,13 +155,52 @@ suite('出品の CHECK 制約', () => {
   });
 });
 
+suite('作品の持ち主（UD-102 決定変更）', () => {
+  it('持ち主のいない作品は保存できない', async () => {
+    // ⚠️ 持ち主が決まらない行を許すと、誰が触ってよいかを判定できない。
+    //    判定できない行は「とりあえず通す」に倒れやすく、それが穴になる。
+    await expect(
+      prisma.artwork.create({
+        data: { slug: `orphan-${randomUUID()}`, title: 'x', maxSupply: 1 } as never,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('実在しないアカウントを持ち主にできない', async () => {
+    await expect(
+      prisma.artwork.create({
+        data: {
+          creatorAccountId: randomUUID(),
+          slug: `ghost-${randomUUID()}`,
+          title: 'x',
+          maxSupply: 1,
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('作品を持ったままのアカウントは消せない（ON DELETE RESTRICT）', async () => {
+    // ⚠️ CASCADE にすると、アカウントを消した拍子に売れた作品まで消え、
+    //    注文の履歴と食い違う。消せないほうを正しいとする。
+    const creatorAccountId = await seedAccount();
+    await prisma.artwork.create({
+      data: { creatorAccountId, slug: `kept-${randomUUID()}`, title: 'x', maxSupply: 1 },
+    });
+
+    await expect(prisma.account.delete({ where: { id: creatorAccountId } })).rejects.toThrow();
+  });
+});
+
 suite('一意制約', () => {
   it('slug は重複できない', async () => {
+    const creatorAccountId = await seedAccount();
     await prisma.artwork.create({
-      data: { slug: 'duplicate', title: 'A', maxSupply: 1 },
+      data: { creatorAccountId, slug: 'duplicate', title: 'A', maxSupply: 1 },
     });
     await expect(
-      prisma.artwork.create({ data: { slug: 'duplicate', title: 'B', maxSupply: 1 } }),
+      prisma.artwork.create({
+        data: { creatorAccountId, slug: 'duplicate', title: 'B', maxSupply: 1 },
+      }),
     ).rejects.toSatisfy(violatesUniqueConstraint);
   });
 });

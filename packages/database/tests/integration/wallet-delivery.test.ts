@@ -70,8 +70,10 @@ async function seedEntitlement(): Promise<Seeded> {
       commonUserLinkedAt: NOW,
     },
   });
+  // 作品には持ち主が要る。この試験の関心事ではないので購入者と同じ人にしておく。
   const artwork = await prisma.artwork.create({
     data: {
+      creatorAccountId: accountId,
       slug: `artwork-${randomUUID()}`,
       title: '天下布武の陣羽織',
       maxSupply: 10,
@@ -512,10 +514,21 @@ suite('注文の出自（§7）', () => {
 });
 
 suite('作品の画像ハッシュ（§23）', () => {
+  /** 作品には持ち主が要る。ここでは画像ハッシュだけが関心事なので、器を1つ用意する。 */
+  async function creator(): Promise<string> {
+    const id = randomUUID();
+    await prisma.account.create({
+      data: { id, authProvider: 'fake', authSubject: id },
+    });
+    return id;
+  }
+
   it('形式の違う値は保存できない', async () => {
+    const creatorAccountId = await creator();
     await expect(
       prisma.artwork.create({
         data: {
+          creatorAccountId,
           slug: `artwork-${randomUUID()}`,
           title: 'x',
           maxSupply: 1,
@@ -528,8 +541,9 @@ suite('作品の画像ハッシュ（§23）', () => {
   });
 
   it('未設定（null）は許す', async () => {
+    const creatorAccountId = await creator();
     const artwork = await prisma.artwork.create({
-      data: { slug: `artwork-${randomUUID()}`, title: 'x', maxSupply: 1 },
+      data: { creatorAccountId, slug: `artwork-${randomUUID()}`, title: 'x', maxSupply: 1 },
     });
     expect(artwork.imageHash).toBeNull();
   });
