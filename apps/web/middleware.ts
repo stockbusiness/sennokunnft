@@ -1,6 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { decideGate, gateToken, GATE_COOKIE, isExemptPath, safeEqual } from './src/gate';
 import { readGatePassword, readVercelEnv } from './src/gate-env';
+import { isSecureRequest, middlewareRedirect } from './src/redirect';
+import { loginEnabled, readSupabaseAnonKey, readSupabaseUrl } from './src/auth/auth-env';
+import { SupabaseAuthGateway } from './src/auth/gateway';
+import { writeSessionToResponse } from './src/auth/cookies';
+import {
+  ACCESS_COOKIE,
+  EXPIRES_COOKIE,
+  REFRESH_COOKIE,
+  isExpired,
+  needsRefresh,
+  requiresLogin,
+} from './src/auth/session';
 
 /**
  * グループ内テストのための合言葉の門（`UD-101` が決まるまでの暫定）。
@@ -49,7 +61,8 @@ async function decide(input: {
   });
 
   if (decision.kind === 'open') {
-    return NextResponse.next();
+    // 門を通ったあとに、誰が操作しているかを見る。
+    return withSession(input.request, input.pathname, input.search);
   }
 
   if (decision.kind === 'misconfigured') {
@@ -60,11 +73,9 @@ async function decide(input: {
     });
   }
 
-  const target = input.request.nextUrl.clone();
-  target.pathname = '/enter';
-  target.search = '';
-  target.searchParams.set('next', `${input.pathname}${input.search}`);
-  return NextResponse.redirect(target);
+  return middlewareRedirect(input.request, '/enter', {
+    next: `${input.pathname}${input.search}`,
+  });
 }
 
 /**
@@ -75,3 +86,57 @@ async function decide(input: {
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
+
+/**
+ * ログイン状態の面倒を見る。
+ *
+ * ⚠️ **取り直しはここでしかできない。** Cookie の書き込みは
+ * Server Component から行えない。画面側でやろうとすると、
+ * 「読めるが更新できない」状態になり、期限が来たら詰む。
+ *
+ * ⚠️ **ログインを求める場所を画面ごとに書かない。** 入口を 1 本にする。
+ * 画面ごとに書くと、あとから足した画面で必ず書き忘れる。
+ * 書き忘れは落ちも警告も出さず、**その画面だけ素通し**になる。
+ */
+async function withSession(
+  request: NextRequest,
+  pathname: string,
+  search: string,
+): Promise<NextResponse> {
+  const protectedPath = requiresLogin(pathname);
+
+  // ログイン機能を有効にしていない環境（手元・いまの staging）では、
+  // 従来どおり運営の資格情報で動く。ここで止めない。
+  if (!loginEnabled()) {
+    return NextResponse.next();
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const access = request.cookies.get(ACCESS_COOKIE)?.value ?? '';
+  const refresh = request.cookies.get(REFRESH_COOKIE)?.value ?? '';
+  const expiresAt = Number.parseInt(request.cookies.get(EXPIRES_COOKIE)?.value ?? '', 10);
+  const hasExpiry = Number.isSafeInteger(expiresAt);
+
+  const loggedIn = access !== '' && (!hasExpiry || !isExpired(expiresAt, nowSec));
+
+  // 期限が近い（または切れた）が、取り直す手立てがあるなら取り直す。
+  if (refresh !== '' && (!hasExpiry || needsRefresh(expiresAt, nowSec))) {
+    const url = readSupabaseUrl();
+    const anonKey = readSupabaseAnonKey();
+    if (url !== undefined && anonKey !== undefined) {
+      const result = await new SupabaseAuthGateway({ url, anonKey }).refresh(refresh);
+      if (result.ok) {
+        return writeSessionToResponse(NextResponse.next(), result.data, isSecureRequest(request));
+      }
+      // ⚠️ 取り直せなかったときに、ここで Cookie を消さない。
+      //    相手側の一時的な不調でも消えてしまい、全員が締め出される。
+      //    期限切れの判定は下に任せる。
+    }
+  }
+
+  if (protectedPath && !loggedIn) {
+    return middlewareRedirect(request, '/login', { next: `${pathname}${search}` });
+  }
+
+  return NextResponse.next();
+}

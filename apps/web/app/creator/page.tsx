@@ -2,20 +2,37 @@ import { EmptyState, Notice, PageHeader, StatusBadge } from '@sengoku/ui';
 import { fetchMyArtworks } from '../../src/creator-client';
 import { CREATOR_COPY, creatorErrorMessage } from '../../src/creator-copy';
 import { artworkStatusLabel } from '../../src/admin-copy';
+import { isLoggedIn } from '../../src/auth/current';
+import { LOGIN_COPY } from '../../src/auth/copy';
 
 export default async function CreatorHomePage() {
   const result = await fetchMyArtworks();
+  const loggedIn = await isLoggedIn();
 
   return (
     <>
       <PageHeader title={CREATOR_COPY.listTitle} description={CREATOR_COPY.listDescription} />
 
-      {/* ⚠️ 前提を隠さない。書かないと「自分だけの出品欄」だと思って使われる。 */}
-      <Notice
-        tone="alert"
-        title={CREATOR_COPY.sharedAccountNotice}
-        hint={CREATOR_COPY.sharedAccountHint}
-      />
+      {/*
+        ⚠️ ログインしていないときだけ「共有されている」と伝える。
+           出しっぱなしにすると、ログイン済みの人に誤って伝わる。
+      */}
+      {loggedIn ? null : (
+        <Notice
+          tone="alert"
+          title={CREATOR_COPY.sharedAccountNotice}
+          hint={CREATOR_COPY.sharedAccountHint}
+        />
+      )}
+
+      {loggedIn ? (
+        <form className="sengoku-logout" method="post" action="/api/auth/logout">
+          {/* ⚠️ GET にしない。リンクを踏ませるだけで他人をログアウトさせられる。 */}
+          <button className="sengoku-button sengoku-button--quiet" type="submit">
+            {LOGIN_COPY.logout}
+          </button>
+        </form>
+      ) : null}
 
       <p className="sengoku-creator-actions">
         <a className="sengoku-button" href="/creator/artworks/new">

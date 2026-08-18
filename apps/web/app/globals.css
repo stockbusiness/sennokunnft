@@ -822,3 +822,10 @@ button {
   border-color: var(--sengoku-rose);
   color: var(--sengoku-rose-deep);
 }
+
+/* ログアウトは目立たせない。日常的に押すものではない。 */
+.sengoku-logout {
+  display: flex;
+  justify-content: flex-end;
+  margin: var(--sengoku-space-3) 0;
+}

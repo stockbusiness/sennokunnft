@@ -396,6 +396,7 @@ describe('画像の保存先の設定検査（UD-508）', () => {
 
 describe('Supabase での検証に必要な設定（UD-801）', () => {
   const SUPABASE_ENV = {
+    APP_ENV: 'staging' as const,
     AUTH_PROVIDER: 'supabase',
     SUPABASE_JWT_ISSUER: 'https://example.supabase.co/auth/v1',
     SUPABASE_JWT_AUDIENCE: 'authenticated',
@@ -428,13 +429,36 @@ describe('Supabase での検証に必要な設定（UD-801）', () => {
   // ⚠️ 平文で鍵束を取りに行くと、経路上で差し替えられる。
   //    差し替えられた鍵で検証が通れば、偽のトークンを本物として受け入れる。
   it.each(['SUPABASE_JWKS_URL', 'SUPABASE_JWT_ISSUER'] as const)(
-    '%s が https でなければ起動させない',
+    '配備先で %s が https でなければ起動させない',
     (name) => {
       expect(() => {
         assertSupabaseAuthConfig({ ...SUPABASE_ENV, [name]: 'http://example.supabase.co/auth/v1' });
       }).toThrow(UnsafeEnvironmentError);
     },
   );
+
+  it.each(['local', 'test'] as const)('手元（%s）では http を許す', (appEnv) => {
+    // ⚠️ Supabase のローカル開発環境は http で動く。全環境で https を
+    //    必須にすると、認証だけ手元で試せなくなり、検証されないまま本番へ出る。
+    expect(() => {
+      assertSupabaseAuthConfig({
+        ...SUPABASE_ENV,
+        APP_ENV: appEnv,
+        SUPABASE_JWKS_URL: 'http://127.0.0.1:54321/auth/v1/.well-known/jwks.json',
+        SUPABASE_JWT_ISSUER: 'http://127.0.0.1:54321/auth/v1',
+      });
+    }).not.toThrow();
+  });
+
+  it('手元でも設定そのものが欠けていれば起動させない', () => {
+    expect(() => {
+      assertSupabaseAuthConfig({
+        ...SUPABASE_ENV,
+        APP_ENV: 'local',
+        SUPABASE_JWKS_URL: undefined,
+      });
+    }).toThrow(UnsafeEnvironmentError);
+  });
 
   it('理由に値そのものを載せない（ホスト名が混ざる）', () => {
     try {

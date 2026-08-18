@@ -7,6 +7,7 @@ import {
   safeNextPath,
 } from '../../../src/gate';
 import { readGatePassword } from '../../../src/gate-env';
+import { isSecureRequest, siteRedirect } from '../../../src/redirect';
 
 /**
  * 合言葉を受け取る場所（`UD-101` が決まるまでの暫定）。
@@ -24,25 +25,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const password = readGatePassword();
 
   if (password === undefined || typeof submitted !== 'string') {
-    return redirectToEnter(request, next);
+    return redirectToEnter(next);
   }
 
   // ⚠️ 合言葉どうしを直接比べず、署名にしてから比べる。
   //    長さの違いが応答時間に出ないようにするため。
   const [expected, actual] = await Promise.all([gateToken(password), gateToken(submitted)]);
   if (!safeEqual(expected, actual)) {
-    return redirectToEnter(request, next);
+    return redirectToEnter(next);
   }
 
-  const target = request.nextUrl.clone();
-  target.pathname = next;
-  target.search = '';
-
-  const response = NextResponse.redirect(target, { status: 303 });
+  // ⚠️ `nextUrl` だとホストが変わることがあり、いま書いた Cookie が届かない。
+  const response = siteRedirect(next, { status: 303 });
   response.cookies.set(GATE_COOKIE, expected, {
     httpOnly: true,
     // ⚠️ 手元の http でも試せるように、https のときだけ secure を付ける。
-    secure: request.nextUrl.protocol === 'https:',
+    secure: isSecureRequest(request),
     sameSite: 'lax',
     path: '/',
     maxAge: GATE_COOKIE_MAX_AGE_SEC,
@@ -56,11 +54,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * ⚠️ **どこが違ったかを伝えない。** 「文字数が違う」「前半は合っている」
  * といった手掛かりを返すと、総当たりの助けになる。
  */
-function redirectToEnter(request: NextRequest, next: string): NextResponse {
-  const target = request.nextUrl.clone();
-  target.pathname = '/enter';
-  target.search = '';
-  target.searchParams.set('next', next);
-  target.searchParams.set('error', '1');
-  return NextResponse.redirect(target, { status: 303 });
+function redirectToEnter(next: string): NextResponse {
+  return siteRedirect('/enter', { params: { next, error: '1' }, status: 303 });
 }
