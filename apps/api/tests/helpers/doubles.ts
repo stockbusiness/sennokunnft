@@ -12,6 +12,16 @@ import type {
   IdempotencyStore,
   Listing,
   ListingRepository,
+  ConnectionCheckRecord,
+  IntegrationEnvironment,
+  IntegrationRepository,
+  IntegrationSecret,
+  IntegrationService,
+  IntegrationSettings,
+  SealedSecret,
+  SecretCipherPort,
+  SecretPurpose,
+  SecretScope,
   Page,
   PageQuery,
   StaffInvitation,
@@ -374,6 +384,256 @@ export class InMemoryStaffInvitationRepository implements StaffInvitationReposit
   constructor(private readonly staff: InMemoryStaffMemberRepository) {}
 }
 
+/**
+ * 試験用の暗号。
+ *
+ * ⚠️ **平文をそのまま返さない形にしてある。** 「暗号化しているつもりで
+ * 素通し」だと、`応答に秘密が含まれない` の試験が通ってしまい、
+ * 本物で漏れていても気付けない。
+ */
+export class ReversibleTestCipher implements SecretCipherPort {
+  seal(plaintext: string, scope: SecretScope): SealedSecret {
+    return {
+      ciphertext: Buffer.from(`${scope.service}|${plaintext}`, 'utf8').toString('base64'),
+      nonce: 'test-nonce',
+      authTag: 'test-tag',
+      keyVersion: 'v1',
+      lastFour: plaintext.length >= 8 ? plaintext.slice(-4) : '',
+    };
+  }
+
+  open(sealed: SealedSecret, scope: SecretScope): string | null {
+    const decoded = Buffer.from(sealed.ciphertext, 'base64').toString('utf8');
+    const prefix = `${scope.service}|`;
+    return decoded.startsWith(prefix) ? decoded.slice(prefix.length) : null;
+  }
+}
+
+/**
+ * 外部連携の代替実装。
+ *
+ * ⚠️ **平文を返すのは `revealForAdapter` だけ。** 本物と同じ形にして
+ * おかないと、試験だけ通って本番で漏れる。
+ */
+export class InMemoryIntegrationRepository implements IntegrationRepository {
+  private readonly settings = new Map<string, IntegrationSettings>();
+  private readonly secrets = new Map<string, IntegrationSecret & { sealed: SealedSecret }>();
+  private readonly checks: ConnectionCheckRecord[] = [];
+  private readonly cipher = new ReversibleTestCipher();
+
+  private key(service: string, environment: string): string {
+    return `${service}:${environment}`;
+  }
+
+  ensureSettings(
+    id: string,
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<IntegrationSettings> {
+    const key = this.key(service, environment);
+    const existing = this.settings.get(key);
+    if (existing !== undefined) {
+      return Promise.resolve(existing);
+    }
+    const created: IntegrationSettings = {
+      id,
+      service,
+      environment,
+      endpointUrl: null,
+      apiVersion: null,
+      timeoutMs: 10_000,
+      maxAttempts: 5,
+      enabled: false,
+      rowVersion: 1,
+    };
+    this.settings.set(key, created);
+    return Promise.resolve(created);
+  }
+
+  findSettings(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<IntegrationSettings | null> {
+    return Promise.resolve(this.settings.get(this.key(service, environment)) ?? null);
+  }
+
+  listSettings(): Promise<readonly IntegrationSettings[]> {
+    return Promise.resolve([...this.settings.values()]);
+  }
+
+  saveSettings(
+    settings: IntegrationSettings,
+    expectedRowVersion: number,
+  ): Promise<IntegrationSettings | null> {
+    const key = this.key(settings.service, settings.environment);
+    const current = this.settings.get(key);
+    if (current === undefined || current.rowVersion !== expectedRowVersion) {
+      return Promise.resolve(null);
+    }
+    const saved = { ...settings, rowVersion: current.rowVersion + 1 };
+    this.settings.set(key, saved);
+    return Promise.resolve(saved);
+  }
+
+  listSecrets(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<readonly IntegrationSecret[]> {
+    return Promise.resolve(
+      [...this.secrets.values()]
+        .filter((item) => item.service === service && item.environment === environment)
+        .map(stripSealed),
+    );
+  }
+
+  findSecretById(id: string): Promise<IntegrationSecret | null> {
+    const found = this.secrets.get(id);
+    return Promise.resolve(found === undefined ? null : stripSealed(found));
+  }
+
+  findSecretByStatus(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+    purpose: SecretPurpose,
+    status: 'pending' | 'active',
+  ): Promise<IntegrationSecret | null> {
+    const found = [...this.secrets.values()].find(
+      (item) =>
+        item.service === service &&
+        item.environment === environment &&
+        item.purpose === purpose &&
+        item.status === status,
+    );
+    return Promise.resolve(found === undefined ? null : stripSealed(found));
+  }
+
+  createSecret(input: {
+    readonly id: string;
+    readonly service: IntegrationService;
+    readonly environment: IntegrationEnvironment;
+    readonly purpose: SecretPurpose;
+    readonly plaintext: string;
+    readonly createdByAccountId: string;
+  }): Promise<IntegrationSecret | null> {
+    const duplicate = [...this.secrets.values()].some(
+      (item) =>
+        item.service === input.service &&
+        item.environment === input.environment &&
+        item.purpose === input.purpose &&
+        item.status === 'pending',
+    );
+    if (duplicate) {
+      return Promise.resolve(null);
+    }
+
+    const sealed = this.cipher.seal(input.plaintext, {
+      service: input.service,
+      environment: input.environment,
+    });
+    const record = {
+      id: input.id,
+      service: input.service,
+      environment: input.environment,
+      purpose: input.purpose,
+      keyVersion: sealed.keyVersion,
+      lastFour: sealed.lastFour,
+      status: 'pending' as const,
+      activatedAt: null,
+      retiredAt: null,
+      createdAt: new Date(TEST_NOW),
+      sealed,
+    };
+    this.secrets.set(record.id, record);
+    return Promise.resolve(stripSealed(record));
+  }
+
+  activateSecret(activated: IntegrationSecret, retired: IntegrationSecret | null): Promise<void> {
+    if (retired !== null) {
+      const current = this.secrets.get(retired.id);
+      if (current !== undefined) {
+        this.secrets.set(retired.id, { ...current, ...retired });
+      }
+    }
+    const target = this.secrets.get(activated.id);
+    if (target !== undefined) {
+      this.secrets.set(activated.id, { ...target, ...activated });
+    }
+    return Promise.resolve();
+  }
+
+  updateSecret(secret: IntegrationSecret): Promise<IntegrationSecret> {
+    const current = this.secrets.get(secret.id);
+    if (current !== undefined) {
+      this.secrets.set(secret.id, { ...current, ...secret });
+    }
+    return Promise.resolve(secret);
+  }
+
+  revealForAdapter(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+    purpose: SecretPurpose,
+  ): Promise<string | null> {
+    const found = [...this.secrets.values()].find(
+      (item) =>
+        item.service === service &&
+        item.environment === environment &&
+        item.purpose === purpose &&
+        item.status === 'active',
+    );
+    if (found === undefined) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(this.cipher.open(found.sealed, { service, environment }));
+  }
+
+  recordConnectionCheck(record: ConnectionCheckRecord): Promise<void> {
+    this.checks.push(record);
+    return Promise.resolve();
+  }
+
+  findLatestConnectionCheck(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<ConnectionCheckRecord | null> {
+    const matching = this.checks
+      .filter((item) => item.service === service && item.environment === environment)
+      .sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
+    return Promise.resolve(matching[0] ?? null);
+  }
+
+  listConnectionChecks(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+    limit: number,
+  ): Promise<readonly ConnectionCheckRecord[]> {
+    return Promise.resolve(
+      this.checks
+        .filter((item) => item.service === service && item.environment === environment)
+        .slice(0, limit),
+    );
+  }
+
+  invalidateConnectionChecks(
+    service: IntegrationService,
+    environment: IntegrationEnvironment,
+  ): Promise<void> {
+    for (let index = 0; index < this.checks.length; index += 1) {
+      const check = this.checks[index];
+      if (check !== undefined && check.service === service && check.environment === environment) {
+        this.checks[index] = { ...check, succeeded: false, failureCode: 'SETTINGS_CHANGED' };
+      }
+    }
+    return Promise.resolve();
+  }
+}
+
+function stripSealed(record: IntegrationSecret & { sealed?: SealedSecret }): IntegrationSecret {
+  // ⚠️ 暗号文を外へ出さない。本物のリポジトリと同じ形にそろえる。
+  const { sealed: _sealed, ...rest } = record;
+  return rest;
+}
+
 export class FixedClock implements ClockPort {
   constructor(private readonly value: Date) {}
   now(): Date {
@@ -412,6 +672,7 @@ export interface TestHarness extends AppDependencies {
   readonly audit: InMemoryAuditLog;
   readonly staffMembers: InMemoryStaffMemberRepository;
   readonly staffInvitations: InMemoryStaffInvitationRepository;
+  readonly integrationRepository: InMemoryIntegrationRepository;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -509,6 +770,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const listings = new InMemoryListingRepository();
   const accounts = new InMemoryAccountRepository();
   const staffMembers = new InMemoryStaffMemberRepository(accounts);
+  const integrationRepository = new InMemoryIntegrationRepository();
   return {
     version: '0.1.0',
     probes: [],
@@ -518,6 +780,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     accounts,
     staffMembers,
     staffInvitations: new InMemoryStaffInvitationRepository(staffMembers),
+    integrations: { repository: integrationRepository, appEnvironment: 'production' },
+    integrationRepository,
     tokenVerifier,
     clock: new FixedClock(TEST_NOW),
     ids: new SequentialIds(),

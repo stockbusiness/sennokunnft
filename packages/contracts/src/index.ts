@@ -110,3 +110,21 @@ export {
   type StaffMemberView,
   type UpdateStaffMemberRequest,
 } from './staff';
+
+export {
+  INTEGRATION_ENVIRONMENT_VALUES,
+  INTEGRATION_SERVICE_VALUES,
+  SECRET_PURPOSE_VALUES,
+  connectionCheckSchema,
+  integrationListResponseSchema,
+  integrationSecretSchema,
+  integrationStatusSchema,
+  registerSecretRequestSchema,
+  updateIntegrationRequestSchema,
+  type ConnectionCheckView,
+  type IntegrationListResponse,
+  type IntegrationSecretView,
+  type IntegrationStatusView,
+  type RegisterSecretRequest,
+  type UpdateIntegrationRequest,
+} from './integration';

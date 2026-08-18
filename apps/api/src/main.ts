@@ -17,6 +17,7 @@ import {
   checkDatabaseConnection,
   createPrismaClient,
   PrismaAccountRepository,
+  PrismaIntegrationRepository,
   PrismaStaffInvitationRepository,
   PrismaStaffMemberRepository,
   PrismaArtworkRepository,
@@ -39,8 +40,10 @@ import {
   contentHash,
   UuidGenerator,
   generateStorageKey,
+  AeadSecretBox,
+  parseEncryptionKeys,
 } from '@sengoku/integrations';
-import { AppModule } from './app.module';
+import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
 import { NestStructuredLogger } from './common/nest-logger';
 import type { DependencyProbe } from './health/health.service';
@@ -164,6 +167,43 @@ async function bootstrap(): Promise<void> {
         })
       : new LocalFileStorage(env.MEDIA_STORAGE_DIR, env.MEDIA_PUBLIC_PREFIX);
 
+  /**
+   * 外部連携の設定と資格情報（管理画面・外部連携 指示書 §6.2）。
+   *
+   * ⚠️ **暗号鍵が無ければ経路ごと生やさない。** 「登録はできるが開けない」
+   * 状態を作らないため。鍵の欠けは、設定画面の 500 ではなく起動ログで気付く。
+   *
+   * ⚠️ **鍵の中身をログへ出さない。** 出すのは「何本読めたか」だけ。
+   */
+  const integrations = ((): AppDependencies['integrations'] => {
+    if (env.INTEGRATION_ENCRYPTION_KEYS === undefined) {
+      logger.warn('外部連携の設定機能は無効です（INTEGRATION_ENCRYPTION_KEYS が未設定）。');
+      return undefined;
+    }
+
+    const keys = parseEncryptionKeys(env.INTEGRATION_ENCRYPTION_KEYS);
+    const version = env.INTEGRATION_ENCRYPTION_ACTIVE_VERSION;
+    if (keys[version] === undefined) {
+      // ⚠️ ここで落とす。起動してから最初の保存で気付くのでは遅い。
+      logger.error(
+        { keyCount: Object.keys(keys).length },
+        `INTEGRATION_ENCRYPTION_ACTIVE_VERSION（${version}）に対応する鍵がありません。`,
+      );
+      process.exit(1);
+    }
+
+    logger.info({ keyCount: Object.keys(keys).length }, '外部連携の設定機能を有効化しました');
+    return {
+      repository: new PrismaIntegrationRepository(
+        prisma,
+        new AeadSecretBox({ keys, activeKeyVersion: version }),
+      ),
+      // ⚠️ 設定の environment は、このプロセスの APP_ENV に固定する。
+      //    要求から受け取れるようにすると、本番から staging を書き換えられる。
+      appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
+    };
+  })();
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -174,6 +214,7 @@ async function bootstrap(): Promise<void> {
       // 運営スタッフの在籍と招待（`UD-803`）。
       staffMembers: new PrismaStaffMemberRepository(prisma),
       staffInvitations: new PrismaStaffInvitationRepository(prisma),
+      integrations,
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       tokenVerifier,

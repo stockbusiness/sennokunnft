@@ -71,3 +71,9 @@ export {
   type HmacVerifierOptions,
   type VerifyRequestInput,
 } from './sennokuni-hmac';
+export {
+  AeadSecretBox,
+  lastFourOf,
+  parseEncryptionKeys,
+  type AeadSecretBoxOptions,
+} from './aead-secret-box';

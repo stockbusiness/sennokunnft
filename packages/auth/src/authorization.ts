@@ -37,6 +37,12 @@ export const ACTIONS = [
   'staff.view',
   'staff.invite',
   'staff.manage',
+  // --- 外部連携（管理画面・外部連携 指示書 §8）---
+  // ⚠️ 閲覧は運営と閲覧者にも開く。設定と資格情報はオーナーだけ。
+  'integration.view',
+  'integration.manage',
+  'integration.manage_secret',
+  'wallet_delivery.retry',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -117,6 +123,13 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'staff.view',
     'staff.invite',
     'staff.manage',
+    'integration.view',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'integration.manage',
+    'integration.manage_secret',
+    // ⚠️ 再送はオーナーの印を要らない。運営の日常業務であり、
+    //    送る内容は Outbox に確定済みで、新しく何かを決める操作ではない。
+    'wallet_delivery.retry',
   ],
   auditor: [
     'artwork.view_public',
@@ -125,6 +138,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'order.view_any',
     'collection.view',
     'audit_log.view',
+    // 状態と履歴は見られるが、変更も再送もできない（指示書 §8）。
+    'integration.view',
   ],
 };
 
@@ -148,7 +163,15 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
  * ⚠️ **一覧の閲覧もオーナーに限る。** スタッフ一覧には業務用の
  * 連絡先が並ぶ。見せる相手を、配る相手と同じところまで絞る。
  */
-const OWNER_ONLY_ACTIONS: readonly Action[] = ['staff.view', 'staff.invite', 'staff.manage'];
+const OWNER_ONLY_ACTIONS: readonly Action[] = [
+  'staff.view',
+  'staff.invite',
+  'staff.manage',
+  // ⚠️ 接続先と資格情報はオーナーだけ（指示書 §8）。
+  //    運営の 1 人が乗っ取られただけで、送信先ごと差し替えられてしまう。
+  'integration.manage',
+  'integration.manage_secret',
+];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {
   'order.view': { bypass: 'order.view_any' },

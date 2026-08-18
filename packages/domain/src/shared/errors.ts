@@ -45,6 +45,20 @@ export const DOMAIN_ERROR_CODES = [
   'STAFF_SELF_CHANGE',
   'STAFF_LAST_OWNER',
   'STAFF_OWNER_MUST_BE_OPERATOR',
+  // --- 外部連携の設定と資格情報（管理画面・外部連携 指示書）---
+  'INTEGRATION_SETTINGS_INVALID',
+  'INTEGRATION_SETTINGS_CONFLICT',
+  'INTEGRATION_ENDPOINT_INSECURE',
+  'INTEGRATION_SECRET_MISSING',
+  'INTEGRATION_SECRET_NOT_PENDING',
+  /**
+   * 接続テストの成功が要る。
+   *
+   * ⚠️ **「保存できた」と「繋がった」を分けるための符号。**
+   * 保存は自分の DB へ書けたというだけで、相手に届くかは別の話。
+   */
+  'INTEGRATION_CHECK_REQUIRED',
+  'INTEGRATION_CHECK_STALE',
   'IMAGE_INVALID',
   'IMAGE_TOO_LARGE',
   'IMAGE_UNSUPPORTED_TYPE',

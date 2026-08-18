@@ -19,6 +19,10 @@ import type {
   StoragePort,
   StaffInvitationRepository,
   StaffMemberRepository,
+  IntegrationRepository,
+  IntegrationEnvironment,
+  IntegrationSettings,
+  IntegrationService as IntegrationServiceName,
 } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
@@ -46,6 +50,8 @@ import { CatalogService } from './catalog/catalog.service';
 import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.service';
 import { StaffController, StaffInvitationAcceptController } from './staff/staff.controller';
 import { StaffService } from './staff/staff.service';
+import { IntegrationController } from './integration/integration.controller';
+import { IntegrationService_ } from './integration/integration.service';
 import { HealthController } from './health/health.controller';
 import { HealthService, type DependencyProbe } from './health/health.service';
 
@@ -66,6 +72,24 @@ export interface AppDependencies {
   /** 運営スタッフの在籍と招待（`UD-803`）。 */
   readonly staffMembers: StaffMemberRepository;
   readonly staffInvitations: StaffInvitationRepository;
+  /**
+   * 外部連携の設定と資格情報（管理画面・外部連携 指示書）。
+   *
+   * ⚠️ **暗号鍵が無い環境では渡さない。** 「渡すが中で落ちる」形にすると、
+   * 設定画面を開いた人に 500 が返るだけで、原因が鍵の欠けだと分からない。
+   * 経路ごと生やさないほうが、起動ログで気付ける。
+   */
+  readonly integrations?: {
+    readonly repository: IntegrationRepository & {
+      ensureSettings(
+        id: string,
+        service: IntegrationServiceName,
+        environment: IntegrationEnvironment,
+      ): Promise<IntegrationSettings>;
+    };
+    /** このプロセスがどの環境か。⚠️ 設定の `environment` とは別物。 */
+    readonly appEnvironment: IntegrationEnvironment;
+  };
   readonly idempotency: IdempotencyStore;
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
@@ -144,6 +168,7 @@ export class AppModule implements NestModule {
     //    すべての provider を作るため、Claim を使わない構成まで道連れに落ちる。
     //    実際にそれで既存の API テストが全滅した。
     const claim = deps.claim;
+    const integrations = deps.integrations;
     return {
       module: AppModule,
       controllers: [
@@ -154,6 +179,7 @@ export class AppModule implements NestModule {
         CreatorCatalogController,
         StaffController,
         StaffInvitationAcceptController,
+        ...(integrations === undefined ? [] : [IntegrationController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -200,6 +226,21 @@ export class AppModule implements NestModule {
           provide: IdempotencyService,
           useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
         },
+        ...(integrations === undefined
+          ? []
+          : [
+              {
+                provide: IntegrationService_,
+                useFactory: () =>
+                  new IntegrationService_(
+                    integrations.repository,
+                    deps.ids,
+                    deps.clock,
+                    deps.audit,
+                    integrations.appEnvironment,
+                  ),
+              },
+            ]),
         {
           provide: StaffService,
           useFactory: () =>
