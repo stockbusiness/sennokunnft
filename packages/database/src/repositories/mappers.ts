@@ -11,6 +11,7 @@ import type { Artwork as ArtworkRow, Listing as ListingRow } from '../../generat
 export function toArtwork(row: ArtworkRow): Artwork {
   return {
     id: row.id,
+    creatorAccountId: row.creatorAccountId,
     slug: row.slug,
     title: row.title,
     description: row.description,

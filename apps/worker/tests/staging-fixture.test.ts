@@ -129,8 +129,14 @@ async function seedAccount(
 }
 
 async function seedArtwork(maxSupply = 10): Promise<string> {
+  // 作品には持ち主が要る。この試験の関心事ではないので器を1つ用意する。
+  const creatorAccountId = randomUUID();
+  await prisma.account.create({
+    data: { id: creatorAccountId, authProvider: 'fake', authSubject: creatorAccountId },
+  });
   const artwork = await prisma.artwork.create({
     data: {
+      creatorAccountId,
       slug: `artwork-${randomUUID()}`,
       title: '天下布武の陣羽織',
       maxSupply,

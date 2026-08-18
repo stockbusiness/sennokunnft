@@ -60,6 +60,12 @@ export class InMemoryArtworkRepository implements ArtworkRepository {
     return Promise.resolve(this.paginate(query, () => true));
   }
 
+  listByCreator(creatorAccountId: string, query: PageQuery): Promise<Page<Artwork>> {
+    return Promise.resolve(
+      this.paginate(query, (item) => item.creatorAccountId === creatorAccountId),
+    );
+  }
+
   create(artwork: Artwork): Promise<Artwork> {
     return Promise.resolve(this.seed(artwork));
   }
@@ -331,6 +337,7 @@ let keyCounter = 1;
 export function sampleArtwork(overrides: Partial<Artwork> = {}): Artwork {
   return {
     id: 'artwork-1',
+    creatorAccountId: 'account-operator',
     slug: 'sample-artwork',
     title: 'サンプル作品',
     description: '説明文',

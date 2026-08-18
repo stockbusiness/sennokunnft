@@ -37,6 +37,8 @@ import { CorrelationMiddleware } from './common/correlation.middleware';
 import { IdempotencyService } from './common/idempotency';
 import { AdminCatalogController } from './catalog/admin-catalog.controller';
 import { AdminCatalogService } from './catalog/admin-catalog.service';
+import { CreatorCatalogController } from './catalog/creator-catalog.controller';
+import { CreatorCatalogService } from './catalog/creator-catalog.service';
 import { CatalogController, PublicListingController } from './catalog/catalog.controller';
 import { CatalogService } from './catalog/catalog.service';
 import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.service';
@@ -126,7 +128,7 @@ export class AppModule implements NestModule {
     consumer.apply(CorrelationMiddleware).forRoutes('*');
     consumer
       .apply(express.raw({ type: ['image/*', 'application/octet-stream'], limit: RAW_BODY_LIMIT }))
-      .forRoutes('api/v1/admin/artworks/:id/image');
+      .forRoutes('api/v1/admin/artworks/:id/image', 'api/v1/creator/artworks/:id/image');
   }
 
   static register(deps: AppDependencies): DynamicModule {
@@ -142,6 +144,7 @@ export class AppModule implements NestModule {
         CatalogController,
         PublicListingController,
         AdminCatalogController,
+        CreatorCatalogController,
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -165,6 +168,13 @@ export class AppModule implements NestModule {
               deps.storage,
               deps.audit,
             ),
+        },
+        {
+          provide: CreatorCatalogService,
+          useFactory: (admin: AdminCatalogService) =>
+            // ⚠️ 業務規則は `AdminCatalogService` を通す。所有権だけを足す。
+            new CreatorCatalogService(admin, deps.artworks, deps.listings),
+          inject: [AdminCatalogService],
         },
         {
           provide: ArtworkImageService,

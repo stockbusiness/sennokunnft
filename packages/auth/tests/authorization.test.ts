@@ -31,6 +31,11 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'artwork.view_unpublished': { anonymous: false, buyer: false, operator: true, auditor: true },
   'artwork.manage': { anonymous: false, buyer: false, operator: true, auditor: false },
   'listing.manage': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // 会員なら誰でも「自分の作品」を出せる（`UD-806`、暫定）。
+  // ⚠️ auditor は読み取り専用なので、自分名義でも出品させない。
+  'artwork.create_own': { anonymous: false, buyer: true, operator: true, auditor: false },
+  'artwork.manage_own': { anonymous: false, buyer: true, operator: true, auditor: false },
+  'listing.manage_own': { anonymous: false, buyer: true, operator: true, auditor: false },
   'order.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'order.view': { anonymous: false, buyer: true, operator: true, auditor: true },
   'order.view_any': { anonymous: false, buyer: false, operator: true, auditor: true },
@@ -64,6 +69,38 @@ describe('所有権チェック（IDOR 対策）', () => {
     expect(decision.allowed).toBe(false);
     if (decision.allowed) throw new Error('expected deny');
     expect(decision.reason).toBe('not_owner');
+  });
+
+  it('他人の作品は buyer には触らせない（Z-2 / UD-102 決定変更）', () => {
+    // ⚠️ ロール判定だけで通すと、他人の作品IDを指定して書き換えられる。
+    const decision = can(actor('buyer'), 'artwork.manage_own', { ownerAccountId: OTHER });
+    expect(decision.allowed).toBe(false);
+    if (decision.allowed) throw new Error('expected deny');
+    expect(decision.reason).toBe('not_owner');
+  });
+
+  it('他人の出品も buyer には触らせない', () => {
+    expect(isAllowed(actor('buyer'), 'listing.manage_own', { ownerAccountId: OTHER })).toBe(false);
+  });
+
+  it('自分の作品なら buyer でも触れる', () => {
+    expect(isAllowed(actor('buyer'), 'artwork.manage_own', { ownerAccountId: SELF })).toBe(true);
+    expect(isAllowed(actor('buyer'), 'listing.manage_own', { ownerAccountId: SELF })).toBe(true);
+  });
+
+  it('運営は他人の作品も止められる（審査は無いが、下ろす経路はある）', () => {
+    // 出品前の審査を行わない代わりに、問題のある出品を事後に停止する。
+    expect(isAllowed(actor('operator'), 'artwork.manage_own', { ownerAccountId: OTHER })).toBe(
+      true,
+    );
+    expect(isAllowed(actor('operator'), 'listing.manage_own', { ownerAccountId: OTHER })).toBe(
+      true,
+    );
+  });
+
+  it('作品の新規登録には所有権が要らない（まだ作品が無いため）', () => {
+    expect(requiresOwnership('artwork.create_own')).toBe(false);
+    expect(isAllowed(actor('buyer'), 'artwork.create_own', {})).toBe(true);
   });
 
   it('operator は広域権限を持つので他人の注文も見られる', () => {
