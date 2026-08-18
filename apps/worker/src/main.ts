@@ -10,17 +10,21 @@ import {
 import {
   createPrismaClient,
   PrismaCommonUserLinkRepository,
+  PrismaIntegrationRepository,
   PrismaWalletDeliveryOutboxRepository,
   type PrismaClient,
 } from '@sengoku/database';
 import {
+  AeadSecretBox,
   AgencyCommonUserDirectory,
   HttpWalletDeliverySender,
+  parseEncryptionKeys,
   SystemClock,
 } from '@sengoku/integrations';
 import { createLogger } from '@sengoku/observability';
 import { createCommonUserLinkJob } from './common-user-job';
 import { createWalletDeliveryJob } from './wallet-delivery-job';
+import { createWalletDeliveryResolver } from './wallet-delivery-config';
 import { WorkerRunner, type JobHandler } from './runner';
 
 /**
@@ -90,22 +94,75 @@ async function bootstrap(): Promise<void> {
   if (env.WALLET_DELIVERY_ENABLED) {
     const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
     const clock = new SystemClock();
+
+    /*
+      管理画面で設定した接続先・鍵を読む口（要決定 03）。
+
+      ⚠️ **暗号鍵が無ければ持たない。** 持たせても復号できず、
+         毎巡「半端な設定」で止まる。落ち先（環境変数）だけで動かす。
+
+      ⚠️ **鍵の中身をログへ出さない。** 出すのは「何本読めたか」だけ。
+    */
+    const walletIntegrations =
+      env.INTEGRATION_ENCRYPTION_KEYS === undefined
+        ? null
+        : (() => {
+            const keys = parseEncryptionKeys(env.INTEGRATION_ENCRYPTION_KEYS ?? '');
+            const version = env.INTEGRATION_ENCRYPTION_ACTIVE_VERSION;
+            if (keys[version] === undefined) {
+              // ⚠️ ここで落とす。起動してから最初の送信で気付くのでは遅い。
+              logger.fatal(
+                { keyCount: Object.keys(keys).length },
+                `INTEGRATION_ENCRYPTION_ACTIVE_VERSION（${version}）に対応する鍵がありません。`,
+              );
+              process.exit(1);
+            }
+            logger.info(
+              { keyCount: Object.keys(keys).length },
+              '管理画面で設定した Wallet の接続先を読みます',
+            );
+            return new PrismaIntegrationRepository(
+              prisma,
+              new AeadSecretBox({ keys, activeKeyVersion: version }),
+            );
+          })();
     handlers.push(
       createWalletDeliveryJob({
         logger,
         batchSize: env.WALLET_DELIVERY_BATCH_SIZE,
-        deps: {
-          outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
-          sender: new HttpWalletDeliverySender({
-            // 上のガードで存在を確認済み。
-            endpoint: env.WALLET_DELIVERY_ENDPOINT ?? '',
-            keyId: env.WALLET_DELIVERY_KEY_ID ?? '',
-            secret: env.WALLET_DELIVERY_SECRET ?? '',
+        outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
+        clock,
+        /*
+          ⚠️ **接続先と鍵は 1 巡ごとに解決する（要決定 03）。**
+             起動時に 1 個作って使い回すと、管理画面で鍵を交換しても
+             再起動するまで古い鍵で送り続ける。手順で埋める前提は、
+             忘れられたときに誰も気づけない。
+
+          ⚠️ **暗号鍵が無い環境では DB を見ない。** 見に行っても復号できず、
+             毎巡「半端な設定」で止まる。落ち先（環境変数）だけで動かす。
+        */
+        resolve: createWalletDeliveryResolver({
+          integrations: walletIntegrations,
+          appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
+          fallback:
+            env.WALLET_DELIVERY_ENDPOINT === undefined
+              ? null
+              : {
+                  // 上のガードで存在を確認済み。
+                  endpoint: env.WALLET_DELIVERY_ENDPOINT,
+                  keyId: env.WALLET_DELIVERY_KEY_ID ?? '',
+                  secret: env.WALLET_DELIVERY_SECRET ?? '',
+                  timeoutMs: env.WALLET_DELIVERY_TIMEOUT_MS,
+                },
+        }),
+        createSender: (config) =>
+          new HttpWalletDeliverySender({
+            endpoint: config.endpoint,
+            keyId: config.keyId,
+            secret: config.secret,
             clock,
-            timeoutMs: env.WALLET_DELIVERY_TIMEOUT_MS,
+            timeoutMs: config.timeoutMs,
           }),
-          clock,
-        },
       }),
     );
     logger.info({ batchSize: env.WALLET_DELIVERY_BATCH_SIZE }, 'Wallet 配送を有効化しました');

@@ -15,6 +15,14 @@ export interface IntegrationSettings {
   readonly service: IntegrationService;
   readonly environment: IntegrationEnvironment;
   readonly endpointUrl: string | null;
+  /**
+   * 署名に使う鍵の識別子。
+   *
+   * ⚠️ **秘密ではない。** 鍵そのものは資格情報の側にある。
+   * ここに入るのは署名ヘッダへそのまま載る名前で、伏せる必要が無い。
+   * 伏せてしまうと、取り違えたときに画面から確かめられなくなる。
+   */
+  readonly keyId: string | null;
   readonly apiVersion: string | null;
   readonly timeoutMs: number;
   readonly maxAttempts: number;
@@ -25,6 +33,7 @@ export interface IntegrationSettings {
 
 export interface UpdateSettingsInput {
   readonly endpointUrl?: string | null;
+  readonly keyId?: string | null;
   readonly apiVersion?: string | null;
   readonly timeoutMs?: number;
   readonly maxAttempts?: number;
@@ -71,12 +80,18 @@ export function updateSettings(
     settings: {
       ...settings,
       endpointUrl: endpointUrl === '' ? null : endpointUrl,
+      keyId: normalizeKeyId(input.keyId === undefined ? settings.keyId : input.keyId),
       apiVersion: input.apiVersion === undefined ? settings.apiVersion : input.apiVersion,
       timeoutMs,
       maxAttempts,
     },
     endpointChanged: endpointUrl !== settings.endpointUrl,
   });
+}
+
+/** 空文字を `null` に寄せる。「入れたつもりで空」を有効な値にしない。 */
+function normalizeKeyId(value: string | null): string | null {
+  return value === null || value.trim() === '' ? null : value.trim();
 }
 
 export interface EnableInput {
@@ -103,6 +118,14 @@ export function enableIntegration(input: EnableInput): Result<IntegrationSetting
 
   if (settings.endpointUrl === null || settings.endpointUrl === '') {
     return err(domainError('INTEGRATION_SETTINGS_INVALID', 'endpoint is not configured'));
+  }
+  /*
+    ⚠️ **鍵の識別子も揃っていることを条件にする。** 署名ヘッダに載る値で、
+       欠けていると相手は誰の署名か分からず、必ず断られる。
+       有効化してから毎回断られるより、有効化の前に止める。
+  */
+  if (settings.keyId === null) {
+    return err(domainError('INTEGRATION_SETTINGS_INVALID', 'key id is not configured'));
   }
   if (!input.hasActiveSecret) {
     return err(domainError('INTEGRATION_SECRET_MISSING', 'no active secret'));

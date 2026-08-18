@@ -26,6 +26,7 @@ import type {
   IntegrationEnvironment,
   IntegrationSettings,
   IntegrationService as IntegrationServiceName,
+  ProbeOutcome,
 } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
@@ -87,6 +88,17 @@ export interface AppDependencies {
    * 経路ごと生やさないほうが、起動ログで気付ける。
    */
   readonly integrations?: {
+    /**
+     * 接続先へ届くかどうかを確かめる手段（指示書 §4.3・要決定 06）。
+     *
+     * ⚠️ **業務データを送る実装を渡さない。** 相手は受取権を作る口で、
+     * 試し打ちしてよい相手ではない。安全なテスト手段が確認できるまで、
+     * 本文を持たない確認だけにする。
+     */
+    readonly probe: (
+      endpointUrl: string,
+      timeoutMs: number,
+    ) => Promise<{ readonly outcome: ProbeOutcome; readonly durationMs: number }>;
     readonly repository: IntegrationRepository & {
       ensureSettings(
         id: string,
@@ -265,6 +277,7 @@ export class AppModule implements NestModule {
                     deps.clock,
                     deps.audit,
                     integrations.appEnvironment,
+                    integrations.probe,
                   ),
               },
             ]),

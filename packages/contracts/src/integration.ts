@@ -30,9 +30,19 @@ export type IntegrationSecretView = z.infer<typeof integrationSecretSchema>;
 
 export const connectionCheckSchema = z.object({
   id: z.string(),
+  /**
+   * 何を確かめたか。
+   *
+   * ⚠️ **「成功」だけでは足りない。** `reachability` は接続先へ届くことを
+   * 確かめただけで、資格情報が正しいかどうかは確かめていない（要決定 06）。
+   * 画面には必ず、何を確かめていないかを併記すること。
+   */
+  kind: z.enum(['reachability']),
   succeeded: z.boolean(),
   /** 失敗の分類。⚠️ 外部の生の応答は入れない。 */
   failureCode: z.string().nullable(),
+  /** 相手が返した HTTP の状態コード。⚠️ 応答本文は返さない。 */
+  httpStatus: z.number().int().nullable(),
   durationMs: z.number().int(),
   executedAt: z.string(),
 });
@@ -42,6 +52,13 @@ export const integrationStatusSchema = z.object({
   service: z.enum(INTEGRATION_SERVICE_VALUES),
   environment: z.enum(INTEGRATION_ENVIRONMENT_VALUES),
   endpointUrl: z.string().nullable(),
+  /**
+   * 署名に使う鍵の識別子。
+   *
+   * ⚠️ **これは秘密ではない。** 署名ヘッダにそのまま載る名前なので、
+   * 伏せずに返す。伏せると、取り違えたときに画面から確かめられない。
+   */
+  keyId: z.string().nullable(),
   apiVersion: z.string().nullable(),
   timeoutMs: z.number().int(),
   maxAttempts: z.number().int(),
@@ -58,6 +75,15 @@ export const integrationStatusSchema = z.object({
   checkFresh: z.boolean(),
   /** いま有効化できるか。できない理由は画面が状態から組み立てる。 */
   canEnable: z.boolean(),
+  /** いま接続確認を行えるか（接続先が入っているか）。 */
+  canCheck: z.boolean(),
+  /**
+   * 直近の接続確認の履歴。
+   *
+   * ⚠️ **成功だけを残さない。** 失敗も並べないと、
+   * 「何度も失敗したあとの 1 回の成功」が見えなくなる。
+   */
+  recentChecks: z.array(connectionCheckSchema),
 });
 export type IntegrationStatusView = z.infer<typeof integrationStatusSchema>;
 
@@ -77,6 +103,7 @@ export type IntegrationListResponse = z.infer<typeof integrationListResponseSche
 export const updateIntegrationRequestSchema = z
   .object({
     endpointUrl: z.string().trim().max(2048).nullable().optional(),
+    keyId: z.string().trim().max(128).nullable().optional(),
     apiVersion: z.string().trim().max(64).nullable().optional(),
     timeoutMs: z.number().int().optional(),
     maxAttempts: z.number().int().optional(),

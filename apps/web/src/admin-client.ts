@@ -8,6 +8,12 @@ import {
   type StaffMemberView,
   type UpdateStaffMemberRequest,
   auditLogListResponseSchema,
+  integrationListResponseSchema,
+  integrationStatusSchema,
+  type IntegrationListResponse,
+  type IntegrationStatusView,
+  type RegisterSecretRequest,
+  type UpdateIntegrationRequest,
   resendWalletDeliveriesResponseSchema,
   walletDeliveryListResponseSchema,
   walletDeliverySchema,
@@ -398,5 +404,94 @@ export function fetchAuditLogs(
   return callAdmin(
     `/api/v1/admin/audit-logs${query === '' ? '' : `?${query}`}`,
     auditLogListResponseSchema,
+  );
+}
+
+// --- 外部連携の設定（管理画面・外部連携 指示書 §4・§6・§9）------------------
+//
+// ⚠️ **登録済みの資格情報を取る経路をここに作らない。** API がそもそも
+//    返さないので取りようが無い——という状態を保つ。
+
+export function fetchIntegrations(): Promise<AdminResult<IntegrationListResponse>> {
+  return callAdmin('/api/v1/admin/integrations', integrationListResponseSchema);
+}
+
+export function fetchIntegration(service: string): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/${encodeURIComponent(service)}`,
+    integrationStatusSchema,
+  );
+}
+
+export function updateIntegration(
+  service: string,
+  request: UpdateIntegrationRequest,
+): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/${encodeURIComponent(service)}`,
+    integrationStatusSchema,
+    json(request, 'PATCH'),
+  );
+}
+
+/**
+ * 接続先へ届くかどうかを確かめる。
+ *
+ * ⚠️ **接続先を引数で渡さない。** 保存済みの設定に対してだけ行う。
+ * 自由に指定できると、この画面が「任意の宛先へ通信させる道具」になる。
+ */
+export function checkIntegration(service: string): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/${encodeURIComponent(service)}/check`,
+    integrationStatusSchema,
+    { method: 'POST' },
+  );
+}
+
+export function setIntegrationEnabled(
+  service: string,
+  enabled: boolean,
+): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/${encodeURIComponent(service)}/${enabled ? 'enable' : 'disable'}`,
+    integrationStatusSchema,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * 資格情報を登録する。
+ *
+ * ⚠️ **この値をどこにも残さない。** 通知にも、状態にも、ログにも。
+ * 画面へ返るのは末尾 4 文字までで、それ以上は API が返さない。
+ */
+export function registerIntegrationSecret(
+  service: string,
+  request: RegisterSecretRequest,
+): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/${encodeURIComponent(service)}/secrets`,
+    integrationStatusSchema,
+    json(request, 'POST'),
+  );
+}
+
+export function activateIntegrationSecret(
+  secretId: string,
+): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/secrets/${encodeURIComponent(secretId)}/activate`,
+    integrationStatusSchema,
+    { method: 'POST' },
+  );
+}
+
+export function discardIntegrationSecret(
+  secretId: string,
+): Promise<AdminResult<IntegrationStatusView>> {
+  return callAdmin(
+    `/api/v1/admin/integrations/secrets/${encodeURIComponent(secretId)}/discard`,
+    integrationStatusSchema,
+    { method: 'POST' },
   );
 }

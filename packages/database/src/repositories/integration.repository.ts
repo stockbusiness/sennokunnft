@@ -29,6 +29,7 @@ function toSettings(row: SettingRow): IntegrationSettings {
     service: row.service as IntegrationService,
     environment: row.environment as IntegrationEnvironment,
     endpointUrl: row.endpointUrl,
+    keyId: row.keyId,
     apiVersion: row.apiVersion,
     timeoutMs: row.timeoutMs,
     maxAttempts: row.maxAttempts,
@@ -61,8 +62,11 @@ function toCheck(row: CheckRow): ConnectionCheckRecord {
     id: row.id,
     service: row.service as IntegrationService,
     environment: row.environment as IntegrationEnvironment,
+    // ⚠️ 知らない種別は DB の CHECK 制約が弾く。ここでは素直に写す。
+    kind: row.kind as ConnectionCheckRecord['kind'],
     succeeded: row.succeeded,
     failureCode: row.failureCode,
+    httpStatus: row.httpStatus,
     durationMs: row.durationMs,
     secretId: row.secretId,
     executedByAccountId: row.executedByAccountId,
@@ -116,6 +120,7 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
       where: { id: settings.id, rowVersion: expectedRowVersion },
       data: {
         endpointUrl: settings.endpointUrl,
+        keyId: settings.keyId,
         apiVersion: settings.apiVersion,
         timeoutMs: settings.timeoutMs,
         maxAttempts: settings.maxAttempts,
@@ -293,8 +298,10 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
         id: record.id,
         service: record.service,
         environment: record.environment,
+        kind: record.kind,
         succeeded: record.succeeded,
         failureCode: record.failureCode,
+        httpStatus: record.httpStatus,
         durationMs: record.durationMs,
         secretId: record.secretId,
         executedByAccountId: record.executedByAccountId,
@@ -310,7 +317,14 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
   ): Promise<ConnectionCheckRecord | null> {
     const row = await this.prisma.integrationConnectionCheck.findFirst({
       where: { service, environment },
-      orderBy: { executedAt: 'desc' },
+      /*
+        ⚠️ **同じ時刻で並んだときは、失敗を先に採る。**
+           この値は本番を有効にしてよいかの判定に使う。同時刻の
+           成功と失敗のどちらを「直近」とするかが実行ごとに変わると、
+           同じ状態で有効化できたりできなかったりする。
+           迷ったら閉じるほうへ倒す。
+      */
+      orderBy: [{ executedAt: 'desc' }, { succeeded: 'asc' }, { id: 'desc' }],
     });
     return row === null ? null : toCheck(row);
   }
@@ -322,7 +336,8 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
   ): Promise<readonly ConnectionCheckRecord[]> {
     const rows = await this.prisma.integrationConnectionCheck.findMany({
       where: { service, environment },
-      orderBy: { executedAt: 'desc' },
+      // 一覧の並びも「直近」の判定と揃える。画面と判定が食い違わないように。
+      orderBy: [{ executedAt: 'desc' }, { succeeded: 'asc' }, { id: 'desc' }],
       take: limit,
     });
     return rows.map(toCheck);

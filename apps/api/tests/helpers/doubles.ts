@@ -37,6 +37,7 @@ import type {
   WalletDeliveryAdminQuery,
   WalletDeliveryAdminRecord,
   WalletDeliveryStatusCounts,
+  ProbeOutcome,
 } from '@sengoku/domain';
 import { canManuallyResend } from '@sengoku/domain';
 import { contentHash, InMemoryStorage } from '@sengoku/integrations';
@@ -450,6 +451,7 @@ export class InMemoryIntegrationRepository implements IntegrationRepository {
       service,
       environment,
       endpointUrl: null,
+      keyId: null,
       apiVersion: null,
       timeoutMs: 10_000,
       maxAttempts: 5,
@@ -608,7 +610,7 @@ export class InMemoryIntegrationRepository implements IntegrationRepository {
   ): Promise<ConnectionCheckRecord | null> {
     const matching = this.checks
       .filter((item) => item.service === service && item.environment === environment)
-      .sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
+      .sort(byLatestThenFailureFirst);
     return Promise.resolve(matching[0] ?? null);
   }
 
@@ -620,6 +622,8 @@ export class InMemoryIntegrationRepository implements IntegrationRepository {
     return Promise.resolve(
       this.checks
         .filter((item) => item.service === service && item.environment === environment)
+        // 一覧の並びも「直近」の判定と揃える。画面と判定が食い違わないように。
+        .sort(byLatestThenFailureFirst)
         .slice(0, limit),
     );
   }
@@ -802,6 +806,24 @@ export class InMemoryAuditLogReader implements AuditLogReadPort {
   }
 }
 
+/**
+ * 接続確認の並び順。
+ *
+ * ⚠️ **同じ時刻で並んだときは失敗を先に採る。** 本番を有効にしてよいかの
+ * 判定に使う値なので、どちらを「直近」とするかが実行ごとに変わってはいけない。
+ * 迷ったら閉じるほうへ倒す。**実装（Prisma）と同じ規則にしてある。**
+ */
+function byLatestThenFailureFirst(a: ConnectionCheckRecord, b: ConnectionCheckRecord): number {
+  const byTime = b.executedAt.getTime() - a.executedAt.getTime();
+  if (byTime !== 0) {
+    return byTime;
+  }
+  if (a.succeeded !== b.succeeded) {
+    return a.succeeded ? 1 : -1;
+  }
+  return b.id.localeCompare(a.id);
+}
+
 export interface TestHarness extends AppDependencies {
   readonly artworks: InMemoryArtworkRepository;
   readonly listings: InMemoryListingRepository;
@@ -812,6 +834,8 @@ export interface TestHarness extends AppDependencies {
   readonly staffInvitations: InMemoryStaffInvitationRepository;
   readonly integrationRepository: InMemoryIntegrationRepository;
   readonly deliveries: InMemoryWalletDeliveries;
+  /** 接続確認の結果を差し替える。 */
+  readonly setProbe: (outcome: ProbeOutcome, durationMs?: number) => void;
   readonly auditLogReader: InMemoryAuditLogReader;
 }
 
@@ -912,6 +936,14 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const staffMembers = new InMemoryStaffMemberRepository(accounts);
   const integrationRepository = new InMemoryIntegrationRepository();
   const audit = new InMemoryAuditLog();
+  /*
+    接続確認の結果。⚠️ **本物の通信をしない。**
+    外へ出る試験は、走らせる場所によって結果が変わる。
+  */
+  let probeResult: { outcome: ProbeOutcome; durationMs: number } = {
+    outcome: { kind: 'response', statusCode: 405 },
+    durationMs: 12,
+  };
   const deliveries = new InMemoryWalletDeliveries();
   const auditLogReader = new InMemoryAuditLogReader(audit);
   return {
@@ -923,7 +955,15 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     accounts,
     staffMembers,
     staffInvitations: new InMemoryStaffInvitationRepository(staffMembers),
-    integrations: { repository: integrationRepository, appEnvironment: 'production' },
+    integrations: {
+      repository: integrationRepository,
+      appEnvironment: 'production',
+      // 既定は「届いた（405）」。試験ごとに `harness.probeOutcome` で差し替える。
+      probe: () => Promise.resolve(probeResult),
+    },
+    setProbe: (outcome: ProbeOutcome, durationMs = 12) => {
+      probeResult = { outcome, durationMs };
+    },
     integrationRepository,
     tokenVerifier,
     clock: new FixedClock(TEST_NOW),

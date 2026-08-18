@@ -1,3 +1,4 @@
+import type { ConnectionCheckKind } from '../integration/connection-check';
 import type { IntegrationEnvironment, IntegrationService } from '../integration/service';
 import type { IntegrationSecret, SecretPurpose } from '../integration/secret';
 import type { IntegrationSettings } from '../integration/settings';
@@ -53,8 +54,18 @@ export interface ConnectionCheckRecord {
   readonly id: string;
   readonly service: IntegrationService;
   readonly environment: IntegrationEnvironment;
+  /**
+   * 何を確かめたか。
+   *
+   * ⚠️ **「成功」だけでは足りない。** いま行えるのは到達性の確認だけで、
+   * 資格情報が正しいかどうかは確かめていない（要決定 06）。
+   * 種別を持たないと、後から見た人がどちらか分からない。
+   */
+  readonly kind: ConnectionCheckKind;
   readonly succeeded: boolean;
   readonly failureCode: string | null;
+  /** 相手が返した HTTP の状態コード。⚠️ 応答本文は保存しない。 */
+  readonly httpStatus: number | null;
   readonly durationMs: number;
   readonly secretId: string | null;
   readonly executedByAccountId: string | null;

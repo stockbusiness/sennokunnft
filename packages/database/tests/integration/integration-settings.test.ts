@@ -344,8 +344,10 @@ suite('接続テストの記録', () => {
       id: randomUUID(),
       service: 'ovew_wallet',
       environment: 'production',
+      kind: 'reachability' as const,
       succeeded,
       failureCode: succeeded ? null : 'TIMEOUT',
+      httpStatus: succeeded ? 405 : null,
       durationMs: 120,
       secretId: null,
       executedByAccountId: owner,
@@ -363,12 +365,51 @@ suite('接続テストの記録', () => {
     expect(latest?.succeeded).toBe(true);
   });
 
+  /*
+    ⚠️ **知らない種別を入れさせない。** 種別を増やすときは要決定 06
+       （安全なテスト手段が確認できたか）の再確認とセットにしたい。
+       制約を直さないと入らないことが、その確認を促す仕掛けになる。
+  */
+  it('知らない確認の種別は保存できない', async () => {
+    await expect(
+      prisma.integrationConnectionCheck.create({
+        data: {
+          service: 'ovew_wallet',
+          environment: 'production',
+          kind: 'test_event',
+          succeeded: true,
+          durationMs: 1,
+        },
+      }),
+    ).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'integration_connection_checks_kind_known'),
+    );
+  });
+
+  it('HTTP の状態コードでない値は保存できない', async () => {
+    await expect(
+      prisma.integrationConnectionCheck.create({
+        data: {
+          service: 'ovew_wallet',
+          environment: 'production',
+          kind: 'reachability',
+          succeeded: true,
+          httpStatus: 999,
+          durationMs: 1,
+        },
+      }),
+    ).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'integration_connection_checks_http_status_range'),
+    );
+  });
+
   it('成功に失敗の分類は付けられない', async () => {
     await expect(
       prisma.integrationConnectionCheck.create({
         data: {
           service: 'ovew_wallet',
           environment: 'production',
+          kind: 'reachability',
           succeeded: true,
           failureCode: 'TIMEOUT',
           durationMs: 1,

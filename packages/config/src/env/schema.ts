@@ -186,6 +186,18 @@ const workerEnvObject = baseEnvObject.extend({
   WORKER_POLL_INTERVAL_MS: integerFromEnv(100, 3_600_000, 5000),
 
   /**
+   * 外部連携の資格情報を包む暗号鍵（api と同じ値）。
+   *
+   * ⚠️ **worker にも要る。** 管理画面で設定した接続先と鍵を読んで送るため
+   * （要決定 03）。無ければ DB を見ず、環境変数の設定だけで動く。
+   *
+   * ⚠️ **`baseEnvObject` へ移さない。** web にも渡ることになる。
+   * web は復号してよい側ではなく、渡せる場所を増やすほど漏れる先が増える。
+   */
+  INTEGRATION_ENCRYPTION_KEYS: z.string().min(1).optional(),
+  INTEGRATION_ENCRYPTION_ACTIVE_VERSION: z.string().min(1).default('v1'),
+
+  /**
    * 共通顧客HUB（代理店システム）への連携。
    *
    * ⚠️ **既定は OFF。** 指示書 §16 のとおり、機能フラグはすべて既定で無効にする。

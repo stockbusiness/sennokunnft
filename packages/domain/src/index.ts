@@ -390,3 +390,13 @@ export type {
   AuditLogPort,
   AuditLogReadPort,
 } from './ports/index';
+
+export {
+  CONNECTION_CHECK_KINDS,
+  isConnectionCheckKind,
+  classifyProbe,
+  canRunCheck,
+  type ConnectionCheckKind,
+  type ProbeOutcome,
+  type CheckVerdict,
+} from './integration/connection-check';
