@@ -15,7 +15,10 @@
  */
 export { PrismaAccountRepository } from './repositories/account.repository';
 export { PrismaCommonUserLinkRepository } from './repositories/common-user-link.repository';
-export { PrismaAuditLogRepository } from './repositories/audit.repository';
+export {
+  PrismaAuditLogRepository,
+  PrismaAuditLogReadRepository,
+} from './repositories/audit.repository';
 export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
@@ -25,6 +28,7 @@ export { PrismaNonceStore } from './repositories/nonce.repository';
 export { PrismaClaimRepository } from './repositories/claim.repository';
 
 export { PrismaWalletDeliveryOutboxRepository } from './repositories/wallet-delivery.repository';
+export { PrismaWalletDeliveryAdminRepository } from './repositories/wallet-delivery-admin.repository';
 
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';
 

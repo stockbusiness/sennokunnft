@@ -22,6 +22,9 @@ import {
   PrismaStaffMemberRepository,
   PrismaArtworkRepository,
   PrismaAuditLogRepository,
+  PrismaAuditLogReadRepository,
+  PrismaWalletDeliveryAdminRepository,
+  PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
   PrismaIdempotencyStore,
   PrismaClaimRepository,
@@ -215,6 +218,17 @@ async function bootstrap(): Promise<void> {
       staffMembers: new PrismaStaffMemberRepository(prisma),
       staffInvitations: new PrismaStaffInvitationRepository(prisma),
       integrations,
+      /*
+        送信の運用画面と監査ログ（管理画面・外部連携 指示書 §5）。
+
+        ⚠️ **読む口と送り直す口を分けて渡す。** 読む口は本文を返さない型で、
+           送り直す口は状態を戻すだけ。画面向けの経路から本文へ手が届かない。
+      */
+      walletDeliveries: {
+        admin: new PrismaWalletDeliveryAdminRepository(prisma),
+        outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
+      },
+      auditLogs: new PrismaAuditLogReadRepository(prisma),
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       tokenVerifier,

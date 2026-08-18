@@ -9,6 +9,8 @@
  * EVM のアドレス形式などを型で固定すると、決定前に選択肢を狭めてしまう。
  */
 
+import type { AuditLogPage, AuditLogQuery } from '../audit/read';
+
 /** 現在時刻。テストで固定できるようにポート化する。 */
 export interface ClockPort {
   now(): Date;
@@ -205,4 +207,15 @@ export interface AuditEntry {
 /** 運営操作の証跡。 */
 export interface AuditLogPort {
   record(entry: AuditEntry): Promise<void>;
+}
+
+/**
+ * 証跡を読む口。
+ *
+ * ⚠️ **書く口と分けてある。** 記録は業務処理のあちこちから呼ばれるが、
+ * 読み出しは管理画面だけが使う。ひとつの interface にすると、
+ * 記録したいだけの箇所が一覧の実装まで抱えることになる。
+ */
+export interface AuditLogReadPort {
+  list(query: AuditLogQuery): Promise<AuditLogPage>;
 }

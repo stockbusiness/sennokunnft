@@ -7,6 +7,14 @@ import {
   type StaffListResponse,
   type StaffMemberView,
   type UpdateStaffMemberRequest,
+  auditLogListResponseSchema,
+  resendWalletDeliveriesResponseSchema,
+  walletDeliveryListResponseSchema,
+  walletDeliverySchema,
+  type AuditLogListResponse,
+  type ResendWalletDeliveriesResponse,
+  type WalletDeliveryListResponse,
+  type WalletDeliveryView,
   adminArtworkListResponseSchema,
   adminArtworkSchema,
   adminListingListResponseSchema,
@@ -319,5 +327,76 @@ export function updateStaffMember(
     `/api/v1/admin/staff/${encodeURIComponent(accountId)}`,
     staffMemberSchema,
     json(request, 'PATCH'),
+  );
+}
+
+// --- 送信の運用と監査ログ（管理画面・外部連携 指示書 §5）---------------------
+//
+// ⚠️ **本文（payload）を取る経路をここに作らない。** API がそもそも
+//    返さないので取りようが無い——という状態を保つ。
+
+export interface WalletDeliveryFilter {
+  readonly statuses?: readonly string[];
+  readonly eventId?: string;
+  readonly cursor?: string;
+}
+
+export function fetchWalletDeliveries(
+  filter: WalletDeliveryFilter = {},
+): Promise<AdminResult<WalletDeliveryListResponse>> {
+  const params = new URLSearchParams();
+  for (const status of filter.statuses ?? []) {
+    params.append('status', status);
+  }
+  if (filter.eventId !== undefined && filter.eventId !== '') {
+    params.set('eventId', filter.eventId);
+  }
+  if (filter.cursor !== undefined && filter.cursor !== '') {
+    params.set('cursor', filter.cursor);
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/wallet-deliveries${query === '' ? '' : `?${query}`}`,
+    walletDeliveryListResponseSchema,
+  );
+}
+
+export function fetchWalletDelivery(id: string): Promise<AdminResult<WalletDeliveryView>> {
+  return callAdmin(
+    `/api/v1/admin/wallet-deliveries/${encodeURIComponent(id)}`,
+    walletDeliverySchema,
+  );
+}
+
+/**
+ * 手で送り直す。
+ *
+ * ⚠️ **結果を 1 件ずつ受け取る。** 「成功しました」で丸めると、
+ * 戻せなかった行があっても押した人には分からない。
+ */
+export function resendWalletDeliveries(
+  ids: readonly string[],
+): Promise<AdminResult<ResendWalletDeliveriesResponse>> {
+  return callAdmin(
+    '/api/v1/admin/wallet-deliveries/resend',
+    resendWalletDeliveriesResponseSchema,
+    json({ ids }, 'POST'),
+  );
+}
+
+export function fetchAuditLogs(
+  filter: { readonly action?: string; readonly cursor?: string } = {},
+): Promise<AdminResult<AuditLogListResponse>> {
+  const params = new URLSearchParams();
+  if (filter.action !== undefined && filter.action !== '') {
+    params.set('action', filter.action);
+  }
+  if (filter.cursor !== undefined && filter.cursor !== '') {
+    params.set('cursor', filter.cursor);
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/audit-logs${query === '' ? '' : `?${query}`}`,
+    auditLogListResponseSchema,
   );
 }
