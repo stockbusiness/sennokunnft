@@ -16,14 +16,23 @@ kill_timeout = "30s"
   dockerfile = "Dockerfile"
 
 [env]
-  # ⚠️ **段階1〜2 は `staging`。`production` にしない。**
-  #    `assertProductionSafety` は APP_ENV=production のとき
-  #    AUTH_PROVIDER=dev を拒否する。候補は現状 dev しか無いので、
-  #    ここを production にすると**起動せずに終了する**。
+  # ✅ **`production`（2026-08-18 に `staging` から変更）。**
   #
-  #    `production` へ切り替えるのは、UD-801（JWT の検証方式）を
-  #    解決して一般公開する時点。順序はこの仕組みで守られている。
-  APP_ENV = "staging"
+  #    以前ここが `staging` だったのは、`assertProductionSafety` が
+  #    APP_ENV=production のとき AUTH_PROVIDER=dev を拒否し、
+  #    当時は dev しか候補が無かったため。UD-801 が解決して
+  #    AUTH_PROVIDER=supabase になり、その制約は外れた。
+  #
+  # ⚠️ **この値は「どの環境か」の唯一の根拠。** 管理画面が
+  #    staging と production を出し分けるときもここを見る。
+  #    本番なのに `staging` と名乗っていると、危険な操作の前に出す
+  #    確認が「これは staging だから大丈夫」という誤解を招く。
+  #
+  # ⚠️ **`production` にすると起動条件が厳しくなる。**
+  #    LOG_LEVEL が trace/debug でないこと、DATABASE_URL が
+  #    ローカルを指していないこと、AUTH_PROVIDER が dev でないこと。
+  #    どれかを崩すと**起動せずに終了する**。
+  APP_ENV = "production"
   # Node の最適化のためのもので、APP_ENV とは別物。こちらは production でよい。
   NODE_ENV = "production"
   LOG_LEVEL = "info"
