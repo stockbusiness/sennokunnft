@@ -46,6 +46,16 @@ model Account {
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
   role         AccountRole   @default(buyer)
   status       AccountStatus @default(active)
+  /// 人に権限を配れるか（UD-803 決定 2026-08-18）。
+  /// ⚠️ 役割とは別の軸。役割は「作品や注文に何ができるか」、
+  /// こちらは「人事を触れるか」。4 つ目の役割にすると、operator に許した
+  /// 操作をすべて写す必要が生まれ、写し忘れが静かに残る。
+  /// ⚠️ CHECK で operator に限っている（accounts_owner_is_operator）。
+  isOwner      Boolean       @default(false) @map("is_owner")
+  /// 運営スタッフの業務用アドレス。**購入者の行には入らない**（CHECK で縛る）。
+  /// ⚠️ UD-503（購入者のメールを平文で持たない）は維持したまま、
+  /// オーナーが自分で入力したスタッフの連絡先だけを持つ。
+  staffEmail   String?       @map("staff_email")
 
   /// 共通顧客ID。**発行元は代理店システムのみ**で、本システムは受け取るだけ。
   /// ⚠️ 主キーにしない。外部が発行した値を主キーにすると、
@@ -71,11 +81,45 @@ model Account {
   auditLogs            AuditLog[]
   idempotencyKeys      IdempotencyKey[]
   createdArtworks      Artwork[]            @relation("ArtworkCreator")
+  sentInvitations      StaffInvitation[]    @relation("StaffInvitationInviter")
+  acceptedInvitations  StaffInvitation[]    @relation("StaffInvitationAcceptor")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
   @@index([commonUserId])
   @@map("accounts")
+}
+
+/// スタッフの招待（UD-803 決定 2026-08-18）。
+///
+/// ⚠️ **招待リンクのトークンを持たない。** 受諾は「そのアドレスで
+/// ログインできたこと」で判定する。トークンを配ると、転送・流出した
+/// リンクを拾った別人が権限を得られる。受信箱に届く経路そのものを
+/// 本人確認に使い、鍵を増やさない。
+model StaffInvitation {
+  id                  String      @id @default(uuid()) @db.Uuid
+  /// 招待した宛先。オーナーが自分で入力した値をそのまま残す。
+  email               String
+  /// 受諾したときに付く役割。buyer は CHECK で弾く。
+  role                AccountRole
+  /// pending / accepted / revoked / expired
+  status              String      @default("pending")
+  invitedByAccountId  String      @map("invited_by_account_id") @db.Uuid
+  acceptedByAccountId String?     @map("accepted_by_account_id") @db.Uuid
+  expiresAt           DateTime    @map("expires_at") @db.Timestamptz(6)
+  acceptedAt          DateTime?   @map("accepted_at") @db.Timestamptz(6)
+  /// 取り消し・期限切れで閉じた時刻。
+  closedAt            DateTime?   @map("closed_at") @db.Timestamptz(6)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invitedBy  Account  @relation("StaffInvitationInviter", fields: [invitedByAccountId], references: [id])
+  /// ⚠️ 受けた人のアカウントは、招待が残っているあいだ消せない（Restrict）。
+  /// SetNull にすると「誰かが受けたが、誰かは分からない」行が残る。
+  acceptedBy Account? @relation("StaffInvitationAcceptor", fields: [acceptedByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([status, expiresAt])
+  @@index([invitedByAccountId, createdAt])
+  @@map("staff_invitations")
 }
 
 // ============================================================================

@@ -89,7 +89,75 @@ describe('正しいトークン', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected success');
-    expect(Object.keys(result.identity)).toEqual(['subject', 'provider', 'expiresAt']);
+    // ⚠️ 取り出す項目を**明示的に**固定する。増やすときは、その値が
+    //    権限の根拠になりうるかを必ず考えること。
+    expect(Object.keys(result.identity)).toEqual(['subject', 'provider', 'expiresAt', 'email']);
+    expect(result.identity).not.toHaveProperty('role');
+    expect(result.identity).not.toHaveProperty('app_metadata');
+  });
+
+  /**
+   * 確認済みのメールアドレス（`UD-803`）。
+   *
+   * ⚠️ **招待の突き合わせにしか使わない値。** それでも、確認していない
+   * アドレスを返してしまうと、宛先を名乗るだけでスタッフの権限を取れる。
+   */
+  it('確認済みのメールアドレスだけを返す', async () => {
+    const token = await sign({
+      sub: SUBJECT,
+      iss: ISSUER,
+      aud: AUDIENCE,
+      email: 'staff@example.com',
+      email_verified: true,
+    });
+    const result = await verifier().verify(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.identity.email).toBe('staff@example.com');
+  });
+
+  it('`user_metadata` 側に確認済みの印がある場合も受け取る', async () => {
+    // Supabase は印をトップレベルにも `user_metadata` にも置く。
+    // 片方だけ見ると、確認済みの人が招待を受け取れなくなる。
+    const token = await sign({
+      sub: SUBJECT,
+      iss: ISSUER,
+      aud: AUDIENCE,
+      email: 'staff@example.com',
+      user_metadata: { email_verified: true },
+    });
+    const result = await verifier().verify(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.identity.email).toBe('staff@example.com');
+  });
+
+  it('確認されていないメールアドレスは返さない', async () => {
+    // ⚠️ ここが漏れると、宛先を名乗るだけで他人宛の招待を取れる。
+    const token = await sign({
+      sub: SUBJECT,
+      iss: ISSUER,
+      aud: AUDIENCE,
+      email: 'attacker@example.com',
+      email_verified: false,
+    });
+    const result = await verifier().verify(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.identity.email).toBeUndefined();
+  });
+
+  it('印そのものが無いときも返さない', async () => {
+    const token = await sign({
+      sub: SUBJECT,
+      iss: ISSUER,
+      aud: AUDIENCE,
+      email: 'unknown@example.com',
+    });
+    const result = await verifier().verify(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.identity.email).toBeUndefined();
   });
 });
 

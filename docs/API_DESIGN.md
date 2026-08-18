@@ -427,7 +427,36 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | PATCH    | `/api/v1/admin/listings/{id}`         | 出品更新（価格・状態）       |
 | GET      | `/api/v1/admin/orders`                | 注文一覧（絞り込み）         |
 | GET      | `/api/v1/admin/entitlements`          | 受取権一覧（受取・発行状況） |
+| DELETE   | `/api/v1/admin/artworks/{id}`         | 作品の削除（`UD-113`）       |
 | POST     | `/api/v1/admin/mint-jobs/{id}/retry`  | 発行ジョブの手動再試行       |
+
+#### スタッフの管理（要 operator ロール **かつ** オーナーの印）
+
+⚠️ **ロールだけでは通らない。** `accounts.is_owner` を追加で要求する
+（`UD-803`、AUTHORIZATION_DESIGN.md §2.6）。
+
+| メソッド | パス                                   | 説明                 |
+| -------- | -------------------------------------- | -------------------- |
+| GET      | `/api/v1/admin/staff`                  | スタッフと招待の一覧 |
+| POST     | `/api/v1/admin/staff/invitations`      | 招待を送る           |
+| DELETE   | `/api/v1/admin/staff/invitations/{id}` | 招待を取り消す       |
+| PATCH    | `/api/v1/admin/staff/{accountId}`      | 役割・オーナー・在籍 |
+
+#### 招待の引き取り（会員なら誰でも）
+
+| メソッド | パス                                 | 説明                   |
+| -------- | ------------------------------------ | ---------------------- |
+| POST     | `/api/v1/me/staff-invitation/accept` | 自分宛の招待を引き取る |
+
+✅ **事実:** 招待IDを受け取らない。引けるのは、トークンに入っている
+**確認済みのメールアドレス**に宛てた招待だけ。IDを受け取る形にすると、
+他人宛の招待IDを指定して権限を取れる。
+
+✅ **事実:** 待っている招待が無くても 200 を返す（`accepted: false`）。
+普通のログインでも毎回呼ぶため、失敗にすると画面が「エラー」を出す口実を持つ。
+
+⚠️ **「宛先が違う」と「招待が無い」を区別して返さない。**
+区別すると、どの宛先へ招待が出ているかを総当たりで探れる。
 
 ✅ **事実:** 管理APIは**認可ミドルウェアで一括保護**する。ルートごとに個別チェックを書かない。
 

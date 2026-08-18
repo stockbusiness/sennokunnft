@@ -31,6 +31,12 @@ export const ACTIONS = [
   'collection.view',
   'mint_job.retry',
   'audit_log.view',
+  // --- 人事（`UD-803` 決定 2026-08-18）。**オーナーだけ**が行える ---
+  // ⚠️ ロール表に載せるだけでは足りない。下の `OWNER_ONLY_ACTIONS` で
+  //    オーナーの印を追加で要求する。
+  'staff.view',
+  'staff.invite',
+  'staff.manage',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -40,6 +46,17 @@ export interface Actor {
   readonly accountId: string | null;
   /** アカウントが有効か。停止中は認証済みでも操作させない。 */
   readonly isActive: boolean;
+  /**
+   * 人に権限を配れるか（`UD-803`）。
+   *
+   * ⚠️ **ロールとは別の軸。** ロールは「作品や注文に何ができるか」、
+   * こちらは「人事を触れるか」。4 つ目のロールにすると、`operator` に
+   * 許した操作をすべて写す必要が生まれ、写し忘れが
+   * 「オーナーだけできない操作」として静かに残る。
+   *
+   * ⚠️ **正は DB（`accounts.is_owner`）。** トークンからは読まない。
+   */
+  readonly isOwner: boolean;
 }
 
 /**
@@ -49,7 +66,12 @@ export interface Resource {
   readonly ownerAccountId?: string | null;
 }
 
-export const ANONYMOUS: Actor = { role: 'anonymous', accountId: null, isActive: false };
+export const ANONYMOUS: Actor = {
+  role: 'anonymous',
+  accountId: null,
+  isActive: false,
+  isOwner: false,
+};
 
 /**
  * ロールごとに許可される操作。
@@ -90,6 +112,11 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'collection.view',
     'mint_job.retry',
     'audit_log.view',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    //    ロール表に載せるのは「運営の仕事のひとつである」ことを示すため。
+    'staff.view',
+    'staff.invite',
+    'staff.manage',
   ],
   auditor: [
     'artwork.view_public',
@@ -111,6 +138,18 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
  * 免除は**操作ごとに明示**する。「管理者だから何でも見てよい」という
  * 包括的な抜け道を作らないため。
  */
+/**
+ * オーナーの印を追加で要求する操作（`UD-803`）。
+ *
+ * ⚠️ **ロールの表とは別に持つ。** 「運営ならできる」と
+ * 「人事を触れる」を同じ表で表すと、運営に何か足すたびに
+ * 人事権まで一緒に配ってしまう危険がある。軸を分けておく。
+ *
+ * ⚠️ **一覧の閲覧もオーナーに限る。** スタッフ一覧には業務用の
+ * 連絡先が並ぶ。見せる相手を、配る相手と同じところまで絞る。
+ */
+const OWNER_ONLY_ACTIONS: readonly Action[] = ['staff.view', 'staff.invite', 'staff.manage'];
+
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {
   'order.view': { bypass: 'order.view_any' },
   // ⚠️ **`artwork.create_own` は所有権を要らない。** まだ作品が無いため。
@@ -133,7 +172,13 @@ export type AuthorizationDecision =
   { readonly allowed: true } | { readonly allowed: false; readonly reason: DenyReason };
 
 export type DenyReason =
-  'unauthenticated' | 'inactive_account' | 'role_not_permitted' | 'not_owner';
+  | 'unauthenticated'
+  | 'inactive_account'
+  | 'role_not_permitted'
+  /** 対象リソースの持ち主ではない。 */
+  | 'not_owner'
+  /** 人事を触れる印（オーナー）が無い。 */
+  | 'not_site_owner';
 
 function allow(): AuthorizationDecision {
   return { allowed: true };
@@ -165,6 +210,11 @@ export function can(actor: Actor, action: Action, resource: Resource = {}): Auth
   // 2. ロール判定
   if (!ROLE_ACTIONS[actor.role].includes(action)) {
     return deny('role_not_permitted');
+  }
+
+  // 2.5 オーナーの印（`UD-803`）
+  if (OWNER_ONLY_ACTIONS.includes(action) && !actor.isOwner) {
+    return deny('not_site_owner');
   }
 
   // 3. 所有権判定
@@ -210,6 +260,11 @@ export function canAtRoleLevel(actor: Actor, action: Action): AuthorizationDecis
   }
   if (!ROLE_ACTIONS[actor.role].includes(action)) {
     return deny('role_not_permitted');
+  }
+  // ⚠️ **ここでも印を見る。** 対象を読み込まなくても判定できるため、
+  //    ガードの段階で止められる。ハンドラ側の書き漏れに頼らない。
+  if (OWNER_ONLY_ACTIONS.includes(action) && !actor.isOwner) {
+    return deny('not_site_owner');
   }
   return allow();
 }

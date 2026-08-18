@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { SupabaseAuthGateway } from '../../../../src/auth/gateway';
 import { safeReturnPath } from '../../../../src/auth/session';
 import { writeSessionToResponse } from '../../../../src/auth/cookies';
+import { claimStaffInvitation } from '../../../../src/auth/invitation';
 import { getWebEnv } from '../../../../src/env';
 import { isSecureRequest, siteRedirect } from '../../../../src/redirect';
 
@@ -44,9 +45,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return redirectToLogin(next);
   }
 
+  // 招待されていた人なら、ここでスタッフになる（`UD-803`）。
+  // ⚠️ **失敗してもログインを止めない。** 招待が無いのが普通の状態。
+  const becameStaff = await claimStaffInvitation(result.data.accessToken);
+
   // ⚠️ 戻り先は `request.url` から組み立てる。`nextUrl` だとホストが
   //    変わることがあり、いま書いた Cookie が届かない（`siteRedirect`）。
-  const response = siteRedirect(next, { status: 303 });
+  //
+  // 招待を受け取った人は、出品欄ではなく運営の画面へ送る。
+  // 招待状のつもりで開いた人に、心当たりのない画面を見せないため。
+  const response = siteRedirect(becameStaff ? '/admin/artworks' : next, { status: 303 });
   return writeSessionToResponse(response, result.data, isSecureRequest(request));
 }
 

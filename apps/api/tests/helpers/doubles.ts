@@ -14,6 +14,10 @@ import type {
   ListingRepository,
   Page,
   PageQuery,
+  StaffInvitation,
+  StaffInvitationRepository,
+  StaffMember,
+  StaffMemberRepository,
 } from '@sengoku/domain';
 import { contentHash, InMemoryStorage } from '@sengoku/integrations';
 import type { AppDependencies } from '../../src/app.module';
@@ -173,13 +177,18 @@ export class InMemoryListingRepository implements ListingRepository {
 export class InMemoryAccountRepository implements AccountLookupPort {
   private readonly items = new Map<string, AccountRecord>();
 
-  seed(subject: string, role: Role, status: AccountRecord['status'] = 'active'): AccountRecord {
+  seed(
+    subject: string,
+    role: Role,
+    options: { status?: AccountRecord['status']; isOwner?: boolean } = {},
+  ): AccountRecord {
     const record: AccountRecord = {
       id: `account-${subject}`,
       authProvider: 'dev',
       authSubject: subject,
       role,
-      status,
+      status: options.status ?? 'active',
+      isOwner: options.isOwner ?? false,
     };
     this.items.set(`dev:${subject}`, record);
     return record;
@@ -197,10 +206,172 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       authSubject: subject,
       role: 'buyer',
       status: 'active',
+      isOwner: false,
     };
     this.items.set(`${provider}:${subject}`, record);
     return Promise.resolve(record);
   }
+
+  /** アカウントIDで引く。スタッフ側の代替実装が同じ保管庫を共有するため。 */
+  byId(accountId: string): AccountRecord | undefined {
+    return [...this.items.values()].find((item) => item.id === accountId);
+  }
+
+  replace(record: AccountRecord): void {
+    this.items.set(`${record.authProvider}:${record.authSubject}`, record);
+  }
+
+  all(): readonly AccountRecord[] {
+    return [...this.items.values()];
+  }
+}
+
+/**
+ * スタッフの代替実装。
+ *
+ * ⚠️ **アカウントの保管庫を共有する。** 別々に持つと、
+ * 「権限を上げたのにガードが古いロールを見る」というテストだけの世界ができ、
+ * 本物では起きない結果になる。
+ */
+export class InMemoryStaffMemberRepository implements StaffMemberRepository {
+  constructor(private readonly accounts: InMemoryAccountRepository) {}
+
+  private toMember(record: AccountRecord): StaffMember {
+    return {
+      accountId: record.id,
+      role: record.role === 'anonymous' ? 'buyer' : record.role,
+      status: record.status,
+      isOwner: record.isOwner,
+      staffEmail: this.emails.get(record.id) ?? null,
+    };
+  }
+
+  /** 連絡先は `AccountRecord` に無いので、ここで持つ。 */
+  private readonly emails = new Map<string, string>();
+
+  listStaff(): Promise<readonly StaffMember[]> {
+    return Promise.resolve(
+      this.accounts
+        .all()
+        .filter((item) => item.role === 'operator' || item.role === 'auditor')
+        .map((item) => this.toMember(item)),
+    );
+  }
+
+  findById(accountId: string): Promise<StaffMember | null> {
+    const record = this.accounts.byId(accountId);
+    return Promise.resolve(record === undefined ? null : this.toMember(record));
+  }
+
+  findByStaffEmail(email: string): Promise<StaffMember | null> {
+    const found = [...this.emails.entries()].find(
+      ([, value]) => value.toLowerCase() === email.toLowerCase(),
+    );
+    if (found === undefined) {
+      return Promise.resolve(null);
+    }
+    const record = this.accounts.byId(found[0]);
+    return Promise.resolve(record === undefined ? null : this.toMember(record));
+  }
+
+  async updateWithOwnerCount(
+    accountId: string,
+    decide: (
+      member: StaffMember,
+      activeOwnerCount: number,
+    ) => StaffMember | null | Promise<StaffMember | null>,
+  ): Promise<StaffMember> {
+    const record = this.accounts.byId(accountId);
+    if (record === undefined) {
+      throw new Error('staff member not found');
+    }
+    const activeOwnerCount = this.accounts
+      .all()
+      .filter((item) => item.isOwner && item.status === 'active').length;
+
+    const next = await decide(this.toMember(record), activeOwnerCount);
+    if (next === null) {
+      return this.toMember(record);
+    }
+    this.accounts.replace({
+      ...record,
+      role: next.role,
+      status: next.status,
+      isOwner: next.isOwner,
+    });
+    if (next.staffEmail === null) {
+      this.emails.delete(accountId);
+    } else {
+      this.emails.set(accountId, next.staffEmail);
+    }
+    return next;
+  }
+}
+
+export class InMemoryStaffInvitationRepository implements StaffInvitationRepository {
+  private readonly items = new Map<string, StaffInvitation>();
+
+  seed(invitation: StaffInvitation): StaffInvitation {
+    this.items.set(invitation.id, invitation);
+    return invitation;
+  }
+
+  list(): Promise<readonly StaffInvitation[]> {
+    return Promise.resolve([...this.items.values()]);
+  }
+
+  findById(id: string): Promise<StaffInvitation | null> {
+    return Promise.resolve(this.items.get(id) ?? null);
+  }
+
+  findOpenByEmail(email: string, now: Date): Promise<StaffInvitation | null> {
+    const found = [...this.items.values()].find(
+      (item) =>
+        item.status === 'pending' &&
+        item.email.toLowerCase() === email.toLowerCase() &&
+        item.expiresAt.getTime() > now.getTime(),
+    );
+    return Promise.resolve(found ?? null);
+  }
+
+  create(invitation: StaffInvitation, now: Date): Promise<StaffInvitation | null> {
+    for (const [id, item] of this.items) {
+      if (
+        item.status !== 'pending' ||
+        item.email.toLowerCase() !== invitation.email.toLowerCase()
+      ) {
+        continue;
+      }
+      if (item.expiresAt.getTime() <= now.getTime()) {
+        // 期限切れは閉じてから作り直す（実装は部分UNIQUEに阻まれるため）。
+        this.items.set(id, { ...item, status: 'expired', closedAt: now });
+        continue;
+      }
+      return Promise.resolve(null);
+    }
+    this.items.set(invitation.id, invitation);
+    return Promise.resolve(invitation);
+  }
+
+  update(invitation: StaffInvitation): Promise<StaffInvitation> {
+    this.items.set(invitation.id, invitation);
+    return Promise.resolve(invitation);
+  }
+
+  async acceptWithMember(
+    invitation: StaffInvitation,
+    member: StaffMember,
+  ): Promise<{ invitation: StaffInvitation; member: StaffMember }> {
+    const current = this.items.get(invitation.id);
+    if (current === undefined || current.status !== 'pending') {
+      throw new Error('invitation was already closed');
+    }
+    this.items.set(invitation.id, invitation);
+    const saved = await this.staff.updateWithOwnerCount(member.accountId, () => member);
+    return { invitation, member: saved };
+  }
+
+  constructor(private readonly staff: InMemoryStaffMemberRepository) {}
 }
 
 export class FixedClock implements ClockPort {
@@ -239,6 +410,8 @@ export interface TestHarness extends AppDependencies {
   readonly accounts: InMemoryAccountRepository;
   readonly storage: InMemoryStorage;
   readonly audit: InMemoryAuditLog;
+  readonly staffMembers: InMemoryStaffMemberRepository;
+  readonly staffInvitations: InMemoryStaffInvitationRepository;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -334,13 +507,17 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
 
 export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const listings = new InMemoryListingRepository();
+  const accounts = new InMemoryAccountRepository();
+  const staffMembers = new InMemoryStaffMemberRepository(accounts);
   return {
     version: '0.1.0',
     probes: [],
     artworks: new InMemoryArtworkRepository(listings),
     listings,
     idempotency: new InMemoryIdempotencyStore(),
-    accounts: new InMemoryAccountRepository(),
+    accounts,
+    staffMembers,
+    staffInvitations: new InMemoryStaffInvitationRepository(staffMembers),
     tokenVerifier,
     clock: new FixedClock(TEST_NOW),
     ids: new SequentialIds(),

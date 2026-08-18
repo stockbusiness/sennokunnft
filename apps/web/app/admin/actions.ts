@@ -38,7 +38,7 @@ function text(form: FormData, name: string): string {
 }
 
 function fail<T>(result: AdminResult<T>): AdminActionState {
-  return { error: result.ok ? undefined : adminErrorMessage(result.reason) };
+  return { error: result.ok ? undefined : adminErrorMessage(result.reason, result.code) };
 }
 
 export async function updateArtworkAction(

@@ -88,6 +88,7 @@ export class SupabaseTokenVerifier implements TokenVerifierPort {
           subject,
           provider: SUPABASE_AUTH_PROVIDER,
           expiresAt: new Date(payload.exp * 1000),
+          email: verifiedEmail(payload),
         },
       };
     } catch (error) {
@@ -138,4 +139,33 @@ function classify(error: unknown): TokenVerificationFailure | null {
   }
   // JWKSTimeout・ネットワーク不達などはこちら側の不調。投げ直す。
   return null;
+}
+
+/**
+ * 確認済みのメールアドレスだけを取り出す（`UD-803`）。
+ *
+ * ⚠️ **`email_verified` が真でなければ返さない。** Supabase は
+ * 未確認のアドレスでもトークンへ `email` を載せうる。確認していない値で
+ * 招待を突き合わせると、他人の宛先を名乗って権限を取れる。
+ *
+ * ⚠️ **見る場所を 1 つに決めない。** Supabase は確認済みの印を
+ * トップレベルにも `user_metadata` にも置く。片方だけ見ると、
+ * 確認済みの人が「未確認」として弾かれ、招待を受け取れなくなる。
+ *
+ * ⚠️ **ここで得た値をロールの判断に使わない。** 使ってよいのは
+ * 「招待の宛先と同じ人か」の突き合わせだけ。
+ */
+function verifiedEmail(payload: Record<string, unknown>): string | undefined {
+  const email = payload.email;
+  if (typeof email !== 'string' || email.length === 0) {
+    return undefined;
+  }
+
+  const metadata = payload.user_metadata;
+  const fromMetadata =
+    typeof metadata === 'object' && metadata !== null
+      ? (metadata as Record<string, unknown>).email_verified
+      : undefined;
+
+  return payload.email_verified === true || fromMetadata === true ? email : undefined;
 }

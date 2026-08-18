@@ -11,6 +11,18 @@ export interface VerifiedIdentity {
   readonly subject: string;
   readonly provider: string;
   readonly expiresAt: Date;
+  /**
+   * 認証プロバイダが確認済みのメールアドレス（あれば）。
+   *
+   * ⚠️ **権限の判断に使わない。** 使ってよいのは
+   * 「招待の宛先と同じ人か」の突き合わせだけ（`UD-803`）。
+   * ここからロールを導くと、認証プロバイダ側の設定ひとつで
+   * 権限昇格の経路になる。
+   *
+   * ⚠️ **確認済みのものだけを入れること。** 本人が自由に書ける欄を
+   * そのまま入れると、宛先を騙って招待を横取りできる。
+   */
+  readonly email?: string;
 }
 
 export type TokenVerificationFailure =
@@ -44,6 +56,8 @@ export interface AccountRecord {
   readonly authSubject: string;
   readonly role: Role;
   readonly status: 'active' | 'suspended';
+  /** 人に権限を配れるか（`UD-803`）。正は DB。 */
+  readonly isOwner: boolean;
 }
 
 export interface AccountLookupPort {

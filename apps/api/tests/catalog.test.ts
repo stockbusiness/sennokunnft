@@ -244,7 +244,7 @@ describe('管理API の認可（AUTHORIZATION_DESIGN §2.3）', () => {
   });
 
   it('停止中のアカウントでは呼べない', async () => {
-    harness.accounts.seed('suspended-op', 'operator', 'suspended');
+    harness.accounts.seed('suspended-op', 'operator', { status: 'suspended' });
     await request(app.getHttpServer())
       .get('/api/v1/admin/artworks')
       .set('Authorization', `Bearer ${tokenFor('suspended-op')}`)

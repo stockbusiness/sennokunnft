@@ -37,3 +37,7 @@ export {
 } from './client';
 
 export { ENTITLEMENT_CLAIM_SQL, MINT_JOB_ACQUIRE_SQL, IDEMPOTENCY_CONSTRAINTS } from './invariants';
+export {
+  PrismaStaffInvitationRepository,
+  PrismaStaffMemberRepository,
+} from './repositories/staff.repository';

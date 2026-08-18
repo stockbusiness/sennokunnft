@@ -32,6 +32,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <nav className="sengoku-admin__nav" aria-label="管理メニュー">
         <a href="/admin/artworks">作品</a>
         <a href="/admin/listings">販売</a>
+        {/*
+          ⚠️ 出しっぱなしでよい。開けるのはオーナーだけで、
+             ほかの人には「権限がありません」と出る。隠すことは保護ではない。
+        */}
+        <a href="/admin/staff">スタッフ</a>
         <a href="/">公開ページ</a>
       </nav>
       {children}

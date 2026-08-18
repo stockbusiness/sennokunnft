@@ -20,6 +20,15 @@ export interface DevTokenClaims {
   readonly iss: string;
   readonly aud: string;
   readonly exp: number;
+  /**
+   * 確認済みのメールアドレス（任意）。招待の突き合わせにだけ使う（`UD-803`）。
+   *
+   * ⚠️ **本物と同じ扱いにする。** ここを「常に確認済み」にすると、
+   * 手元では招待が通るのに本番では通らない、という差が生まれる。
+   * 本物と同じく `email_verified` が真のときだけ返す。
+   */
+  readonly email?: string;
+  readonly email_verified?: boolean;
 }
 
 export interface DevTokenVerifierOptions {
@@ -123,6 +132,10 @@ export class DevTokenVerifier implements TokenVerifierPort {
         subject: claims.sub,
         provider: 'dev',
         expiresAt: new Date(claims.exp * 1000),
+        email:
+          typeof claims.email === 'string' && claims.email.length > 0 && claims.email_verified
+            ? claims.email
+            : undefined,
       },
     };
   }

@@ -17,6 +17,8 @@ import {
   checkDatabaseConnection,
   createPrismaClient,
   PrismaAccountRepository,
+  PrismaStaffInvitationRepository,
+  PrismaStaffMemberRepository,
   PrismaArtworkRepository,
   PrismaAuditLogRepository,
   PrismaListingRepository,
@@ -169,6 +171,9 @@ async function bootstrap(): Promise<void> {
       artworks: new PrismaArtworkRepository(prisma),
       listings: new PrismaListingRepository(prisma),
       accounts: new PrismaAccountRepository(prisma),
+      // 運営スタッフの在籍と招待（`UD-803`）。
+      staffMembers: new PrismaStaffMemberRepository(prisma),
+      staffInvitations: new PrismaStaffInvitationRepository(prisma),
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       tokenVerifier,

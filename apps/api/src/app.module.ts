@@ -17,6 +17,8 @@ import type {
   IdGeneratorPort,
   ListingRepository,
   StoragePort,
+  StaffInvitationRepository,
+  StaffMemberRepository,
 } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
@@ -42,6 +44,8 @@ import { CreatorCatalogService } from './catalog/creator-catalog.service';
 import { CatalogController, PublicListingController } from './catalog/catalog.controller';
 import { CatalogService } from './catalog/catalog.service';
 import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.service';
+import { StaffController, StaffInvitationAcceptController } from './staff/staff.controller';
+import { StaffService } from './staff/staff.service';
 import { HealthController } from './health/health.controller';
 import { HealthService, type DependencyProbe } from './health/health.service';
 
@@ -59,6 +63,9 @@ export interface AppDependencies {
   readonly artworks: ArtworkRepository;
   readonly listings: ListingRepository;
   readonly accounts: AccountLookupPort;
+  /** 運営スタッフの在籍と招待（`UD-803`）。 */
+  readonly staffMembers: StaffMemberRepository;
+  readonly staffInvitations: StaffInvitationRepository;
   readonly idempotency: IdempotencyStore;
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
@@ -145,6 +152,8 @@ export class AppModule implements NestModule {
         PublicListingController,
         AdminCatalogController,
         CreatorCatalogController,
+        StaffController,
+        StaffInvitationAcceptController,
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -190,6 +199,17 @@ export class AppModule implements NestModule {
         {
           provide: IdempotencyService,
           useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
+        },
+        {
+          provide: StaffService,
+          useFactory: () =>
+            new StaffService(
+              deps.staffMembers,
+              deps.staffInvitations,
+              deps.ids,
+              deps.clock,
+              deps.audit,
+            ),
         },
         ...(claim === undefined
           ? []
