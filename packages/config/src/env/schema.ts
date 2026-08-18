@@ -56,19 +56,30 @@ const apiEnvObject = baseEnvObject.extend({
   API_PORT: integerFromEnv(1, 65535, 3001),
   API_PUBLIC_ORIGIN: z.url().default('http://localhost:3000'),
   DATABASE_URL: z.string().min(1),
+  /** 例: `https://<ref>.supabase.co`。末尾スラッシュなし。 */
   SUPABASE_URL: z.string().min(1).optional(),
+  /** 例: `https://<ref>.supabase.co/auth/v1`。トークンの `iss` と一致させる。 */
   SUPABASE_JWT_ISSUER: z.string().min(1).optional(),
-  SUPABASE_JWT_AUDIENCE: z.string().min(1).optional(),
+  /** Supabase の既定は `authenticated`。 */
+  SUPABASE_JWT_AUDIENCE: z.string().min(1).default('authenticated'),
+  /**
+   * 鍵束の場所。例: `https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`
+   *
+   * ⚠️ **公開情報であって秘密ではない。** 公開鍵しか含まない。
+   * だからこそ、この方式では api に秘密を配らずに済む。
+   */
   SUPABASE_JWKS_URL: z.string().min(1).optional(),
   /**
-   * 認証トークンの検証方式。
+   * 認証トークンの検証方式（`UD-801` 決定済 2026-08-18）。
    *
-   * 候補が `dev` しかないのは、検証方式（UD-801）が未決定で、
-   * 共有シークレットか JWKS かが決まっていないため。
-   * `dev` は誰でもトークンを作れるので、本番では使えないよう
-   * 起動時の組み合わせ検査で拒否する。
+   * - `supabase`: Supabase の JWKS（ES256）で検証する。**本番はこちら。**
+   * - `dev`: 開発用。**誰でもトークンを作れる。**
+   *
+   * ⚠️ `dev` は本番で使えないよう起動時の組み合わせ検査で拒否する。
+   * ⚠️ **既定を `supabase` にしない。** 手元やテストで設定が無いまま
+   * 起動できなくなる。既定は緩く、本番は検査で締める向きにしてある。
    */
-  AUTH_PROVIDER: z.enum(['dev']).default('dev'),
+  AUTH_PROVIDER: z.enum(['dev', 'supabase']).default('dev'),
   AUTH_DEV_SECRET: z.string().min(8).optional(),
   PAYMENT_PROVIDER: z.enum(['fake']).default('fake'),
   PAYMENT_WEBHOOK_SECRET: z.string().min(1).optional(),
@@ -230,6 +241,31 @@ const workerEnvObject = baseEnvObject.extend({
 
 const webEnvObject = baseEnvObject.extend({
   WEB_API_BASE_URL: z.url().default('http://localhost:3001'),
+
+  /**
+   * ログイン（Supabase Auth）。`UD-801` 決定済 2026-08-18。
+   *
+   * ⚠️ **`NEXT_PUBLIC_` を付けない。** 付けるとブラウザのバンドルに入る。
+   * ログインの送受信はすべてサーバー側で行い、トークンをブラウザの
+   * JavaScript へ渡さない。
+   */
+  SUPABASE_URL: z.url().optional(),
+  /**
+   * 公開鍵（anon / publishable key）。
+   *
+   * ⚠️ **秘密鍵（service_role）を入れない。** あれは行単位の権限を
+   * すべて飛び越える。ログインの送信に必要なのは公開鍵だけ。
+   * 名前が似ているので、取り違えると被害が大きい。
+   */
+  SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  /**
+   * メールのリンクの戻り先を組み立てるための、このサイトの入口。
+   * 例: `https://sennokunnft-web.vercel.app`（末尾スラッシュなし）
+   *
+   * ⚠️ **要求の Host ヘッダから組み立てない。** 偽の Host を送られると、
+   * ログインのリンクを攻撃者の場所へ向けさせられる。
+   */
+  WEB_PUBLIC_ORIGIN: z.url().optional(),
   /**
    * 表示に使うサイト名。
    *
@@ -242,11 +278,14 @@ const webEnvObject = baseEnvObject.extend({
    */
   NEXT_PUBLIC_SITE_NAME: z.string().min(1).optional(),
   /**
-   * 管理画面がAPIを呼ぶときの資格情報。
+   * 運営がAPIを呼ぶときの資格情報（ログインが入るまでの暫定）。
    *
    * ⚠️ **サーバー側でのみ読む。** `NEXT_PUBLIC_` を付けていないので
    * ブラウザのバンドルには入らない。
-   * 認証プロバイダへ本接続しない Phase 2 の暫定手段（UD-801）。
+   *
+   * ⚠️ **ログインした人がいるときは使わない。** これは 1 本しか無く、
+   * 全員が同じ人として扱われる。ログイン済みならその人のトークンを使う。
+   * ここへ落ちるのは、ログイン機能を有効にしていない環境だけ。
    */
   ADMIN_DEV_TOKEN: z.string().min(8).optional(),
 

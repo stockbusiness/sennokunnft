@@ -40,6 +40,12 @@ export {
   type DevTokenVerifierOptions,
 } from './dev-token-verifier';
 
+export {
+  SupabaseTokenVerifier,
+  SUPABASE_AUTH_PROVIDER,
+  type SupabaseTokenVerifierOptions,
+} from './supabase-token-verifier';
+
 export { LocalFileStorage, InMemoryStorage, generateStorageKey } from './local-storage';
 
 export { R2Storage, type R2StorageOptions } from './r2-storage';

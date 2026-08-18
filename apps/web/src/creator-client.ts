@@ -7,6 +7,7 @@ import {
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
+import { currentAccessToken } from './auth/current';
 
 /**
  * 出品者向け API（`/api/v1/creator/**`）の呼び出し。
@@ -15,15 +16,31 @@ import { getWebEnv } from './env';
  *
  * ⚠️ **画面を隠すことは保護ではない。** 画面を出さなくても API は直接叩ける。
  * 「その作品はあなたのものか」の判定は必ず API 側が行う。ここは入口を用意するだけ。
- *
- * ⚠️ **いまは利用者ごとの資格情報が無い（`UD-801` が未決定）。**
- * サーバー側の環境変数で渡した開発用トークン 1 本で動くため、
- * **合言葉の門の内側にいる全員が同じ出品者アカウントとして扱われる。**
- * 誰が登録したかは区別できない。ログインが入るまでの前提。
  */
 
-function creatorToken(): string | null {
-  const token = getWebEnv().ADMIN_DEV_TOKEN;
+/**
+ * いま操作している人の資格情報。
+ *
+ * ⚠️ **ログイン済みなら、必ずその人のトークンを使う。**
+ * 運営の資格情報（`ADMIN_DEV_TOKEN`）は 1 本しか無く、使うと全員が
+ * 同じ人として扱われる。ログインしているのにそちらへ落ちると、
+ * **自分の出品欄のつもりで他人の作品を触れてしまう。**
+ *
+ * ⚠️ **落ちる先を残しているのは、ログイン機能を有効にしていない環境のため。**
+ * Supabase の設定が入っていない手元では、従来どおり動かしたい。
+ * 設定が入った環境では `currentAccessToken()` が返るので、こちらは使われない。
+ */
+async function creatorToken(): Promise<string | null> {
+  const session = await currentAccessToken();
+  if (session !== null) {
+    return session;
+  }
+  const env = getWebEnv();
+  if (env.SUPABASE_URL !== undefined && env.SUPABASE_ANON_KEY !== undefined) {
+    // ログイン機能が有効な環境では、未ログインを運営の資格情報で埋めない。
+    return null;
+  }
+  const token = env.ADMIN_DEV_TOKEN;
   return token === undefined || token === '' ? null : token;
 }
 
@@ -49,7 +66,7 @@ async function call<T>(
   schema: z.ZodType<T>,
   init: RequestInit = {},
 ): Promise<CreatorResult<T>> {
-  const token = creatorToken();
+  const token = await creatorToken();
   if (token === null) {
     return { ok: false, reason: 'unauthorized' };
   }

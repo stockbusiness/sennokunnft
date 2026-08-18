@@ -551,6 +551,109 @@ Free は **1 週間アクセスが無いとプロジェクトが一時停止す�
 
 ---
 
+## 3-4. ログインを有効にする（`UD-801` 決定済 2026-08-18）
+
+✅ **検証方式は JWKS / ES256。** Supabase プロジェクトの署名鍵が
+ECC (P-256) へ交代済みのため、事実として決まっている。
+
+⚠️ **設定を入れるまで、いまの「全員が同じ出品者」の状態が続く。**
+`SUPABASE_URL` と `SUPABASE_ANON_KEY` の両方が入って初めて
+ログイン機能が有効になる。片方だけでは有効にならない。
+
+### 3-4-1. メールの文面を書き換える（**これを忘れると入れない**）
+
+Supabase の **Authentication → Emails → Magic Link** を開き、
+本文のリンクを次の形にする。
+
+```
+{{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink
+```
+
+⚠️ **既定の `{{ .ConfirmationURL }}` のままにしない。**
+あちらは `#` の後ろにトークンを付けて戻す。`#` から後ろは**サーバーに届かない**ため、
+こちらでは受け取れない。
+
+✅ **`{{ .TokenHash }}` を使うと、どのブラウザで開いても通る。**
+パソコンで申し込んでスマホのメールで開く、という普通の使い方で失敗しない。
+`{{ .ConfirmationURL }}` + PKCE の組み合わせでは、これができない。
+
+### 3-4-2. 戻り先を許可する
+
+**Authentication → URL Configuration** で:
+
+| 項目          | 値                                                    |
+| ------------- | ----------------------------------------------------- |
+| Site URL      | `https://sennokunnft-web.vercel.app`                  |
+| Redirect URLs | `https://sennokunnft-web.vercel.app/api/auth/confirm` |
+
+⚠️ **ここに無い戻り先は Supabase が弾く。** 弾かれた理由は
+利用者側には出ないので、「メールは届くのに入れない」に見える。
+
+### 3-4-3. Vercel に環境変数を入れる
+
+| 変数                | 値                                        | 秘密か |
+| ------------------- | ----------------------------------------- | ------ |
+| `SUPABASE_URL`      | `https://<ref>.supabase.co`               | 公開   |
+| `SUPABASE_ANON_KEY` | Settings → API Keys の anon / publishable | 公開   |
+| `WEB_PUBLIC_ORIGIN` | `https://sennokunnft-web.vercel.app`      | 公開   |
+
+⚠️ **`service_role` キーを入れない。** 行単位の権限をすべて飛び越える。
+名前が似ているので取り違えると被害が大きい。ログインに必要なのは公開鍵だけ。
+
+⚠️ **`WEB_PUBLIC_ORIGIN` を省かない。** 省くと要求の `Host` から
+組み立てる逃げ道に落ちる。偽の `Host` を送られると、ログインのリンクを
+攻撃者の場所へ向けさせられる。
+
+### 3-4-4. Fly（api）に環境変数を入れる
+
+⚠️ **この手順だけは、ログイン対応の api が本番へ出てからにする。**
+それより前の api は `AUTH_PROVIDER` に `dev` しか受け付けない。先に入れると
+**設定の検査で弾かれて起動しなくなる**（`Waiting for ... to become healthy: 0/1`
+のまま止まる）。3-4-1〜3-4-3 は先に済ませてよい。
+
+⚠️ **`<ref>` を置き換えるのを忘れない。実際にこれで api を落とした。**
+そのまま貼ると、存在しないホストへ鍵を取りに行く設定になる。
+`<ref>` はダッシュボードの住所に入っている文字列
+（`supabase.com/dashboard/project/<ref>/...`）。
+
+```bash
+fly secrets set --app sennokunnft-api AUTH_PROVIDER=supabase SUPABASE_JWT_ISSUER=https://<ref>.supabase.co/auth/v1 SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json
+```
+
+**起動しなくなったら、消せば戻る。**
+
+```bash
+fly secrets unset --app sennokunnft-api AUTH_PROVIDER SUPABASE_JWT_ISSUER SUPABASE_JWKS_URL
+```
+
+戻ったかどうかは `curl https://sennokunnft-api.fly.dev/healthz` で確かめる。
+
+⚠️ **設定が欠けたまま `AUTH_PROVIDER=supabase` にすると起動しない。**
+これは意図した動作。起動させると**すべてのログインが 401 になり**、
+利用者からは「自分の入力が悪い」ようにしか見えず、諦めるまで直らない。
+
+✅ **JWKS の URL は公開情報。** 公開鍵しか含まない。`fly secrets` に
+入れているのは扱いを揃えるためで、秘密だからではない。
+
+### 3-4-5. 確かめる
+
+1. 合言葉を通して `/creator` を開く → ログイン画面へ送られる
+2. メールアドレスを入れる → メールが届く
+3. **スマホで**リンクを開く → 出品一覧に入れる（別の端末でも通ることの確認）
+4. 作品を登録する
+5. **別のメールアドレスでログインし直す** → 1 の作品が**見えない**こと
+
+⚠️ **5 を省かない。** ここが通らないなら、全員が同じ出品欄を共有した
+ままになっている。見た目では気づけない。
+
+### ログインを有効にしたあとの `ADMIN_DEV_TOKEN`
+
+⚠️ **消してよい。** ログイン済みの人がいるときは使われない。
+残しておくと、`SUPABASE_*` を外したときに黙って「全員が同じ人」へ
+戻る経路が残る。
+
+---
+
 ## 4. 段階3 — OVEW Wallet と連携する
 
 ### 4-1. worker を立てる

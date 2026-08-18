@@ -5,6 +5,7 @@ import {
   assertClaimApiConfig,
   assertWalletDeliveryConfig,
   assertMediaStorageConfig,
+  assertSupabaseAuthConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
@@ -26,6 +27,7 @@ import {
 } from '@sengoku/database';
 import {
   DevTokenVerifier,
+  SupabaseTokenVerifier,
   InMemoryRateLimiter,
   LocalFileStorage,
   R2Storage,
@@ -75,6 +77,7 @@ async function bootstrap(): Promise<void> {
     //    起動すると画像のアップロードだけが失敗し、
     //    「画像の無い作品」ができあがる。表面化するのは配送の段。
     assertMediaStorageConfig(env);
+    assertSupabaseAuthConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       // 理由は変数名と説明のみで、値を含まない。
@@ -94,21 +97,40 @@ async function bootstrap(): Promise<void> {
     },
   ];
 
-  // 4. トークン検証。
-  //    検証方式が未決定（UD-801）のため開発用実装のみ。
-  //    本番で dev を使えないことは assertProductionSafety が保証している。
-  if (env.AUTH_DEV_SECRET === undefined) {
-    logger.fatal(
-      { variable: 'AUTH_DEV_SECRET' },
-      '認証に必要な環境変数が設定されていないため起動を中止しました',
-    );
-    process.exit(1);
+  // 4. トークン検証（`UD-801` 決定済 2026-08-18: JWKS / ES256）。
+  //
+  //    ⚠️ **本番で dev を使えないことは assertProductionSafety が保証している。**
+  //    ここで分岐を書き足しても、その保証は弱めない。
+  let tokenVerifier;
+  if (env.AUTH_PROVIDER === 'supabase') {
+    // 設定の欠けは assertSupabaseAuthConfig が起動時に止めている。
+    // ここに来た時点で揃っているが、型のために確かめる。
+    if (env.SUPABASE_JWKS_URL === undefined || env.SUPABASE_JWT_ISSUER === undefined) {
+      logger.fatal(
+        { variable: 'SUPABASE_JWKS_URL / SUPABASE_JWT_ISSUER' },
+        '認証に必要な環境変数が設定されていないため起動を中止しました',
+      );
+      process.exit(1);
+    }
+    tokenVerifier = new SupabaseTokenVerifier({
+      jwksUrl: env.SUPABASE_JWKS_URL,
+      issuer: env.SUPABASE_JWT_ISSUER,
+      audience: env.SUPABASE_JWT_AUDIENCE,
+    });
+  } else {
+    if (env.AUTH_DEV_SECRET === undefined) {
+      logger.fatal(
+        { variable: 'AUTH_DEV_SECRET' },
+        '認証に必要な環境変数が設定されていないため起動を中止しました',
+      );
+      process.exit(1);
+    }
+    tokenVerifier = new DevTokenVerifier({
+      secret: env.AUTH_DEV_SECRET,
+      issuer: env.SUPABASE_JWT_ISSUER ?? 'sennokunnft-dev',
+      audience: env.SUPABASE_JWT_AUDIENCE,
+    });
   }
-  const tokenVerifier = new DevTokenVerifier({
-    secret: env.AUTH_DEV_SECRET,
-    issuer: env.SUPABASE_JWT_ISSUER ?? 'sennokunnft-dev',
-    audience: env.SUPABASE_JWT_AUDIENCE ?? 'sennokunnft',
-  });
 
   // Claim（OVEW Wallet 連携）。既定は無効。
   // ✅ 相手側の署名器が v1.1 FINAL へ揃い、固定ベクトルが両システムで
