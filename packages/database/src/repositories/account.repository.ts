@@ -10,6 +10,8 @@ function toAccount(row: AccountRow): AccountRecord {
     // ⚠️ ロールは必ず DB の値を使う。トークンのクレームからは読まない。
     role: row.role,
     status: row.status,
+    // ⚠️ 人事の印も DB の値（`UD-803`）。
+    isOwner: row.isOwner,
   };
 }
 

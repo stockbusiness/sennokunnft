@@ -29,6 +29,22 @@ export const DOMAIN_ERROR_CODES = [
   'MINT_ALREADY_EXISTS',
   'MINT_ATTEMPTS_EXHAUSTED',
   'IDEMPOTENCY_CONFLICT',
+  // --- 運営スタッフの招待と権限（`UD-803` 決定 2026-08-18）---
+  'STAFF_INVITE_INVALID',
+  /**
+   * その招待はいま受け取れない。
+   *
+   * ⚠️ **「宛先が違う」と「招待が無い」を分けない。** 分けると、
+   * どの宛先に招待が出ているかを総当たりで探れる。
+   */
+  'STAFF_INVITE_NOT_OPEN',
+  'STAFF_INVITE_EXPIRED',
+  'STAFF_INVITE_DUPLICATE',
+  'STAFF_ALREADY_MEMBER',
+  'STAFF_NOT_MEMBER',
+  'STAFF_SELF_CHANGE',
+  'STAFF_LAST_OWNER',
+  'STAFF_OWNER_MUST_BE_OPERATOR',
   'IMAGE_INVALID',
   'IMAGE_TOO_LARGE',
   'IMAGE_UNSUPPORTED_TYPE',

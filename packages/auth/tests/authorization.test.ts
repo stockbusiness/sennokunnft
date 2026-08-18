@@ -19,7 +19,7 @@ function actor(role: Role, overrides: Partial<Actor> = {}): Actor {
   if (role === 'anonymous') {
     return { ...ANONYMOUS, ...overrides };
   }
-  return { role, accountId: SELF, isActive: true, ...overrides };
+  return { role, accountId: SELF, isActive: true, isOwner: false, ...overrides };
 }
 
 /**
@@ -46,6 +46,12 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'collection.view': { anonymous: false, buyer: true, operator: true, auditor: true },
   'mint_job.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
   'audit_log.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ **人事はロールだけでは通らない**（`UD-803`）。
+  //    この表は「オーナーの印が無い人」の判定なので、operator でも拒否になる。
+  //    印を持つ場合は下の別の組で確かめる。
+  'staff.view': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'staff.invite': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'staff.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
 };
 
 describe('権限マトリクスの全セル検証（Z-1）', () => {
@@ -198,7 +204,7 @@ describe('ガードが使う役割段階の判定', () => {
   });
 
   it('停止中のアカウントは入口で止まる', () => {
-    const suspended = { role: 'buyer' as const, accountId: SELF, isActive: false };
+    const suspended = { role: 'buyer' as const, accountId: SELF, isActive: false, isOwner: false };
     expect(canAtRoleLevel(suspended, 'claim.reissue').allowed).toBe(false);
   });
 
@@ -213,5 +219,55 @@ describe('ガードが使う役割段階の判定', () => {
     // ⚠️ 入口を通ったことは「呼んでよい」までしか意味しない。
     expect(canAtRoleLevel(actor('buyer'), 'claim.reissue').allowed).toBe(true);
     expect(isAllowed(actor('buyer'), 'claim.reissue', { ownerAccountId: OTHER })).toBe(false);
+  });
+});
+
+/**
+ * 人事（`UD-803`）。
+ *
+ * ⚠️ **この組の主題は「印が無ければ通らない」こと。**
+ * ここが緩むと、運営の 1 人が乗っ取られただけで全権限を配り直される。
+ */
+describe('オーナーの印', () => {
+  const STAFF_ACTIONS = ['staff.view', 'staff.invite', 'staff.manage'] as const;
+
+  for (const action of STAFF_ACTIONS) {
+    it(`印を持つ operator は ${action} を行える`, () => {
+      expect(isAllowed(actor('operator', { isOwner: true }), action)).toBe(true);
+    });
+
+    it(`印が無い operator は ${action} を行えない`, () => {
+      expect(isAllowed(actor('operator'), action)).toBe(false);
+    });
+
+    it(`印を持っていても auditor は ${action} を行えない`, () => {
+      // ⚠️ DB の CHECK でも縛っているが、判定側でも塞いでおく。
+      //    片方だけの守りは、もう片方を直したときに黙って消える。
+      expect(isAllowed(actor('auditor', { isOwner: true }), action)).toBe(false);
+    });
+
+    it(`印を持っていても buyer は ${action} を行えない`, () => {
+      expect(isAllowed(actor('buyer', { isOwner: true }), action)).toBe(false);
+    });
+
+    it(`ガードの段階（対象を読む前）でも ${action} を止める`, () => {
+      // ハンドラ側の書き漏れに頼らない。
+      const decision = canAtRoleLevel(actor('operator'), action);
+      expect(decision.allowed).toBe(false);
+      if (decision.allowed) return;
+      expect(decision.reason).toBe('not_site_owner');
+    });
+  }
+
+  it('停止中のオーナーは人事を行えない', () => {
+    expect(isAllowed(actor('operator', { isOwner: true, isActive: false }), 'staff.manage')).toBe(
+      false,
+    );
+  });
+
+  it('印は他の操作の可否を変えない', () => {
+    // 人事の軸を足したことで、作品の権限まで広がっていないこと。
+    expect(isAllowed(actor('auditor', { isOwner: true }), 'artwork.manage')).toBe(false);
+    expect(isAllowed(actor('buyer', { isOwner: true }), 'artwork.manage')).toBe(false);
   });
 });

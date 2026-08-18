@@ -688,6 +688,16 @@ button {
   vertical-align: top;
 }
 
+/*
+  ⚠️ **見出しを折り返させない。**
+  折り返すと、狭い画面で「状 態」のように一文字ずつ縦に割れて読めなくなる。
+  折り返さなければ、表は squeeze ではなく横スクロールに倒れる。
+  ページ自体は `.sengoku-table-scroll` の中で止まるので、はみ出さない。
+*/
+.sengoku-table th {
+  white-space: nowrap;
+}
+
 .sengoku-definition-list {
   margin: var(--sengoku-space-4) 0;
 }
@@ -840,6 +850,29 @@ button {
   background: var(--sengoku-bengara);
   border-color: var(--sengoku-bengara);
   color: #fff;
+}
+
+/*
+  表の中に並ぶ操作。
+  ⚠️ **1 行に詰め込まない。** スマホ幅では横に並べると押し間違える。
+  折り返して、指の幅ぶんの間隔を空ける。
+*/
+.sengoku-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sengoku-space-2);
+}
+
+.sengoku-inline-form {
+  margin: 0;
+}
+
+/* 表の中のボタンは、本文のボタンより控えめにする。 */
+.sengoku-actions .sengoku-button,
+.sengoku-inline-form .sengoku-button {
+  min-height: 44px;
+  padding: 0 var(--sengoku-space-4);
+  font-size: var(--sengoku-text-small);
 }
 
 /* ログアウトは目立たせない。日常的に押すものではない。 */

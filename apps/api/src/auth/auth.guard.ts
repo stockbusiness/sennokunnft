@@ -36,6 +36,15 @@ export const RequireAction = (action: Action): MethodDecorator & ClassDecorator 
 
 export interface AuthenticatedRequest extends Request {
   actor?: Actor;
+  /**
+   * 認証プロバイダが確認済みのメールアドレス（`UD-803`）。
+   *
+   * ⚠️ **`Actor` へ入れない。** `Actor` は認可判定に渡る値なので、
+   * そこにアドレスがあると、いつか誰かが「このドメインの人は運営」
+   * のような判定を書く。権限の根拠になりうる場所へ置かない。
+   * ここに置いてよい用途は、招待の宛先との突き合わせだけ。
+   */
+  verifiedEmail?: string;
 }
 
 /** ハンドラの引数として現在のアクターを受け取る。 */
@@ -44,6 +53,16 @@ export const CurrentActor = createParamDecorator(
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     return request.actor ?? ANONYMOUS;
   },
+);
+
+/**
+ * 確認済みのメールアドレスを受け取る（`UD-803`）。
+ *
+ * ⚠️ **認可に使わない。** 使ってよいのは招待の宛先との突き合わせだけ。
+ */
+export const CurrentVerifiedEmail = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): string | undefined =>
+    context.switchToHttp().getRequest<AuthenticatedRequest>().verifiedEmail,
 );
 
 /**
@@ -98,6 +117,10 @@ export class AuthGuard implements CanActivate {
   }
 
   private async resolveActor(request: AuthenticatedRequest, isPublic: boolean): Promise<Actor> {
+    // ⚠️ 毎回消してから始める。前の要求の値が残ると、別人の宛先で
+    //    招待を引き取れてしまう（同じ request が再利用されることは無いが、
+    //    ここを暗黙の前提にしない）。
+    request.verifiedEmail = undefined;
     const token = extractBearerToken(request.headers.authorization);
     if (token === null) {
       if (isPublic) {
@@ -117,6 +140,8 @@ export class AuthGuard implements CanActivate {
     }
 
     const { provider, subject } = verified.identity;
+    // 招待の突き合わせにだけ使う。認可には渡さない（`AuthenticatedRequest` 参照）。
+    request.verifiedEmail = verified.identity.email;
     const existing = await this.accounts.findByAuthSubject(provider, subject);
     // 初回アクセスならここで作る。作られるロールは常に buyer。
     const account = existing ?? (await this.accounts.provision(provider, subject));
@@ -126,6 +151,8 @@ export class AuthGuard implements CanActivate {
       role: account.role,
       accountId: account.id,
       isActive: account.status === 'active',
+      // 人事の印も DB の値（`UD-803`）。ここもトークンから読まない。
+      isOwner: account.isOwner,
     };
   }
 }

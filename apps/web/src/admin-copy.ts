@@ -61,16 +61,45 @@ export const ADMIN_COPY = {
 
 export type AdminFailureReason = 'unauthorized' | 'not_found' | 'rejected' | 'unavailable';
 
+/**
+ * 断られた理由を、その符号ごとの言葉に置き換える。
+ *
+ * ⚠️ **API の本文をそのまま出さない。** 出す言葉はここで決める。
+ * 符号だけを受け取り、対応する日本語を引き当てる。
+ * ここに無い符号は、当たり障りのない言い方へ落とす。
+ */
+const REJECTED_MESSAGES: Readonly<Record<string, string>> = {
+  ARTWORK_NOT_DELETABLE:
+    'この作品は削除できません。公開中のもの、お支払い待ちや発行済みがあるものは削除できません。',
+  ARTWORK_SUPPLY_IMMUTABLE: '公開したあとは、発行する数を変更できません。',
+  ARTWORK_NOT_PUBLISHED: 'この作品はまだ公開されていません。先に公開してください。',
+  // --- スタッフ（`UD-803`）---
+  STAFF_INVITE_DUPLICATE: 'その宛先には、すでに招待をお送りしています。',
+  STAFF_INVITE_INVALID: 'この内容では招待できません。宛先とお任せすることをご確認ください。',
+  STAFF_INVITE_NOT_OPEN: 'この招待はお使いいただけません。もう一度お送りください。',
+  STAFF_INVITE_EXPIRED: 'この招待は期限が過ぎています。もう一度お送りください。',
+  STAFF_ALREADY_MEMBER: 'この方はすでにスタッフです。',
+  STAFF_NOT_MEMBER: 'この方はスタッフではありません。招待からお迎えください。',
+  STAFF_SELF_CHANGE: 'ご自身の権限は変更できません。ほかのオーナーにお願いしてください。',
+  STAFF_LAST_OWNER:
+    'オーナーが居なくなるため、この変更はできません。先にもうひとりオーナーを立ててください。',
+  STAFF_OWNER_MUST_BE_OPERATOR: 'オーナーにできるのは運営の方だけです。',
+};
+
 /** 操作が通らなかったときに画面へ出す言葉。理由の中身は写さない。 */
-export function adminErrorMessage(reason: AdminFailureReason): string {
+export function adminErrorMessage(reason: AdminFailureReason, code?: string): string {
   switch (reason) {
     case 'unauthorized':
       return '管理機能を利用する権限がありません。ログインし直すか、設定をご確認ください。';
     case 'not_found':
-      return 'その作品は見つかりませんでした。すでに消えている可能性があります。';
-    case 'rejected':
-      // ⚠️ どの条件で弾かれたかを断定しない。API 側の判定の中身を画面へ写さない。
-      return 'この操作は受け付けられませんでした。作品の状態をご確認のうえ、もう一度お試しください。';
+      return 'その対象は見つかりませんでした。すでに消えている可能性があります。';
+    case 'rejected': {
+      const known = code === undefined ? undefined : REJECTED_MESSAGES[code];
+      // ⚠️ 知らない符号のときに、勝手な理由を断定しない。
+      return (
+        known ?? 'この操作は受け付けられませんでした。内容をご確認のうえ、もう一度お試しください。'
+      );
+    }
     case 'unavailable':
       return 'ただいま処理できませんでした。しばらくしてからもう一度お試しください。';
   }

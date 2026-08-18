@@ -74,6 +74,34 @@ export { archiveArtworkAndEndListings, type ArchivedCatalogEntry } from './catal
 export { prepareArtworkDeletion, type DeletableCatalogEntry } from './catalog/deletion';
 
 export {
+  INVITABLE_ROLES,
+  INVITATION_LIFETIME_DAYS,
+  acceptInvitation,
+  createInvitation,
+  expireInvitation,
+  isExpired as isInvitationExpired,
+  isInvitableRole,
+  isOpen as isInvitationOpen,
+  normalizeEmail,
+  revokeInvitation,
+  type AcceptInvitationInput,
+  type AcceptedInvitation,
+  type CreateInvitationInput,
+  type InvitableRole,
+  type InvitationStatus,
+  type StaffInvitation,
+} from './staff/invitation';
+export {
+  applyInvitationToMember,
+  changeMembership,
+  type ChangeMembershipInput,
+  type MemberRole,
+  type MemberStatus,
+  type StaffMember,
+} from './staff/membership';
+export { type StaffInvitationRepository, type StaffMemberRepository } from './ports/staff';
+
+export {
   createListing,
   updateListing,
   activateListing,

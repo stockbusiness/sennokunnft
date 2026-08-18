@@ -1,4 +1,12 @@
 import {
+  staffListResponseSchema,
+  staffInvitationSchema,
+  staffMemberSchema,
+  type CreateStaffInvitationRequest,
+  type StaffInvitationView,
+  type StaffListResponse,
+  type StaffMemberView,
+  type UpdateStaffMemberRequest,
   adminArtworkListResponseSchema,
   adminArtworkSchema,
   adminListingListResponseSchema,
@@ -30,6 +38,14 @@ export type AdminResult<T> =
       readonly ok: false;
       readonly reason: 'unauthorized' | 'not_found' | 'rejected' | 'unavailable';
       readonly message?: string;
+      /**
+       * API が返した符号（`{ error: { code } }`）。
+       *
+       * ⚠️ **本文の文言をそのまま画面へ出さない。** 内部情報が混ざりうる。
+       * 画面へ出す言葉は、こちらの符号から**web 側で**引き当てる。
+       * 符号だけなら、何が起きたかを伝えつつ、中身は漏れない。
+       */
+      readonly code?: string;
     };
 
 /**
@@ -69,6 +85,22 @@ async function credentials(): Promise<string[]> {
     tokens.push(shared);
   }
   return tokens;
+}
+
+/**
+ * `{ error: { code } }` の符号だけを取り出す。
+ *
+ * ⚠️ **`message` は読まない。** 画面へ出す言葉は web 側で決める。
+ * 本文をそのまま流すと、いつか内部の詳細が画面に出る。
+ */
+async function errorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json();
+    const error = (body as { error?: { code?: unknown } }).error;
+    return typeof error?.code === 'string' ? error.code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 応答の状態コードを、画面が扱える理由に翻訳する。 */
@@ -121,8 +153,8 @@ async function callAdmin<T>(
       if (lastReason === 'unauthorized') {
         continue;
       }
-      // ⚠️ エラー本文はそのまま画面へ出さない。内部情報が混ざりうる。
-      return { ok: false, reason: lastReason };
+      // ⚠️ エラー本文はそのまま画面へ出さない。符号だけを取り出す。
+      return { ok: false, reason: lastReason, code: await errorCode(response) };
     }
 
     if (schema === null) {
@@ -245,4 +277,39 @@ export function endAdminListing(id: string): Promise<AdminResult<AdminListing>> 
   return callAdmin(`/api/v1/admin/listings/${encodeURIComponent(id)}/end`, adminListingSchema, {
     method: 'POST',
   });
+}
+
+// --- 運営スタッフ（`UD-803`）------------------------------------------------
+//
+// ⚠️ **これらはオーナーの印を持つ人しか通らない。** 印が無ければ API が
+//    403 を返し、画面には「権限がありません」と出る。画面側で隠すのは
+//    導線を分かりやすくするためであって、保護ではない。
+
+export function fetchStaff(): Promise<AdminResult<StaffListResponse>> {
+  return callAdmin('/api/v1/admin/staff', staffListResponseSchema);
+}
+
+export function inviteStaff(
+  request: CreateStaffInvitationRequest,
+): Promise<AdminResult<StaffInvitationView>> {
+  return callAdmin('/api/v1/admin/staff/invitations', staffInvitationSchema, json(request, 'POST'));
+}
+
+export function revokeStaffInvitation(id: string): Promise<AdminResult<StaffInvitationView>> {
+  return callAdmin(
+    `/api/v1/admin/staff/invitations/${encodeURIComponent(id)}`,
+    staffInvitationSchema,
+    { method: 'DELETE' },
+  );
+}
+
+export function updateStaffMember(
+  accountId: string,
+  request: UpdateStaffMemberRequest,
+): Promise<AdminResult<StaffMemberView>> {
+  return callAdmin(
+    `/api/v1/admin/staff/${encodeURIComponent(accountId)}`,
+    staffMemberSchema,
+    json(request, 'PATCH'),
+  );
 }
