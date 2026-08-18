@@ -52,13 +52,23 @@ export type AdminResult<T> =
  * 運営の資格情報（環境変数の共有トークン）。
  *
  * ⚠️ **これは 1 本しか無く、使った全員が同じ人として扱われる。**
- * 監査ログの「誰が」がひとつに潰れるので、本来はログインした運営者の
- * トークンを使いたい。残してあるのは、まだ `operator` へ昇格した
- * アカウントが無い環境と、ログイン機能を有効にしていない手元のため
- * （`UD-801` の移行期間）。
+ * 監査ログの「誰が」がひとつに潰れる。
+ *
+ * ⚠️ **ログイン機能が有効な環境では使わない**（2026-08-18 に変更）。
+ * 以前は「ログインが断られたときの逃げ道」として残していたが、それだと
+ * `SUPABASE_*` を外したときに**黙って「全員が同じ人」へ戻る**。
+ * 静かに弱くなる経路は、いつか誰も気づかないまま本番に残る。
+ *
+ * 残してあるのは、ログイン機能を有効にしていない手元のため。
+ * `SUPABASE_URL` と `SUPABASE_ANON_KEY` が入っていれば、こちらは使われない。
+ * これは出品者向け（`creator-client`）と同じ規則にそろえてある。
  */
 function sharedOperatorToken(): string | null {
-  const token = getWebEnv().ADMIN_DEV_TOKEN;
+  const env = getWebEnv();
+  if (env.SUPABASE_URL !== undefined && env.SUPABASE_ANON_KEY !== undefined) {
+    return null;
+  }
+  const token = env.ADMIN_DEV_TOKEN;
   return token === undefined || token === '' ? null : token;
 }
 
@@ -68,11 +78,9 @@ function sharedOperatorToken(): string | null {
  * ⚠️ **ログイン済みなら、まずその人のトークンを試す。**
  * 共有トークンを先に使うと、誰が操作したのかが監査ログに残らない。
  *
- * ⚠️ **共有トークンへ落ちるのは、断られたときだけ。**
- * ログインしている人が `operator` でなければ API が 401/403 を返すので、
- * そのときにもう一度だけ共有トークンで試す。先に落ちてしまうと、
- * 運営として昇格済みのアカウントでログインしていても、
- * 操作がすべて共有トークンの名義になってしまう。
+ * ⚠️ **ログイン機能が有効な環境では、共有トークンが並びに入らない。**
+ * `sharedOperatorToken` が `null` を返すため、本番では実質この 1 本だけ。
+ * 手元（ログイン未設定）では今までどおり共有トークンが使える。
  */
 async function credentials(): Promise<string[]> {
   const tokens: string[] = [];
