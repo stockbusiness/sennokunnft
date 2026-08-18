@@ -88,6 +88,18 @@ export class InMemoryArtworkRepository implements ArtworkRepository {
     return artwork;
   }
 
+  /** 実装は 1 トランザクションで消す。ここでは順に消すだけ。 */
+  async deleteWithListings(artworkId: string, listingIds: readonly string[]): Promise<void> {
+    for (const listingId of listingIds) {
+      await this.listings.remove(listingId, artworkId);
+    }
+    this.items.delete(artworkId);
+    const index = this.order.indexOf(artworkId);
+    if (index >= 0) {
+      this.order.splice(index, 1);
+    }
+  }
+
   private paginate(query: PageQuery, predicate: (item: Artwork) => boolean): Page<Artwork> {
     const all = this.order
       .map((id) => this.items.get(id))
@@ -146,6 +158,15 @@ export class InMemoryListingRepository implements ListingRepository {
   update(listing: Listing): Promise<Listing> {
     this.items.set(listing.id, listing);
     return Promise.resolve(listing);
+  }
+
+  /** 作品の削除に伴う後始末。作品IDが一致しないものは消さない。 */
+  remove(id: string, artworkId: string): Promise<void> {
+    const found = this.items.get(id);
+    if (found !== undefined && found.artworkId === artworkId) {
+      this.items.delete(id);
+    }
+    return Promise.resolve();
   }
 }
 

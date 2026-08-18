@@ -15,6 +15,7 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   ARTWORK_NOT_AVAILABLE: HttpStatus.NOT_FOUND,
   ARTWORK_NOT_PUBLISHED: HttpStatus.CONFLICT,
   ARTWORK_SUPPLY_IMMUTABLE: HttpStatus.CONFLICT,
+  ARTWORK_NOT_DELETABLE: HttpStatus.CONFLICT,
   LISTING_NOT_ACTIVE: HttpStatus.CONFLICT,
   LISTING_NOT_EDITABLE: HttpStatus.CONFLICT,
   LISTING_PERIOD_INVALID: HttpStatus.BAD_REQUEST,
@@ -54,6 +55,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ARTWORK_NOT_AVAILABLE: 'お探しの作品は見つかりませんでした。',
   ARTWORK_NOT_PUBLISHED: 'この作品はまだ公開されていません。先に公開してください。',
   ARTWORK_SUPPLY_IMMUTABLE: '公開後の作品は発行数を変更できません。',
+  ARTWORK_NOT_DELETABLE:
+    'この作品は削除できません。公開中のもの、お支払い待ちや発行済みがあるものは削除できません。',
   LISTING_NOT_ACTIVE: 'この作品は現在販売していません。',
   LISTING_NOT_EDITABLE:
     '販売中または終了した内容は変更できません。一度停止してから変更してください。',

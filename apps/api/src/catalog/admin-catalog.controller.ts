@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -131,6 +132,22 @@ export class AdminCatalogController {
     return this.withIdempotency(actor, idempotencyKey, `artwork.archive:${id}`, null, () =>
       this.admin.archiveArtwork(id, requireActorId(actor)),
     );
+  }
+
+  /**
+   * 作品を完全に消す。
+   *
+   * ⚠️ **`DELETE` に冪等キーを付けていない。** 2 回目は対象が無く
+   * 404 になるだけで、二重に何かが起きることはない。
+   *
+   * ⚠️ **本文を返さない（204）。** 消したものの内容を返しても使い道が無く、
+   * 「まだ在る」と読み違える余地を残すだけ。
+   */
+  @Delete('artworks/:id')
+  @HttpCode(204)
+  @RequireAction('artwork.manage')
+  deleteArtwork(@Param('id') id: string, @CurrentActor() actor: Actor): Promise<void> {
+    return this.admin.deleteArtwork(id, requireActorId(actor));
   }
 
   /**

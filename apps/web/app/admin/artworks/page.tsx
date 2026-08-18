@@ -1,6 +1,6 @@
 import { EmptyState, PageHeader, StatusBadge } from '@sengoku/ui';
 import { fetchAdminArtworks } from '../../../src/admin-client';
-import { ADMIN_COPY, artworkStatusLabel } from '../../../src/admin-copy';
+import { ADMIN_COPY, artworkStatusLabel, shortAccountId } from '../../../src/admin-copy';
 
 export default async function AdminArtworksPage() {
   const result = await fetchAdminArtworks();
@@ -25,6 +25,7 @@ export default async function AdminArtworksPage() {
             <thead>
               <tr>
                 <th scope="col">作品名</th>
+                <th scope="col">{ADMIN_COPY.creatorColumn}</th>
                 <th scope="col">状態</th>
                 <th scope="col">残り / 全数</th>
                 <th scope="col"> </th>
@@ -34,6 +35,11 @@ export default async function AdminArtworksPage() {
               {result.data.items.map((artwork) => (
                 <tr key={artwork.id}>
                   <td>{artwork.title}</td>
+                  {/*
+                    ⚠️ 氏名・メールアドレスは出せない。平文で保持していないため（`UD-503`）。
+                       運営が見分けられるのはアカウントIDだけ。
+                  */}
+                  <td>{shortAccountId(artwork.creatorAccountId)}</td>
                   <td>
                     <StatusBadge
                       label={artworkStatusLabel(artwork.status)}
@@ -44,7 +50,7 @@ export default async function AdminArtworksPage() {
                     {artwork.availableSupply} / {artwork.maxSupply}
                   </td>
                   <td>
-                    <a href={`/admin/artworks/${artwork.id}`}>詳細</a>
+                    <a href={`/admin/artworks/${artwork.id}`}>管理する</a>
                   </td>
                 </tr>
               ))}

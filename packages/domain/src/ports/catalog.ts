@@ -48,6 +48,17 @@ export interface ArtworkRepository {
    * この 2 つは分割できない 1 つの操作として扱う。
    */
   archiveWithListings(artwork: Artwork, endedListings: readonly Listing[]): Promise<Artwork>;
+  /**
+   * 作品と、渡された出品を**完全に消す**。**1 トランザクションで書く。**
+   *
+   * ⚠️ **消してよいかの判定はここでしない。** それはドメイン
+   * （`prepareArtworkDeletion`）の仕事で、ここは書き込みだけを担う。
+   *
+   * ⚠️ **取り消せない。** 注文明細・受取権から参照されている作品は
+   * 外部キー（`Restrict`）が拒否する。実装はその失敗を握りつぶさず、
+   * そのまま投げること。握りつぶすと「消えたはずの作品が残っている」に見える。
+   */
+  deleteWithListings(artworkId: string, listingIds: readonly string[]): Promise<void>;
 }
 
 export interface ListingRepository {

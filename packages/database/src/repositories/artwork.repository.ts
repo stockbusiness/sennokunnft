@@ -103,6 +103,27 @@ export class PrismaArtworkRepository implements ArtworkRepository {
     });
   }
 
+  /**
+   * 作品と出品を完全に消す。**1 トランザクションで行う。**
+   *
+   * ⚠️ **出品を先に消す。** 作品を先に消そうとすると、出品からの
+   * 外部キーに弾かれる。
+   *
+   * ⚠️ **外部キー違反を握りつぶさない。** 注文明細・受取権から
+   * 参照されていれば PostgreSQL が拒否する。それが最後の砦なので、
+   * ここで `catch` して「消えたことにする」ようなことはしない。
+   */
+  async deleteWithListings(artworkId: string, listingIds: readonly string[]): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      if (listingIds.length > 0) {
+        // 作品に紐づく出品だけを消す。ID の指定漏れがあっても
+        // 他作品の出品まで巻き込まないよう、作品IDでも絞る。
+        await tx.listing.deleteMany({ where: { id: { in: [...listingIds] }, artworkId } });
+      }
+      await tx.artwork.delete({ where: { id: artworkId } });
+    });
+  }
+
   /** キーセットページング。新しい順に返す。 */
   private async list(
     query: PageQuery,

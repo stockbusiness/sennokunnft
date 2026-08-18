@@ -420,6 +420,9 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | POST     | `/api/v1/admin/artworks`              | 作品登録                     |
 | PATCH    | `/api/v1/admin/artworks/{id}`         | 作品更新                     |
 | POST     | `/api/v1/admin/artworks/{id}/publish` | 公開                         |
+| POST     | `/api/v1/admin/artworks/{id}/archive` | 公開停止（出品も終了する）   |
+| POST     | `/api/v1/admin/artworks/{id}/image`   | 画像の登録・差し替え         |
+| DELETE   | `/api/v1/admin/artworks/{id}`         | **完全削除**（`UD-113`）     |
 | POST     | `/api/v1/admin/listings`              | 出品作成                     |
 | PATCH    | `/api/v1/admin/listings/{id}`         | 出品更新（価格・状態）       |
 | GET      | `/api/v1/admin/orders`                | 注文一覧（絞り込み）         |
@@ -427,6 +430,19 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | POST     | `/api/v1/admin/mint-jobs/{id}/retry`  | 発行ジョブの手動再試行       |
 
 ✅ **事実:** 管理APIは**認可ミドルウェアで一括保護**する。ルートごとに個別チェックを書かない。
+
+> ⚠️ **`DELETE /api/v1/admin/artworks/{id}` は取り消せない。**
+>
+> - 公開停止（`archive`）は表示を止めるだけで、行は残る。**削除は行が消える。**
+> - 消せるのは、**公開中でなく、お支払い待ち・発行済みがどちらも 0 件**のときだけ
+>   （🟡 仮決定 `UD-113`）。条件を満たさなければ `409 ARTWORK_NOT_DELETABLE`。
+> - 作品に紐づく出品も**同一トランザクションで**消える。
+> - 注文明細・受取権から参照されている作品は、条件をすり抜けても
+>   外部キー（`RESTRICT`）が拒否する。**これが最後の砦。**
+> - 応答は `204`（本文なし）。2 回目は対象が無く `404` になるだけで、
+>   二重に何かが起きることはないため**冪等キーを要求しない**。
+> - 画像は DB を消したあとに消す。逆順だと、DB 側が拒否されたときに
+>   「作品は残っているのに画像だけ消えた」状態になる。
 
 #### Webhook（外部→本システム）
 

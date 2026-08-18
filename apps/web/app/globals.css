@@ -33,6 +33,7 @@
   --sengoku-rose: #9e4f66; /* 濃桜。主要アクション。生成りと 5.12:1 / 白文字 5.58:1 */
   --sengoku-rose-deep: #7c3f52; /* 濃桜の押下・強調 */
   --sengoku-matsu: #4f6b52; /* 松。状態表示。生成りと 5.42:1 */
+  --sengoku-bengara: #8c2f2f; /* 弁柄。⚠️ 取り消せない操作にだけ使う。白文字 8.19:1 / 生成り 7.52:1 */
   --sengoku-keisen: #ddd7cc; /* 罫線 */
   --sengoku-keisen-soft: #ece7dd; /* 薄い区切り */
   --sengoku-shade: #f0ece3; /* 生成りより少し沈んだ面 */
@@ -821,6 +822,24 @@ button {
   background: var(--sengoku-sakura-pale);
   border-color: var(--sengoku-rose);
   color: var(--sengoku-rose-deep);
+}
+
+/*
+  取り返しのつかない操作。
+  ⚠️ **地の色で塗らない。** 塗ると主要アクションと同じ重みになり、
+  並んだときに押し間違えを誘う。色は「違う種類の操作だ」と伝えるためだけに使う。
+  ⚠️ **この色を他の用途に広げない。** どこにでも出てくる色は警告として働かない。
+*/
+.sengoku-button--danger {
+  background: var(--sengoku-paper);
+  color: var(--sengoku-bengara);
+  border-color: var(--sengoku-bengara);
+}
+
+.sengoku-button--danger:hover {
+  background: var(--sengoku-bengara);
+  border-color: var(--sengoku-bengara);
+  color: #fff;
 }
 
 /* ログアウトは目立たせない。日常的に押すものではない。 */
