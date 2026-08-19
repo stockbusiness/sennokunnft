@@ -32,6 +32,12 @@ import {
   type AdminListingListResponse,
   adminOrderListResponseSchema,
   adminOrderDetailSchema,
+  legalVersionListResponseSchema,
+  legalVersionSchema,
+  type LegalVersionListResponse,
+  type LegalVersionView,
+  type PublishLegalVersionRequest,
+  type SaveLegalDraftRequest,
   type AdminOrderListResponse,
   type AdminOrderDetail,
 } from '@sengoku/contracts';
@@ -520,4 +526,47 @@ export function fetchAdminOrders(
 
 export function fetchAdminOrder(orderId: string): Promise<AdminResult<AdminOrderDetail>> {
   return callAdmin(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, adminOrderDetailSchema);
+}
+
+// --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------
+
+/**
+ * 版の一覧。下書きも含む。
+ *
+ * ⚠️ **削除する口をここへ足さない。** API 側に存在しない。過去の版は
+ * 「その注文の時点でどう書いてあったか」を示すために残す。
+ */
+export function fetchLegalVersions(kind: string): Promise<AdminResult<LegalVersionListResponse>> {
+  return callAdmin(
+    `/api/v1/admin/legal/${encodeURIComponent(kind)}`,
+    legalVersionListResponseSchema,
+  );
+}
+
+export function saveLegalDraft(
+  kind: string,
+  request: SaveLegalDraftRequest,
+): Promise<AdminResult<LegalVersionView>> {
+  return callAdmin(`/api/v1/admin/legal/${encodeURIComponent(kind)}/draft`, legalVersionSchema, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+}
+
+/**
+ * 下書きを公開する。
+ *
+ * ⚠️ **取り消せない。** 公開した版は書き換えも削除もできず、誤りは
+ * 新しい版で直す。画面側で必ず確認を挟むこと。
+ */
+export function publishLegalVersion(
+  kind: string,
+  request: PublishLegalVersionRequest,
+): Promise<AdminResult<LegalVersionView>> {
+  return callAdmin(
+    `/api/v1/admin/legal/${encodeURIComponent(kind)}/publish`,
+    legalVersionSchema,
+    json(request, 'POST'),
+  );
 }

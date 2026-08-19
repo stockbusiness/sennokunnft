@@ -87,6 +87,26 @@ test('管理画面の販売一覧が表示される', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 });
 
+/**
+ * 法務のページ。
+ *
+ * ⚠️ **中身がまだ無くても、辿れること自体が要る。** 特商法の表記は
+ * 販売前に掲げる義務がある。押せる場所が無いほうが困るので、
+ * リンクは常に出し、中身が無いことはそのページが正直に伝える。
+ */
+test('フッタから法務のページへ辿れる', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: '特定商取引法に基づく表記' })).toBeVisible();
+});
+
+test('法務のページが壊れずに開く（中身が未公開でも）', async ({ page }) => {
+  for (const path of ['/legal/terms', '/legal/privacy', '/legal/tokushoho']) {
+    const response = await page.goto(path);
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  }
+});
+
 test.describe('スマートフォン幅', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -118,6 +138,18 @@ test.describe('スマートフォン幅', () => {
   */
   test('注文の一覧が横にはみ出さない', async ({ page }) => {
     await page.goto('/admin/orders');
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  /*
+    ⚠️ 法務文書は長い。狭い画面で横に流れると、条文の途中が読めなくなる。
+       読むのは困っているときなので、いちばん読みにくくてはいけない場面。
+  */
+  test('法務のページが横にはみ出さない', async ({ page }) => {
+    await page.goto('/legal/tokushoho');
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );

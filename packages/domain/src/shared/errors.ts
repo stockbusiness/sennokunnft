@@ -127,6 +127,25 @@ export const DOMAIN_ERROR_CODES = [
   'COMMON_USER_ID_INVALID',
   'COMMON_USER_PENDING',
   'COMMON_USER_MISMATCH',
+  // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
+  /**
+   * 公開済みの版を書き換えようとした。
+   *
+   * ⚠️ **「権限が無い」ではない。** オーナーでも書き換えられない。
+   * 過去にどう書いてあったかが変わると、あとから確かめられなくなる。
+   */
+  'LEGAL_VERSION_NOT_DRAFT',
+  /** 入力が受け付けられない（長すぎる・HTML が入っている等）。 */
+  'LEGAL_DOCUMENT_INVALID',
+  /**
+   * 公開に必要な項目が埋まっていない。
+   *
+   * ⚠️ **`LEGAL_DOCUMENT_INVALID` と分けてある。** 直し方が違う。
+   * 片方は書き直し、片方は書き足し。
+   */
+  'LEGAL_DOCUMENT_INCOMPLETE',
+  /** 施行日が過去、または現行版より前。 */
+  'LEGAL_EFFECTIVE_DATE_INVALID',
   /**
    * Wallet へ送るイベントを組み立てられなかった。
    *

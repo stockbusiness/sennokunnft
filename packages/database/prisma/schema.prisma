@@ -89,6 +89,8 @@ model Account {
   integrationSettings  IntegrationSetting[] @relation("IntegrationSettingEditor")
   integrationSecrets   IntegrationSecret[]  @relation("IntegrationSecretCreator")
   integrationChecks    IntegrationConnectionCheck[] @relation("IntegrationCheckExecutor")
+  createdLegalVersions   LegalDocumentVersion[] @relation("LegalVersionAuthor")
+  publishedLegalVersions LegalDocumentVersion[] @relation("LegalVersionPublisher")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -226,6 +228,50 @@ model IntegrationConnectionCheck {
 
   @@index([service, environment, executedAt(sort: Desc)])
   @@map("integration_connection_checks")
+}
+
+/// 法務文書の版（利用規約・プライバシーポリシー・特商法表記）。
+///
+/// ⚠️ **公開した版を書き換えない。** 直すときは新しい版を足す。
+/// 「その注文の時点でどう書いてあったか」を示せなくなるため。
+/// 書き換えの口はリポジトリにも置かず、UPDATE は `status = 'draft'` の
+/// 行だけに効かせる。
+///
+/// ⚠️ **削除しない。** 消せる口を作ると、いつか「古いから」と消される。
+/// 困るのは消したあとに問い合わせが来たときで、そのときには戻せない。
+///
+/// ⚠️ 下記の索引は Prisma では表せないため、マイグレーションが正:
+///   - `legal_document_versions_one_draft_per_kind`（種類ごとに下書き 1 つ）
+///   - `legal_document_versions_effective_from_key`（施行日の重複禁止）
+model LegalDocumentVersion {
+  id                   String    @id @default(uuid()) @db.Uuid
+  /// terms / privacy / tokushoho
+  kind                 String
+  /// 種類ごとの連番。⚠️ 表全体の通し番号にしない。
+  version              Int
+  /// draft / published。
+  /// ⚠️ **「施行中」を持たない。** 施行中かどうかは施行日と現在時刻で
+  /// 決まる。状態にすると、日付が来ても誰かが切り替えるまで変わらない。
+  status               String    @default("draft")
+  title                String
+  /// 規約・プライバシーポリシーの本文。⚠️ HTML は保存の時点で断る。
+  bodyText             String?   @map("body_text")
+  /// 特商法の 12 項目。⚠️ 自由文にしない（欠けを機械が見つけられない）。
+  tokushoho            Json?
+  /// 施行日。⚠️ 未来の日付を入れられる（公開の予約）。
+  effectiveFrom        DateTime? @map("effective_from") @db.Timestamptz(6)
+  publishedAt          DateTime? @map("published_at") @db.Timestamptz(6)
+  createdByAccountId   String    @map("created_by_account_id") @db.Uuid
+  publishedByAccountId String?   @map("published_by_account_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy   Account  @relation("LegalVersionAuthor", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+  publishedBy Account? @relation("LegalVersionPublisher", fields: [publishedByAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([kind, version])
+  @@index([kind, createdAt(sort: Desc)])
+  @@map("legal_document_versions")
 }
 
 // ============================================================================

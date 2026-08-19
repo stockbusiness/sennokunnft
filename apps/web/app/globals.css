@@ -1056,3 +1056,80 @@ button {
   white-space: nowrap;
   border: 0;
 }
+
+/* --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------
+ *
+ * ⚠️ **読みやすさを最優先にする。** 読むのは 40 代以上を含む購入者で、
+ *    しかも困っているときに読む。行間を詰めない。1 行を長くしない。
+ */
+
+.sengoku-legal {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--sengoku-space-4);
+}
+
+.sengoku-legal__meta {
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+  margin: 0 0 var(--sengoku-space-4);
+}
+
+.sengoku-legal__body {
+  line-height: 1.9;
+}
+
+.sengoku-legal__body h2 {
+  margin: var(--sengoku-space-6) 0 var(--sengoku-space-2);
+  font-size: var(--sengoku-text-title);
+}
+
+.sengoku-legal__body p {
+  /* ⚠️ 改行をそのまま活かす。条文は行の切れ目に意味があることがある。 */
+  white-space: pre-wrap;
+  margin: 0 0 var(--sengoku-space-4);
+}
+
+.sengoku-legal__body ul {
+  margin: 0 0 var(--sengoku-space-4);
+  padding-left: 1.4em;
+}
+
+/*
+  特商法の表記。
+  ⚠️ **表にしない。** 項目名が長く、狭い画面で必ず折り返す。
+     項目名を上、内容を下に積むほうが読める。
+*/
+.sengoku-legal__fields {
+  margin: 0;
+}
+
+.sengoku-legal__fields > div {
+  padding: var(--sengoku-space-4) 0;
+  border-bottom: 1px solid var(--sengoku-keisen);
+}
+
+.sengoku-legal__fields dt {
+  font-weight: 600;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
+.sengoku-legal__fields dd {
+  margin: var(--sengoku-space-2) 0 0;
+  white-space: pre-wrap;
+}
+
+/* 管理画面の素朴な一覧。 */
+.sengoku-admin__list {
+  list-style: none;
+  margin: var(--sengoku-space-4) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sengoku-space-2);
+}
+
+.sengoku-admin__list > li {
+  padding: var(--sengoku-space-2) 0;
+  border-bottom: 1px solid var(--sengoku-keisen);
+}

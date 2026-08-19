@@ -58,6 +58,12 @@ import type {
   RandomPort,
   ReleasedReservation,
   Result,
+  LegalDocumentRepository,
+  LegalDocumentKind,
+  LegalDocumentVersion,
+  CreateLegalDraftCommand,
+  SaveLegalDraftCommand,
+  PublishLegalVersionCommand,
 } from '@sengoku/domain';
 import { canManuallyResend, err, ok, reserveSupply, PAYMENT_API_ENDPOINT } from '@sengoku/domain';
 import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
@@ -701,6 +707,11 @@ export class FixedClock implements ClockPort {
   advanceMs(ms: number): void {
     this.value = new Date(this.value.getTime() + ms);
   }
+
+  /** 時刻を差し替える。施行日をまたぐ試験で使う。 */
+  set(value: Date): void {
+    this.value = new Date(value);
+  }
 }
 
 export class SequentialIds implements IdGeneratorPort {
@@ -816,6 +827,106 @@ export class InMemoryWalletDeliveries implements WalletDeliveryAdminPort {
  * 記録側（`InMemoryAuditLog`）が貯めたものをそのまま読む。
  * 「操作したら監査に残り、その画面から見える」までを 1 本で確かめられる。
  */
+/**
+ * 法務文書の保管庫（試験用）。
+ *
+ * ⚠️ **本物と同じく、公開済みを書き換えない。** 二重書きは
+ * `saveDraft` / `publish` が `null` を返すことで表す。ここを緩めると、
+ * 本物の `updateMany` の `where` を外しても試験が通ってしまう。
+ */
+export class InMemoryLegalDocuments implements LegalDocumentRepository {
+  private readonly rows: LegalDocumentVersion[] = [];
+  private counter = 1;
+
+  seed(version: LegalDocumentVersion): void {
+    this.rows.push(version);
+  }
+
+  listVersions(kind: LegalDocumentKind): Promise<readonly LegalDocumentVersion[]> {
+    return Promise.resolve(
+      this.rows.filter((row) => row.kind === kind).sort((a, b) => b.version - a.version),
+    );
+  }
+
+  findById(id: string): Promise<LegalDocumentVersion | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  findDraft(kind: LegalDocumentKind): Promise<LegalDocumentVersion | null> {
+    return Promise.resolve(
+      this.rows.find((row) => row.kind === kind && row.status === 'draft') ?? null,
+    );
+  }
+
+  findEffective(kind: LegalDocumentKind, now: Date): Promise<LegalDocumentVersion | null> {
+    const candidates = this.rows
+      .filter(
+        (row) =>
+          row.kind === kind &&
+          row.status === 'published' &&
+          row.effectiveFrom !== null &&
+          row.effectiveFrom.getTime() <= now.getTime(),
+      )
+      .sort((a, b) => (b.effectiveFrom?.getTime() ?? 0) - (a.effectiveFrom?.getTime() ?? 0));
+    return Promise.resolve(candidates[0] ?? null);
+  }
+
+  create(command: CreateLegalDraftCommand): Promise<LegalDocumentVersion> {
+    const latest = this.rows
+      .filter((row) => row.kind === command.kind)
+      .reduce((max, row) => Math.max(max, row.version), 0);
+    const row: LegalDocumentVersion = {
+      id: `legal-${String(this.counter++)}`,
+      kind: command.kind,
+      version: latest + 1,
+      status: 'draft',
+      title: command.title,
+      bodyText: command.bodyText,
+      tokushoho: command.tokushoho,
+      effectiveFrom: null,
+      publishedAt: null,
+      createdByAccountId: command.createdByAccountId,
+      publishedByAccountId: null,
+      createdAt: new Date('2026-06-01T00:00:00.000Z'),
+    };
+    this.rows.push(row);
+    return Promise.resolve(row);
+  }
+
+  saveDraft(command: SaveLegalDraftCommand): Promise<LegalDocumentVersion | null> {
+    const index = this.rows.findIndex((row) => row.id === command.id && row.status === 'draft');
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const current = this.rows[index] as LegalDocumentVersion;
+    const next: LegalDocumentVersion = {
+      ...current,
+      title: command.title,
+      bodyText: command.bodyText,
+      tokushoho: command.tokushoho,
+    };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+
+  publish(command: PublishLegalVersionCommand): Promise<LegalDocumentVersion | null> {
+    const index = this.rows.findIndex((row) => row.id === command.id && row.status === 'draft');
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const current = this.rows[index] as LegalDocumentVersion;
+    const next: LegalDocumentVersion = {
+      ...current,
+      status: 'published',
+      effectiveFrom: command.effectiveFrom,
+      publishedAt: command.publishedAt,
+      publishedByAccountId: command.publishedByAccountId,
+    };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+}
+
 export class InMemoryAuditLogReader implements AuditLogReadPort {
   constructor(
     private readonly source: InMemoryAuditLog,
@@ -1301,6 +1412,7 @@ export interface TestHarness extends AppDependencies {
   readonly orderRepository: InMemoryOrderRepository;
   readonly commonUserLinks: InMemoryCommonUserLinks;
   readonly paymentRepository: InMemoryPaymentRepository;
+  readonly legalRepository: InMemoryLegalDocuments;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -1457,6 +1569,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     () => clock.now(),
   );
   const clock = new FixedClock(TEST_NOW);
+  const legalRepository = new InMemoryLegalDocuments();
   return {
     version: '0.1.0',
     probes: [],
@@ -1494,6 +1607,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     deliveries,
     auditLogs: auditLogReader,
     auditLogReader,
+    legalDocuments: legalRepository,
+    legalRepository,
     orderRepository,
     commonUserLinks,
     paymentRepository,

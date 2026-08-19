@@ -50,3 +50,5 @@ export {
 export { PrismaIntegrationRepository } from './repositories/integration.repository';
 
 export { PrismaPlatformFeeRateReader } from './repositories/platform-fee-rate.repository';
+
+export { PrismaLegalDocumentRepository } from './repositories/legal.repository';
