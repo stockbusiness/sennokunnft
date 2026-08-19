@@ -104,6 +104,10 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   LEGAL_EFFECTIVE_DATE_INVALID: HttpStatus.BAD_REQUEST,
   // 画面が古い。読み込み直せば直る。
   LEGAL_CONSENT_VERSION_MISMATCH: HttpStatus.CONFLICT,
+  // --- 決済資格情報の世代（`UD-118`）---
+  PAYMENT_CREDENTIAL_CHECK_REQUIRED: HttpStatus.CONFLICT,
+  PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: HttpStatus.CONFLICT,
+  PAYMENT_CREDENTIAL_IN_USE: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -203,6 +207,11 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     '適用開始日は、現在より後で、いま適用中の版より後の日時にしてください。',
   LEGAL_CONSENT_VERSION_MISMATCH:
     '規約が更新されました。お手数ですが、画面を読み込み直してからご確認ください。',
+  PAYMENT_CREDENTIAL_CHECK_REQUIRED:
+    '先に接続テストを行い、成功させてください。鍵の入力間違いをここで防いでいます。',
+  PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: 'この世代は有効化できません。状態をご確認ください。',
+  PAYMENT_CREDENTIAL_IN_USE:
+    'この世代はいま新規のお支払いを受け付けています。先に切り替えてください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

@@ -89,9 +89,22 @@ describe('正しいトークン', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected success');
-    // ⚠️ 取り出す項目を**明示的に**固定する。増やすときは、その値が
-    //    権限の根拠になりうるかを必ず考えること。
-    expect(Object.keys(result.identity)).toEqual(['subject', 'provider', 'expiresAt', 'email']);
+    /*
+      ⚠️ 取り出す項目を**明示的に**固定する。増やすときは、その値が
+         権限の根拠になりうるかを必ず考えること。
+
+      `issuedAt`（`iat`）を足した（`UD-118`・2026-08-19）。考えた結果:
+      **権限の根拠にはならない。** 新しいトークンであることは、権限が
+      あることを意味しない。使い道は「取り返しのつかない操作の前に
+      最近ログインし直したか」を見る再認証だけで、`Actor` へは入れない。
+    */
+    expect(Object.keys(result.identity)).toEqual([
+      'subject',
+      'provider',
+      'expiresAt',
+      'issuedAt',
+      'email',
+    ]);
     expect(result.identity).not.toHaveProperty('role');
     expect(result.identity).not.toHaveProperty('app_metadata');
   });

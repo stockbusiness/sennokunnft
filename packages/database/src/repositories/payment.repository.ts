@@ -123,6 +123,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     }));
   }
 
+  /**
+   * その世代で処理した決済の件数（`UD-118`）。
+   *
+   * ⚠️ **件数だけ。** 金額は返さない。世代の画面に要るのは
+   * 「まだ使われているか」の判断材料まで。
+   */
+  countByCredential(credentialId: string): Promise<number> {
+    return this.prisma.payment.count({ where: { credentialId } });
+  }
+
   async listAttempts(orderId: string): Promise<readonly PaymentAttemptView[]> {
     const rows = await this.prisma.payment.findMany({
       where: { orderId },

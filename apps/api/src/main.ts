@@ -28,6 +28,7 @@ import {
   PrismaAuditLogReadRepository,
   PrismaLegalDocumentRepository,
   PrismaLegalConsentRepository,
+  PrismaPaymentCredentialRepository,
   PrismaWalletDeliveryAdminRepository,
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
@@ -61,6 +62,7 @@ import {
   AeadSecretBox,
   parseEncryptionKeys,
   ReachabilityProbe,
+  probeStripeAccount,
 } from '@sengoku/integrations';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
 import type { PaymentGatewayPort } from '@sengoku/domain';
@@ -261,6 +263,24 @@ async function bootstrap(): Promise<void> {
    *
    * ⚠️ **鍵の中身をログへ出さない。** 出すのは「何本読めたか」だけ。
    */
+  /*
+    秘密情報の封（外部連携と決済の世代で共有する）。
+
+    ⚠️ **鍵が無ければ `null`。** 「渡すが中で落ちる」形にすると、画面を
+       開いた人に 500 が返るだけで、原因が鍵の欠けだと分からない。
+  */
+  const secretCipher = ((): AeadSecretBox | null => {
+    if (env.INTEGRATION_ENCRYPTION_KEYS === undefined) {
+      return null;
+    }
+    const keys = parseEncryptionKeys(env.INTEGRATION_ENCRYPTION_KEYS);
+    const version = env.INTEGRATION_ENCRYPTION_ACTIVE_VERSION;
+    if (keys[version] === undefined) {
+      return null;
+    }
+    return new AeadSecretBox({ keys, activeKeyVersion: version });
+  })();
+
   const integrations = ((): AppDependencies['integrations'] => {
     if (env.INTEGRATION_ENCRYPTION_KEYS === undefined) {
       logger.warn('外部連携の設定機能は無効です（INTEGRATION_ENCRYPTION_KEYS が未設定）。');
@@ -309,11 +329,53 @@ async function bootstrap(): Promise<void> {
       }),
       repository: new PrismaIntegrationRepository(
         prisma,
-        new AeadSecretBox({ keys, activeKeyVersion: version }),
+        // ⚠️ 上で組んだものを使い回す。ここで作り直すと鍵の版がずれうる。
+        secretCipher ?? new AeadSecretBox({ keys, activeKeyVersion: version }),
       ),
       // ⚠️ 設定の environment は、このプロセスの APP_ENV に固定する。
       //    要求から受け取れるようにすると、本番から staging を書き換えられる。
       appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
+    };
+  })();
+
+  /*
+    決済資格情報の世代（`UD-118`）。
+
+    ⚠️ **暗号鍵が無ければ経路ごと生やさない。** 画面を開いた人に 500 が
+       返るだけの状態を作らない。
+    ⚠️ **緊急上書きが有効なら、起動のたびに警告を出す。** 黙って二重管理が
+       復活している状態が、いちばん気づきにくい。
+  */
+  if (env.PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE) {
+    logger.warn(
+      '⚠️ 決済の緊急上書きが有効です（PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE=true）。' +
+        '配備環境の鍵が使われます。復旧が済んだら false へ戻してください。',
+    );
+  }
+
+  const paymentCredentials = ((): AppDependencies['paymentCredentials'] => {
+    if (secretCipher === null) {
+      logger.warn('決済資格情報の世代管理は無効です（INTEGRATION_ENCRYPTION_KEYS が未設定）。');
+      return undefined;
+    }
+    const appEnvironment = env.APP_ENV === 'production' ? 'production' : 'staging';
+    return {
+      repository: new PrismaPaymentCredentialRepository(prisma, secretCipher),
+      cipher: secretCipher,
+      config: {
+        provider: env.PAYMENT_PROVIDER,
+        appEnvironment,
+        emergencyOverrideActive: env.PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE,
+        countPayments: (credentialId) => paymentRepository.countByCredential(credentialId),
+        /*
+          ⚠️ **`fake` では実際に外へ出ない。** 手元と E2E で世代の流れを
+             通せるようにするための擬似応答。⚠️ `stripe` のときだけ本物を叩く。
+        */
+        probeAccount: async (secretKey, apiVersion) =>
+          env.PAYMENT_PROVIDER === 'stripe'
+            ? probeStripeAccount(secretKey, apiVersion)
+            : { ok: true, accountRef: `acct_fake_${secretKey.slice(-4)}` },
+      },
     };
   })();
 
@@ -422,6 +484,7 @@ async function bootstrap(): Promise<void> {
            連携設定の保管庫と同じ経路に載せると、鍵を置いていない配備で
            法務ページごと開かなくなる。
       */
+      paymentCredentials,
       legalDocuments: {
         documents: legalDocuments,
         consents: new PrismaLegalConsentRepository(prisma),

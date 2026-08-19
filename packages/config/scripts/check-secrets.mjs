@@ -19,14 +19,29 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** git が追跡しているファイル一覧をプロジェクト相対で得る。 */
+/**
+ * 検査するファイル一覧をプロジェクト相対で得る。
+ *
+ * ⚠️ **追跡済みだけを見ない。** `--others --exclude-standard` を付けて、
+ * まだコミットしていないファイルも対象にする。追跡済みだけを見ていたころ、
+ * **新しく書いた試験ファイルの鍵らしき文字列を手元の `pnpm verify` が
+ * 見逃し、コミットして初めて CI が捕まえた。** 手元で通ったものが CI で
+ * 落ちるのは、いちばん時間を無駄にする落ち方。
+ *
+ * ⚠️ `--exclude-standard` があるので `.gitignore` されたものは入らない。
+ * `.env` は別の検査で見ている。
+ */
 function listTrackedFiles() {
   try {
-    const output = execFileSync('git', ['ls-files', '-z', '--', '.'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    });
+    const output = execFileSync(
+      'git',
+      ['ls-files', '-z', '--others', '--exclude-standard', '--cached', '--', '.'],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
     return output.split('\0').filter((line) => line.length > 0);
   } catch {
     console.warn('! git のファイル一覧を取得できませんでした。追跡ファイルの検査を省略します。');

@@ -100,3 +100,4 @@ export {
   type ResolvedPaymentConfig,
 } from './payment-config';
 export { ResolvingPaymentGateway } from './resolving-payment';
+export { probeStripeAccount } from './stripe-payment';

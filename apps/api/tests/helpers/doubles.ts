@@ -69,6 +69,12 @@ import type {
   RecordConsentCommand,
   ConsentRequiredKind,
   TokushohoFields,
+  PaymentCredentialRepository,
+  PaymentCredentialGeneration,
+  RegisterCredentialCommand,
+  RecordCredentialCheckCommand,
+  ActivateCredentialCommand,
+  OpenedPaymentCredential,
 } from '@sengoku/domain';
 import {
   canManuallyResend,
@@ -1013,6 +1019,173 @@ export class InMemoryLegalConsents implements LegalConsentRepository {
   }
 }
 
+/**
+ * 決済資格情報の世代（試験用）。
+ *
+ * ⚠️ **本物と同じく「受付は 1 世代」を守る。** 緩めると、本物の
+ * 部分UNIQUE を外しても試験が通ってしまう。
+ */
+export class InMemoryPaymentCredentials implements PaymentCredentialRepository {
+  private readonly rows: PaymentCredentialGeneration[] = [];
+  private readonly secrets = new Map<string, { secretKey: string; webhookSecret: string }>();
+  private counter = 1;
+
+  list(
+    provider: string,
+    environment: IntegrationEnvironment,
+  ): Promise<readonly PaymentCredentialGeneration[]> {
+    return Promise.resolve(
+      this.rows
+        .filter((row) => row.provider === provider && row.environment === environment)
+        .sort((a, b) => b.generation - a.generation),
+    );
+  }
+
+  findById(id: string): Promise<PaymentCredentialGeneration | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  register(command: RegisterCredentialCommand): Promise<PaymentCredentialGeneration> {
+    const latest = this.rows
+      .filter((row) => row.provider === command.provider && row.environment === command.environment)
+      .reduce((max, row) => Math.max(max, row.generation), 0);
+    const row: PaymentCredentialGeneration = {
+      id: `cred-${String(this.counter++)}`,
+      provider: command.provider,
+      environment: command.environment,
+      generation: latest + 1,
+      status: 'pending',
+      accountRef: null,
+      label: command.label,
+      apiVersion: command.apiVersion,
+      lastCheckSucceeded: null,
+      lastCheckAt: null,
+      lastWebhookReceivedAt: null,
+      acceptsNewPayments: false,
+      activatedAt: null,
+      retiredAt: null,
+      createdAt: new Date('2026-06-01T00:00:00.000Z'),
+    };
+    this.rows.push(row);
+    // ⚠️ 封の中身は試験でも持ち回らない。開ける口だけが知っている。
+    this.secrets.set(row.id, {
+      secretKey: `plain:${command.secretKey.ciphertext}`,
+      webhookSecret: `plain:${command.webhookSecret.ciphertext}`,
+    });
+    return Promise.resolve(row);
+  }
+
+  recordCheck(command: RecordCredentialCheckCommand): Promise<PaymentCredentialGeneration | null> {
+    const index = this.rows.findIndex((row) => row.id === command.id);
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const current = this.rows[index] as PaymentCredentialGeneration;
+    const next: PaymentCredentialGeneration = {
+      ...current,
+      lastCheckSucceeded: command.succeeded,
+      lastCheckAt: command.checkedAt,
+      accountRef: command.accountRef ?? current.accountRef,
+    };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+
+  activate(command: ActivateCredentialCommand): Promise<PaymentCredentialGeneration | null> {
+    const index = this.rows.findIndex((row) => row.id === command.id);
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const target = this.rows[index] as PaymentCredentialGeneration;
+    // ⚠️ 接続確認を通っていなければ、本物と同じく書かない。
+    if (target.lastCheckSucceeded !== true) {
+      return Promise.resolve(null);
+    }
+    if (command.steppedDownId !== null) {
+      const oldIndex = this.rows.findIndex((row) => row.id === command.steppedDownId);
+      if (oldIndex === -1) {
+        return Promise.resolve(null);
+      }
+      const old = this.rows[oldIndex] as PaymentCredentialGeneration;
+      this.rows[oldIndex] = { ...old, acceptsNewPayments: false };
+    }
+    const next: PaymentCredentialGeneration = {
+      ...target,
+      status: 'active',
+      acceptsNewPayments: true,
+      activatedAt: command.activatedAt,
+    };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+
+  setAcceptsNewPayments(id: string, accepts: boolean): Promise<PaymentCredentialGeneration | null> {
+    const index = this.rows.findIndex((row) => row.id === id && row.status === 'active');
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const current = this.rows[index] as PaymentCredentialGeneration;
+    if (accepts && this.rows.some((row) => row.acceptsNewPayments && row.id !== id)) {
+      // ⚠️ 受付は 1 世代。本物は部分UNIQUE が弾く。
+      return Promise.resolve(null);
+    }
+    const next = { ...current, acceptsNewPayments: accepts };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+
+  retire(id: string, retiredAt: Date): Promise<PaymentCredentialGeneration | null> {
+    const index = this.rows.findIndex((row) => row.id === id && !row.acceptsNewPayments);
+    if (index === -1) {
+      return Promise.resolve(null);
+    }
+    const current = this.rows[index] as PaymentCredentialGeneration;
+    const next: PaymentCredentialGeneration = { ...current, status: 'retired', retiredAt };
+    this.rows[index] = next;
+    return Promise.resolve(next);
+  }
+
+  touchWebhookReceived(id: string, receivedAt: Date): Promise<void> {
+    const index = this.rows.findIndex((row) => row.id === id);
+    if (index !== -1) {
+      const current = this.rows[index] as PaymentCredentialGeneration;
+      this.rows[index] = { ...current, lastWebhookReceivedAt: receivedAt };
+    }
+    return Promise.resolve();
+  }
+
+  open(id: string): Promise<OpenedPaymentCredential | null> {
+    const row = this.rows.find((item) => item.id === id);
+    const secret = this.secrets.get(id);
+    if (row === undefined || secret === undefined) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve({
+      id: row.id,
+      generation: row.generation,
+      secretKey: secret.secretKey,
+      webhookSecret: secret.webhookSecret,
+      apiVersion: row.apiVersion,
+    });
+  }
+
+  async openForVerification(
+    provider: string,
+    environment: IntegrationEnvironment,
+    limit: number,
+  ): Promise<readonly OpenedPaymentCredential[]> {
+    const rows = await this.list(provider, environment);
+    const opened: OpenedPaymentCredential[] = [];
+    for (const row of rows.slice(0, limit)) {
+      const one = await this.open(row.id);
+      if (one !== null) {
+        opened.push(one);
+      }
+    }
+    return opened;
+  }
+}
+
 export class InMemoryAuditLogReader implements AuditLogReadPort {
   constructor(
     private readonly source: InMemoryAuditLog,
@@ -1355,6 +1528,11 @@ export class SequentialRandom implements RandomPort {
  * ここを動かす Fake にすると、本番の設計と食い違ったまま試験が通る。
  */
 export class InMemoryPaymentRepository implements PaymentRepository {
+  /** ⚠️ 件数だけ。金額は返さない（`UD-118`）。 */
+  countByCredential(_credentialId: string): Promise<number> {
+    return Promise.resolve(0);
+  }
+
   private readonly attempts = new Map<string, PaymentAttemptView[]>();
   private readonly events = new Map<string, { status: string; attemptCount: number }>();
   /** 作られた出来事。⚠️ 1 注文につき 1 件だけであることを試験が見る。 */
@@ -1515,6 +1693,7 @@ export interface TestHarness extends AppDependencies {
   readonly paymentRepository: InMemoryPaymentRepository;
   readonly legalRepository: InMemoryLegalDocuments;
   readonly legalConsents: InMemoryLegalConsents;
+  readonly paymentCredentialRepository: InMemoryPaymentCredentials;
 }
 
 /**
@@ -1698,6 +1877,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     () => clock.now(),
   );
   const clock = new FixedClock(TEST_NOW);
+  const paymentCredentialRepository = new InMemoryPaymentCredentials();
   const legalRepository = new InMemoryLegalDocuments();
   /*
     ⚠️ **既定で特商法表記を公開済みにしておく。** 掲げるものが無ければ
@@ -1744,6 +1924,23 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     deliveries,
     auditLogs: auditLogReader,
     auditLogReader,
+    paymentCredentials: {
+      repository: paymentCredentialRepository,
+      cipher: new ReversibleTestCipher(),
+      config: {
+        provider: 'fake',
+        appEnvironment: 'production',
+        // ⚠️ 既定は無効。有効なときの表示を見る試験だけが差し替える。
+        emergencyOverrideActive: false,
+        countPayments: async () => 0,
+        // ⚠️ 外へ出ない擬似応答。鍵の末尾からアカウント識別子を組む。
+        probeAccount: async (secretKey: string) => ({
+          ok: true as const,
+          accountRef: `acct_fake_${secretKey.slice(-4)}`,
+        }),
+      },
+    },
+    paymentCredentialRepository,
     legalDocuments: { documents: legalRepository, consents: legalConsents },
     legalRepository,
     legalConsents,

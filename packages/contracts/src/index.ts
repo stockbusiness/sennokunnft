@@ -212,3 +212,15 @@ export {
   type LegalBlock,
   type LegalDocumentKind,
 } from './legal';
+
+export {
+  PAYMENT_CREDENTIAL_STATUS_VALUES,
+  paymentCredentialSchema,
+  paymentCredentialListResponseSchema,
+  registerPaymentCredentialRequestSchema,
+  activatePaymentCredentialRequestSchema,
+  type PaymentCredentialView,
+  type PaymentCredentialListResponse,
+  type RegisterPaymentCredentialRequest,
+  type ActivatePaymentCredentialRequest,
+} from './payment-credential';

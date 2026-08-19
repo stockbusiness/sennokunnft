@@ -57,6 +57,12 @@ export const ACTIONS = [
    * 運営に免除を与えない（`OWNERSHIP_RULES` の `claim.accept` と同じ考え方）。
    */
   'legal.consent',
+  // --- 決済資格情報の世代（`UD-118`）---
+  // ⚠️ 見るのは運営と閲覧者にも開く。状態が見えないと、決済が止まった
+  //    ときに誰も原因を追えない。
+  'payment_credential.view',
+  // ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。入金先が変わる操作。
+  'payment_credential.manage',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -151,6 +157,9 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'legal.publish',
     // 運営も利用者として同意する。
     'legal.consent',
+    'payment_credential.view',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'payment_credential.manage',
   ],
   auditor: [
     'artwork.view_public',
@@ -165,6 +174,7 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     //    確かめるのは、まさに監査の仕事。
     'legal.view',
     'legal.consent',
+    'payment_credential.view',
   ],
 };
 
@@ -200,6 +210,9 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   //    足すことしかできない）。書いた内容は購入者への約束になるので、
   //    下書き（`legal.edit`）と決裁を分ける。
   'legal.publish',
+  // ⚠️ **入金先が変わる操作。** 運営の 1 人が乗っ取られただけで、
+  //    売上の振込先を差し替えられてしまう。
+  'payment_credential.manage',
 ];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {

@@ -21,6 +21,13 @@ export interface DevTokenClaims {
   readonly aud: string;
   readonly exp: number;
   /**
+   * 発行時刻（任意）。再認証の判定に使う（`UD-118`）。
+   *
+   * ⚠️ **本物と同じ扱いにする。** ここを常に「いま」にすると、
+   * 手元では再認証が通るのに本番では通らない差が生まれる。
+   */
+  readonly iat?: number;
+  /**
    * 確認済みのメールアドレス（任意）。招待の突き合わせにだけ使う（`UD-803`）。
    *
    * ⚠️ **本物と同じ扱いにする。** ここを「常に確認済み」にすると、
@@ -132,6 +139,7 @@ export class DevTokenVerifier implements TokenVerifierPort {
         subject: claims.sub,
         provider: 'dev',
         expiresAt: new Date(claims.exp * 1000),
+        ...(typeof claims.iat === 'number' ? { issuedAt: new Date(claims.iat * 1000) } : {}),
         email:
           typeof claims.email === 'string' && claims.email.length > 0 && claims.email_verified
             ? claims.email

@@ -88,6 +88,7 @@ export class SupabaseTokenVerifier implements TokenVerifierPort {
           subject,
           provider: SUPABASE_AUTH_PROVIDER,
           expiresAt: new Date(payload.exp * 1000),
+          ...(typeof payload.iat === 'number' ? { issuedAt: new Date(payload.iat * 1000) } : {}),
           email: verifiedEmail(payload),
         },
       };

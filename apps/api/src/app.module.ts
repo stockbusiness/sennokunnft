@@ -22,6 +22,8 @@ import type {
   IntegrationRepository,
   LegalDocumentRepository,
   LegalConsentRepository,
+  PaymentCredentialRepository,
+  SecretCipherPort,
   AuditLogReadPort,
   OrderRepository,
   PaymentRepository,
@@ -90,6 +92,11 @@ import {
   PublicLegalController,
 } from './legal/legal.controller';
 import { LegalService } from './legal/legal.service';
+import { PaymentCredentialController } from './payment-credential/payment-credential.controller';
+import {
+  PaymentCredentialService,
+  type PaymentCredentialConfig,
+} from './payment-credential/payment-credential.service';
 import { AuditLogController } from './audit/audit.controller';
 import { AuditLogQueryService } from './audit/audit.service';
 import { HealthController } from './health/health.controller';
@@ -177,6 +184,17 @@ export interface AppDependencies {
    * ⚠️ **無い環境では経路ごと生やさない。** 公開ページの口だけが開いて
    * 500 を返すより、404 のほうが原因が分かる。
    */
+  /**
+   * 決済資格情報の世代（`UD-118`）。
+   *
+   * ⚠️ **暗号鍵が無い環境では渡さない。** 「渡すが中で落ちる」形にすると、
+   * 画面を開いた人に 500 が返るだけで、原因が鍵の欠けだと分からない。
+   */
+  readonly paymentCredentials?: {
+    readonly repository: PaymentCredentialRepository;
+    readonly cipher: SecretCipherPort;
+    readonly config: PaymentCredentialConfig;
+  };
   readonly legalDocuments?: {
     readonly documents: LegalDocumentRepository;
     /** 規約への同意（`UD-126`）。 */
@@ -309,6 +327,7 @@ export class AppModule implements NestModule {
     const walletDeliveries = deps.walletDeliveries;
     const auditLogs = deps.auditLogs;
     const legalDocuments = deps.legalDocuments;
+    const paymentCredentials = deps.paymentCredentials;
     const internalJobToken = deps.orders.internalJobToken;
     const payments = deps.payments;
     return {
@@ -333,6 +352,7 @@ export class AppModule implements NestModule {
         ...(legalDocuments === undefined
           ? []
           : [PublicLegalController, AdminLegalController, LegalConsentController]),
+        ...(paymentCredentials === undefined ? [] : [PaymentCredentialController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -497,6 +517,21 @@ export class AppModule implements NestModule {
                 useFactory: () => new AuditLogQueryService(auditLogs),
               },
             ]),
+        ...(paymentCredentials === undefined
+          ? []
+          : [
+              {
+                provide: PaymentCredentialService,
+                useFactory: () =>
+                  new PaymentCredentialService(
+                    paymentCredentials.repository,
+                    paymentCredentials.cipher,
+                    deps.clock,
+                    deps.audit,
+                    paymentCredentials.config,
+                  ),
+              },
+            ]),
         ...(legalDocuments === undefined
           ? []
           : [
@@ -580,7 +615,7 @@ export class AppModule implements NestModule {
           //    自動的に保護対象になる（宣言を忘れたら通らない向き）。
           provide: APP_GUARD,
           useFactory: (reflector: Reflector) =>
-            new AuthGuard(reflector, deps.tokenVerifier, deps.accounts),
+            new AuthGuard(reflector, deps.tokenVerifier, deps.accounts, deps.clock),
           inject: [Reflector],
         },
       ],
