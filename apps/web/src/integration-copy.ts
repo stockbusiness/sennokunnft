@@ -139,13 +139,69 @@ export const INTEGRATION_COPY = {
   enableBlockedHint:
     '接続先・鍵の名前・お預かりした鍵・直近の接続確認（30 分以内の成功）が、すべてそろっている必要があります。',
   disableHint: '止めるのはいつでもできます。押すとすぐに新しいお届けが止まります。',
+
+  // --- お支払いの設定 ---
+  paymentHeading: 'お支払いの設定',
+  paymentIntro:
+    'ここで保存した内容は、次のお支払いから使われます。再起動は要りません。まだ何も保存していない間は、配備時の設定がそのまま使われます。',
+  fieldSuccessUrl: 'お支払い後に戻る画面の URL',
+  fieldSuccessUrlHint:
+    'https で始まり、{ORDER_ID} を含めてください。この目印が、どのご注文の結果を表示するかの手がかりになります。',
+  fieldCancelUrl: 'お支払いをやめたときに戻る画面の URL',
+  fieldCancelUrlHint: 'https で始まる URL をお使いください。',
+  fieldFeeRate: '当社の手数料（％）',
+  /*
+    ⚠️ **0 を「手数料無料」と書かない。** 0 のまま売れると、こちらの
+       取り分が無い注文が成立し、あとから請求し直すことはできない。
+  */
+  fieldFeeRateHint:
+    '0 のままでは販売を開始できません（未設定として扱います）。作家さまへのお渡し分は、100％からこの割合を引いた残りです。',
+  feeRateNotSet: '手数料が未設定のため、購入手続きに進めません',
+  feeRateSet: (percent: string, creator: string): string =>
+    `手数料 ${percent}％／作家さま ${creator}％`,
+  // --- お支払いの鍵（この画面では扱わない） ---
+  paymentKeyHeading: 'お支払いの鍵',
+  /*
+    ⚠️ **「なぜここで扱わないか」を書く。** 書かないと、探した人が
+       「機能が足りない」と受け取り、別の場所へ鍵を置き始める。
+  */
+  paymentKeyIntro:
+    '決済の鍵は、この画面では扱いません。配備環境の秘密情報管理に置いてあり、画面からの入力・表示・変更はできません。ここに出るのは、設定されているかどうかだけです。',
+  paymentSecretKeyLabel: 'シークレットキー',
+  paymentWebhookSecretLabel: 'Webhook 署名シークレット',
+  paymentModeLabel: 'モード',
+  paymentLastWebhookLabel: '最後にお知らせが届いた日時',
+  paymentNoWebhookYet: 'まだ届いていません',
+  paymentSettingsSourceLabel: '戻り先・API 版の出どころ',
+  paymentConfigured: '設定されています',
+  paymentNotConfigured: '設定されていません',
+  paymentSourceDatabase: 'この画面の設定',
+  paymentSourceEnvironment: '配備時の設定（この画面ではまだ保存していません）',
 } as const;
+
+/**
+ * テストか本番か。
+ *
+ * ⚠️ **鍵の値は出さない。** 出すのは取り違えに気づける粒度まで。
+ */
+export function paymentModeLabel(mode: 'test' | 'live' | 'unknown'): string {
+  switch (mode) {
+    case 'test':
+      return 'テストモード（本物のお金は動きません）';
+    case 'live':
+      return '本番モード（本物のお金が動きます）';
+    case 'unknown':
+      return '判別できません（鍵が未設定か、想定外の形式です）';
+  }
+}
 
 /** どの提携先か。⚠️ 内部の名前をそのまま出さない。 */
 export function integrationServiceLabel(service: IntegrationStatusView['service']): string {
   switch (service) {
     case 'ovew_wallet':
       return 'お受け取り先（OVEW Wallet）';
+    case 'payment':
+      return 'お支払い（クレジットカード決済）';
     case 'storage':
       return '画像の保管先';
     case 'auth':
@@ -153,7 +209,14 @@ export function integrationServiceLabel(service: IntegrationStatusView['service'
   }
 }
 
-export function secretPurposeLabel(purpose: 'api_key' | 'hmac_secret'): string {
+export function secretPurposeLabel(
+  purpose: 'api_key' | 'hmac_secret',
+  service?: IntegrationStatusView['service'],
+): string {
+  if (service === 'payment') {
+    // ⚠️ 決済では呼び名が違う。画面の言葉を提携先の画面に合わせる。
+    return purpose === 'api_key' ? 'シークレットキー' : 'Webhook 署名シークレット';
+  }
   return purpose === 'api_key' ? 'API キー' : '署名の鍵';
 }
 

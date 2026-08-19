@@ -24,8 +24,15 @@ import {
 import { DomainErrorException } from '../common/domain-error.filter';
 
 export interface OrderServiceConfig {
-  /** 注文時点の手数料率（bps）。⚠️ 設定から来る。ブラウザからは来ない。 */
-  readonly platformFeeRateBps: number;
+  /**
+   * 注文時点の手数料率（bps）を引く。
+   *
+   * ⚠️ **設定から来る。ブラウザからは来ない。**
+   * ⚠️ **呼び出しのたびに引く。** 管理画面で率を変えたら、次の注文から
+   * 効いてほしい。起動時に読んだ値を持ち回ると、変えたのに効かない。
+   * 引いた値は注文へスナップショットされるので、**過去の注文は動かない。**
+   */
+  readonly resolvePlatformFeeRateBps: () => Promise<number>;
   readonly reservationMinutes: number;
 }
 
@@ -105,7 +112,7 @@ export class OrderService {
       creatorAccountId: artwork.creatorAccountId,
       counters: artwork,
       quantity: 1,
-      platformFeeRateBps: this.config.platformFeeRateBps,
+      platformFeeRateBps: await this.config.resolvePlatformFeeRateBps(),
       now,
       reservationMinutes: this.config.reservationMinutes,
     });

@@ -134,7 +134,7 @@ model StaffInvitation {
 /// 表現できない。列そのものを用意しないことでしか担保できない。
 model IntegrationSetting {
   id                 String   @id @default(uuid()) @db.Uuid
-  /// ovew_wallet / storage / auth
+  /// ovew_wallet / payment / storage / auth
   service            String
   /// staging / production。⚠️ `APP_ENV` とは別物（どの環境向けの設定か）。
   environment        String
@@ -144,6 +144,15 @@ model IntegrationSetting {
   /// 「どの鍵か」を相手へ伝える名前で、署名ヘッダにそのまま載る値。
   keyId              String?  @map("key_id")
   apiVersion         String?  @map("api_version")
+  /// 決済にだけ意味のある欄。支払い完了・中止で購入者を戻す先。
+  /// ⚠️ 成功URLには `{ORDER_ID}` を含める（どの注文の結果か画面が判断できない）。
+  checkoutSuccessUrl String?  @map("checkout_success_url")
+  checkoutCancelUrl  String?  @map("checkout_cancel_url")
+  /// プラットフォーム手数料（ベーシスポイント）。
+  /// ⚠️ **0 は「無料」ではなく「販売設定が未完了」。** 0 のままでは
+  /// 支払い口を作らせない。「無料で売れる」より「売れない」ほうが
+  /// 取り返しがつくため。
+  platformFeeRateBps Int      @default(0) @map("platform_fee_rate_bps")
   timeoutMs          Int      @default(10000) @map("timeout_ms")
   maxAttempts        Int      @default(5) @map("max_attempts")
   enabled            Boolean  @default(false)

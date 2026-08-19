@@ -120,6 +120,7 @@ export {
   integrationListResponseSchema,
   integrationSecretSchema,
   integrationStatusSchema,
+  paymentSettingsSchema,
   registerSecretRequestSchema,
   updateIntegrationRequestSchema,
   type ConnectionCheckView,
@@ -127,6 +128,7 @@ export {
   type IntegrationListResponse,
   type IntegrationSecretView,
   type IntegrationStatusView,
+  type PaymentSettingsView,
   type RegisterSecretRequest,
   type UpdateIntegrationRequest,
 } from './integration';

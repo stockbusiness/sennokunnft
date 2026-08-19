@@ -36,9 +36,10 @@ export function describeIntegrationEnvironment(
         return describeStorage(env);
       case 'auth':
         return describeAuth(env);
+      case 'payment':
       case 'ovew_wallet':
         /*
-          ⚠️ Wallet は管理画面が正なので、ここは呼ばれない。
+          ⚠️ 決済と Wallet は管理画面が正なので、ここは呼ばれない。
              それでも値を返せるようにしておくのは、呼ばれたときに
              例外で 500 になるより、空の姿を返すほうが調べやすいため。
         */

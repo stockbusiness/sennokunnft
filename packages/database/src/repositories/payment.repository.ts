@@ -84,6 +84,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
+  async findLastWebhookReceivedAt(provider: string): Promise<Date | null> {
+    const row = await this.prisma.webhookEvent.findFirst({
+      where: { provider },
+      orderBy: { receivedAt: 'desc' },
+      // ⚠️ 時刻だけを取り出す。本文も署名も読まない。
+      select: { receivedAt: true },
+    });
+    return row?.receivedAt ?? null;
+  }
+
   async listWebhookReceipts(orderId: string): Promise<readonly WebhookReceiptRecord[]> {
     const rows = await this.prisma.webhookEvent.findMany({
       where: { orderId },

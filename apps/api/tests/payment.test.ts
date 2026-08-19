@@ -217,7 +217,9 @@ describe('【13】手数料が未設定なら支払い口を作らせない', ()
       }),
     );
     // ⚠️ 0 は「無料」ではなく「販売設定未完了」（UD-109）。
-    (harness.orders as { platformFeeRateBps: number }).platformFeeRateBps = 0;
+    (
+      harness.orders as { resolvePlatformFeeRateBps: () => Promise<number> }
+    ).resolvePlatformFeeRateBps = async () => 0;
     await buildApp();
   });
 

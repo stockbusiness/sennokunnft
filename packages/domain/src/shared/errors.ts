@@ -58,6 +58,23 @@ export const DOMAIN_ERROR_CODES = [
    * 変えても誰も読まないため、受け付けること自体が嘘になる。
    */
   'INTEGRATION_NOT_MANAGED',
+  // --- 決済の設定（管理画面から変える分）---
+  'PAYMENT_SETTINGS_INVALID',
+  'PAYMENT_SECRET_INVALID',
+  /**
+   * 鍵と環境が食い違っている。
+   *
+   * ⚠️ **「無効な鍵」と分けてある。** 形は正しいのに置き場所が違う、
+   * という状態を、直す人がすぐ見分けられるようにするため。
+   */
+  'PAYMENT_SECRET_ENVIRONMENT_MISMATCH',
+  /**
+   * 決済連携が管理画面から止められている。
+   *
+   * ⚠️ **「設定が足りない」と分けてある。** 直し方が違う。止めたのなら
+   * 戻す、足りないなら埋める。混ぜると、止めた本人が「壊れた」と読む。
+   */
+  'PAYMENT_PROVIDER_DISABLED',
   // --- 注文（決済 Phase P0・P1）---
   /** 注文時の手数料率が受け付けられない値。 */
   'INVALID_FEE_RATE',

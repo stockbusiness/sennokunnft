@@ -313,6 +313,17 @@ export interface PaymentRepository {
    */
   listWebhookReceipts(orderId: string): Promise<readonly WebhookReceiptRecord[]>;
 
+  /**
+   * その事業者から最後に知らせが届いた時刻。無ければ `null`。
+   *
+   * ⚠️ **注文に紐づかないものも数える。** 宛先の設定が誤っていると、
+   * こちらの注文に一致しない知らせだけが届く。それでも「届いてはいる」
+   * ことは、設定を直す人にとって重要な手掛かりになる。
+   *
+   * ⚠️ **本文も署名も返さない。** 返すのは時刻だけ。
+   */
+  findLastWebhookReceivedAt(provider: string): Promise<Date | null>;
+
   /** 支払い口を記録する。⚠️ 同じ冪等キーなら既存を返す。 */
   recordCheckoutSession(command: RecordCheckoutSessionCommand): Promise<PaymentAttemptView>;
 

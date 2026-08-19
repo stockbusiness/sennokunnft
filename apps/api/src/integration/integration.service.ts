@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   ConnectionCheckView,
   IntegrationListResponse,
@@ -18,7 +23,10 @@ import {
   discardPendingSecret,
   enableIntegration,
   isCheckFresh,
+  storesSecrets,
+  updatePaymentSettings,
   updateSettings,
+  isSalesSetupComplete,
   type AuditLogPort,
   type ClockPort,
   type ConnectionCheckRecord,
@@ -46,6 +54,25 @@ import { DomainErrorException } from '../common/domain-error.filter';
  * ⚠️ **判断はドメインが持つ。** 「接続テストの成功が要る」「古い成功では
  * 通さない」といった規則をここへ書き足さない。2 か所に散ると必ずずれる。
  */
+/**
+ * 決済の配備側の状態。
+ *
+ * ⚠️ **鍵そのもの・先頭・末尾・署名値を持たない**（2026-08-19 決定）。
+ */
+export interface PaymentDeploymentStatus {
+  readonly secretKeyConfigured: boolean;
+  readonly webhookSecretConfigured: boolean;
+  readonly mode: 'test' | 'live' | 'unknown';
+  readonly lastWebhookReceivedAt: Date | null;
+}
+
+const EMPTY_PAYMENT_DEPLOYMENT: PaymentDeploymentStatus = {
+  secretKeyConfigured: false,
+  webhookSecretConfigured: false,
+  mode: 'unknown',
+  lastWebhookReceivedAt: null,
+};
+
 @Injectable()
 export class IntegrationService_ {
   constructor(
@@ -79,6 +106,14 @@ export class IntegrationService_ {
      * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
      */
     private readonly describeEnvironment: (service: IntegrationService) => EnvIntegrationSummary,
+    /**
+     * 決済の配備側の状態を返す。
+     *
+     * ⚠️ **鍵そのもの・先頭・末尾を返させない。** 返すのは
+     * 「設定されているか」「テストか本番か」「最後に知らせが届いた時刻」まで。
+     * 鍵は配備環境の Secret 管理にあり、ここへは流れてこない。
+     */
+    private readonly describePaymentDeployment: () => Promise<PaymentDeploymentStatus>,
   ) {}
 
   /**
@@ -127,7 +162,22 @@ export class IntegrationService_ {
 
     const now = this.clock.now();
     const fresh = isCheckFresh(lastCheck, CHECK_FRESHNESS_MS, now);
-    const hasActive = secrets.some((secret) => secret.status === 'active');
+    const deployment =
+      service === 'payment' ? await this.describePaymentDeployment() : EMPTY_PAYMENT_DEPLOYMENT;
+    /*
+      ⚠️ **有効化できるかの判定は、ドメインの関数をそのまま使う。**
+         画面用に別式を書くと、「画面では押せるのに保存で断られる」
+         あるいはその逆が、いつか必ず生まれる。
+    */
+    const canEnable = enableIntegration({
+      settings,
+      activeSecretPurposes: secrets
+        .filter((secret) => secret.status === 'active')
+        .map((secret) => secret.purpose),
+      lastCheck,
+      freshnessMs: CHECK_FRESHNESS_MS,
+      now,
+    }).ok;
 
     return {
       service,
@@ -144,12 +194,33 @@ export class IntegrationService_ {
       lastCheck: lastCheck === null ? null : toCheckView(lastCheck),
       checkFresh: fresh,
       // 画面のボタンを出し分けるための値。⚠️ **これは保護ではない。**
-      canEnable: fresh && hasActive && settings.endpointUrl !== null && settings.keyId !== null,
+      canEnable,
       canCheck: canRunCheck(settings),
       manageable: true,
       // ⚠️ 管理できる連携では、正は DB。2 つの正を並べない。
       environmentSummary: null,
       recentChecks: recentChecks.map(toCheckView),
+      payment:
+        service === 'payment'
+          ? {
+              ...settings.payment,
+              // ⚠️ 0 を「手数料無料」と読ませないための印。
+              salesSetupComplete: isSalesSetupComplete(settings.payment),
+              /*
+                戻り先が DB に入っていれば DB、無ければ配備環境の値で
+                動いている。⚠️ **鍵の出どころではない。** 鍵は常に配備環境。
+              */
+              settingsSource:
+                settings.payment.checkoutSuccessUrl !== null &&
+                settings.payment.checkoutCancelUrl !== null
+                  ? ('database' as const)
+                  : ('environment' as const),
+              secretKeyConfigured: deployment.secretKeyConfigured,
+              webhookSecretConfigured: deployment.webhookSecretConfigured,
+              mode: deployment.mode,
+              lastWebhookReceivedAt: deployment.lastWebhookReceivedAt?.toISOString() ?? null,
+            }
+          : null,
     };
   }
 
@@ -193,6 +264,8 @@ export class IntegrationService_ {
       manageable: false,
       environmentSummary: { ...summary, missing: [...summary.missing] },
       recentChecks: recentChecks.map(toCheckView),
+      // 決済は管理できる連携なので、ここへは来ない。
+      payment: null,
     };
   }
 
@@ -293,13 +366,57 @@ export class IntegrationService_ {
       }),
     );
 
-    const saved = await this.repository.saveSettings(updated.settings, request.rowVersion, actorId);
+    /*
+      決済に固有の欄。
+      ⚠️ **ほかの連携へ送られても書き換えない。** 意味の無い欄が
+         黙って保存されると、あとから読んだ人が「効くのか」を
+         判断できなくなる。
+    */
+    /*
+      ⚠️ **手数料率を変えられるのはオーナーだけ**（2026-08-19 決定）。
+         率はこちらと作家さまの取り分を決める約束で、日々の運営操作とは
+         重さが違う。`operator` に許すと、権限を配れない人が
+         お金の分け方を変えられることになる。
+
+      ⚠️ **要求の中身から判定しない。** `isOwner` の正は DB で、
+         認証ガードが DB から詰めている。
+    */
+    if (service === 'payment' && request.platformFeeRateBps !== undefined) {
+      const current = settings.payment.platformFeeRateBps;
+      if (request.platformFeeRateBps !== current && !actor.isOwner) {
+        throw new ForbiddenException();
+      }
+    }
+
+    const withPayment =
+      service === 'payment'
+        ? {
+            ...updated,
+            settings: {
+              ...updated.settings,
+              payment: unwrapDomain(
+                updatePaymentSettings(updated.settings.payment, {
+                  apiVersion: request.apiVersion,
+                  checkoutSuccessUrl: request.checkoutSuccessUrl,
+                  checkoutCancelUrl: request.checkoutCancelUrl,
+                  platformFeeRateBps: request.platformFeeRateBps,
+                }),
+              ),
+            },
+          }
+        : updated;
+
+    const saved = await this.repository.saveSettings(
+      withPayment.settings,
+      request.rowVersion,
+      actorId,
+    );
     if (saved === null) {
       // 読んでから書くまでに、ほかの人が変えていた。
       throw new DomainErrorException('INTEGRATION_SETTINGS_CONFLICT');
     }
 
-    if (updated.endpointChanged) {
+    if (withPayment.endpointChanged) {
       await this.repository.invalidateConnectionChecks(service, environment, this.clock.now());
     }
 
@@ -315,6 +432,23 @@ export class IntegrationService_ {
         environment,
         changed: Object.keys(request).filter((key) => key !== 'rowVersion'),
         endpointChanged: updated.endpointChanged,
+        /*
+          ⚠️ **手数料率だけは、変更前後の値そのものを残す**（2026-08-19 決定）。
+             ほかの設定は「変えたかどうか」しか残さないが、率は
+             こちらと作家さまの取り分を決める約束で、あとから
+             「いつ何％から何％へ、誰が変えたか」を説明できないと、
+             支払いの問い合わせに答えられない。
+
+          ⚠️ **秘密ではないから残せる。** 率は契約条件であって資格情報ではない。
+             鍵の類はここにも残さない。
+        */
+        ...(service === 'payment' &&
+        withPayment.settings.payment.platformFeeRateBps !== settings.payment.platformFeeRateBps
+          ? {
+              platformFeeRateBpsBefore: settings.payment.platformFeeRateBps,
+              platformFeeRateBpsAfter: withPayment.settings.payment.platformFeeRateBps,
+            }
+          : {}),
       },
     });
     return this.status(service, environment);
@@ -344,7 +478,9 @@ export class IntegrationService_ {
       next = unwrapDomain(
         enableIntegration({
           settings,
-          hasActiveSecret: secrets.some((secret) => secret.status === 'active'),
+          activeSecretPurposes: secrets
+            .filter((secret) => secret.status === 'active')
+            .map((secret) => secret.purpose),
           lastCheck,
           freshnessMs: CHECK_FRESHNESS_MS,
           now: this.clock.now(),
@@ -387,6 +523,16 @@ export class IntegrationService_ {
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
     this.requireManaged(service);
+
+    /*
+      ⚠️ **決済の鍵はここで預からない**（2026-08-19 決定）。秘密鍵も
+         Webhook 署名鍵も配備環境の Secret 管理に置く。画面で隠すだけに
+         すると、直接叩けば預かれてしまい、置かないと決めた場所に
+         鍵が残る。口そのものを断る。
+    */
+    if (!storesSecrets(service)) {
+      throw new DomainErrorException('INTEGRATION_NOT_MANAGED');
+    }
 
     const created = await this.repository.createSecret({
       id: this.ids.generate(),

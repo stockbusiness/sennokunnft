@@ -59,7 +59,7 @@ import type {
   ReleasedReservation,
   Result,
 } from '@sengoku/domain';
-import { canManuallyResend, err, ok, reserveSupply } from '@sengoku/domain';
+import { canManuallyResend, err, ok, reserveSupply, PAYMENT_API_ENDPOINT } from '@sengoku/domain';
 import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
 
@@ -486,12 +486,19 @@ export class InMemoryIntegrationRepository implements IntegrationRepository {
       id,
       service,
       environment,
-      endpointUrl: null,
+      // ⚠️ 本物と同じく、決済だけ既定の接続先を入れる。
+      endpointUrl: service === 'payment' ? PAYMENT_API_ENDPOINT : null,
       keyId: null,
       apiVersion: null,
       timeoutMs: 10_000,
       maxAttempts: 5,
       enabled: false,
+      payment: {
+        apiVersion: null,
+        checkoutSuccessUrl: null,
+        checkoutCancelUrl: null,
+        platformFeeRateBps: 0,
+      },
       rowVersion: 1,
     };
     this.settings.set(key, created);
@@ -1170,6 +1177,12 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve([...(this.attempts.get(orderId) ?? [])].reverse());
   }
 
+  /* ⚠️ 本文も署名も持たない。持つのは時刻だけ。 */
+  findLastWebhookReceivedAt(): Promise<Date | null> {
+    // 本物と同じく「届いたことがあるか」だけを表す。
+    return Promise.resolve(this.events.size === 0 ? null : new Date(0));
+  }
+
   listWebhookReceipts(): Promise<readonly WebhookReceiptRecord[]> {
     // ⚠️ 本文は保存していないので、そもそも返せるものが無い。
     return Promise.resolve(
@@ -1405,8 +1418,20 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     配備環境から読める姿。⚠️ **値を持たない。**
     既定は「そろっている」。欠けを試す試験だけ `setEnvironmentSummary` で差し替える。
   */
+  /*
+    決済の配備側の状態。⚠️ 鍵そのものは入らない。
+    既定は「テスト鍵が設定済み」。欠けを試す試験だけ差し替える。
+  */
+  const paymentDeployment = {
+    secretKeyConfigured: true,
+    webhookSecretConfigured: true,
+    mode: 'test' as 'test' | 'live' | 'unknown',
+    lastWebhookReceivedAt: null as Date | null,
+  };
+
   const environmentSummaries: Record<IntegrationService, EnvIntegrationSummary> = {
     ovew_wallet: { provider: 'database', complete: false, missing: [], publicUrl: null },
+    payment: { provider: 'database', complete: false, missing: [], publicUrl: null },
     storage: {
       provider: 'r2',
       complete: true,
@@ -1447,6 +1472,11 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // 既定は「届いた（405）」。試験ごとに `harness.probeOutcome` で差し替える。
       probe: () => Promise.resolve(probeResult),
       describeEnvironment: (service) => environmentSummaries[service],
+      /*
+        決済の配備側の状態。
+        ⚠️ 本物と同じく、鍵そのものは持たない。持つのは有無とモードだけ。
+      */
+      describePaymentDeployment: async () => paymentDeployment,
     },
     setEnvironmentSummary: (service, summary) => {
       environmentSummaries[service] = summary;
@@ -1483,7 +1513,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // ✅ 承認済み 2026-08-19（UD-109）: 20% = 2000。
       // ⚠️ 0 は「無料」ではなく「販売設定未完了」。0 の挙動を見る試験は
       //    `buildHarness` の戻りを書き換えて確かめる。
-      platformFeeRateBps: APPROVED_FEE_RATE_BPS,
+      resolvePlatformFeeRateBps: async () => APPROVED_FEE_RATE_BPS,
       reservationMinutes: 30,
       internalJobToken: TEST_INTERNAL_JOB_TOKEN,
     },

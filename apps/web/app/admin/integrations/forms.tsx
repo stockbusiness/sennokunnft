@@ -10,6 +10,7 @@ import {
   registerSecretAction,
   setEnabledAction,
   updateIntegrationAction,
+  updatePaymentSettingsAction,
 } from './actions';
 import type { AdminActionState } from '../actions';
 import { INTEGRATION_COPY } from '../../../src/integration-copy';
@@ -111,6 +112,103 @@ export function SettingsForm({ status }: { readonly status: IntegrationStatusVie
           type="number"
           inputMode="numeric"
           defaultValue={String(status.maxAttempts)}
+        />
+      </div>
+
+      <button className="sengoku-button" type="submit" disabled={pending}>
+        {pending ? '保存しています…' : INTEGRATION_COPY.submitSettings}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * お支払いの設定。
+ *
+ * ⚠️ **接続先と鍵の名前は出さない。** 決済会社の宛先は決まっていて
+ * 変える意味が無く、鍵の識別子という概念も無い。無い欄を並べると、
+ * 埋めるための嘘の値が入る。
+ *
+ * ⚠️ **手数料 0 を「無料」と書かない。** 0 は「まだ決めていない」。
+ * 画面がそこを取り違えると、設定した人も取り違える。
+ */
+export function PaymentSettingsForm({ status }: { readonly status: IntegrationStatusView }) {
+  const [state, action, pending] = useActionState(updatePaymentSettingsAction, INITIAL);
+  const payment = status.payment;
+  if (payment === null) {
+    return null;
+  }
+  return (
+    <form className="sengoku-form" action={action}>
+      <Messages state={state} />
+      <input type="hidden" name="service" value={status.service} />
+      <input type="hidden" name="rowVersion" value={String(status.rowVersion)} />
+
+      <div className="sengoku-form__field">
+        <label className="sengoku-form__label" htmlFor="checkoutSuccessUrl">
+          {INTEGRATION_COPY.fieldSuccessUrl}
+        </label>
+        <p className="sengoku-form__hint">{INTEGRATION_COPY.fieldSuccessUrlHint}</p>
+        <input
+          className="sengoku-form__input"
+          id="checkoutSuccessUrl"
+          name="checkoutSuccessUrl"
+          type="text"
+          inputMode="url"
+          autoComplete="off"
+          defaultValue={payment.checkoutSuccessUrl ?? ''}
+        />
+      </div>
+
+      <div className="sengoku-form__field">
+        <label className="sengoku-form__label" htmlFor="checkoutCancelUrl">
+          {INTEGRATION_COPY.fieldCancelUrl}
+        </label>
+        <p className="sengoku-form__hint">{INTEGRATION_COPY.fieldCancelUrlHint}</p>
+        <input
+          className="sengoku-form__input"
+          id="checkoutCancelUrl"
+          name="checkoutCancelUrl"
+          type="text"
+          inputMode="url"
+          autoComplete="off"
+          defaultValue={payment.checkoutCancelUrl ?? ''}
+        />
+      </div>
+
+      <div className="sengoku-form__field">
+        <label className="sengoku-form__label" htmlFor="feeRatePercent">
+          {INTEGRATION_COPY.fieldFeeRate}
+        </label>
+        <p className="sengoku-form__hint">{INTEGRATION_COPY.fieldFeeRateHint}</p>
+        {/*
+          ⚠️ **画面は％で受け、送るのは bps。** ％で持つと小数になり、
+             金額の計算に浮動小数が混ざる。変換はここ 1 か所だけで行う。
+        */}
+        <input
+          className="sengoku-form__input"
+          id="feeRatePercent"
+          name="feeRatePercent"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          max="100"
+          step="0.01"
+          defaultValue={String(payment.platformFeeRateBps / 100)}
+        />
+      </div>
+
+      <div className="sengoku-form__field">
+        <label className="sengoku-form__label" htmlFor="paymentApiVersion">
+          {INTEGRATION_COPY.fieldApiVersion}
+        </label>
+        <input
+          className="sengoku-form__input"
+          id="paymentApiVersion"
+          name="apiVersion"
+          type="text"
+          autoComplete="off"
+          defaultValue={payment.apiVersion ?? ''}
         />
       </div>
 

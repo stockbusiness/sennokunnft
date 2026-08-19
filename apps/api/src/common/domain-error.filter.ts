@@ -52,6 +52,13 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PAYMENT_PROVIDER_ERROR: HttpStatus.BAD_GATEWAY,
   // ⚠️ 401 にしない。誰かの資格情報の問題ではなく、署名が合っていない。
   WEBHOOK_SIGNATURE_INVALID: HttpStatus.BAD_REQUEST,
+  // --- 決済の設定（管理画面から変える分）---
+  // 運営の入力の誤り。利用者には出ない。
+  PAYMENT_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
+  PAYMENT_SECRET_INVALID: HttpStatus.BAD_REQUEST,
+  PAYMENT_SECRET_ENVIRONMENT_MISMATCH: HttpStatus.BAD_REQUEST,
+  // ⚠️ 「壊れている」ではなく「止めてある」。運営が戻せる。
+  PAYMENT_PROVIDER_DISABLED: HttpStatus.CONFLICT,
   // --- 運営スタッフの招待と権限（`UD-803`）---
   STAFF_INVITE_INVALID: HttpStatus.BAD_REQUEST,
   // ⚠️ 「宛先が違う」も「もう使えない」もこれ 1 つ。
@@ -138,6 +145,17 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'ただいまお支払いのお手続きができませんでした。しばらくしてからお試しください。',
   // 外へ返す想定が無い。Webhook の送信元にだけ返る。
   WEBHOOK_SIGNATURE_INVALID: 'ただいま処理できませんでした。',
+  /*
+    ⚠️ **設定の誤りは、運営にだけ具体的に伝える。** これらは管理画面の
+       操作でしか出ない。利用者に見える経路（購入）では
+       `SALES_SETUP_INCOMPLETE` に倒れる。
+  */
+  PAYMENT_SETTINGS_INVALID: '決済の設定に誤りがあります。入力内容をご確認ください。',
+  PAYMENT_SECRET_INVALID: '鍵の形式が正しくありません。貼り付ける値をご確認ください。',
+  PAYMENT_SECRET_ENVIRONMENT_MISMATCH:
+    'この環境では使えない鍵です。本番用とテスト用を取り違えていないかご確認ください。',
+  PAYMENT_PROVIDER_DISABLED:
+    '決済連携が停止されています。管理画面の「外部連携」からご確認ください。',
   STAFF_INVITE_INVALID: 'この内容では招待できません。宛先と役割をご確認ください。',
   STAFF_INVITE_NOT_OPEN: 'この招待はお使いいただけません。',
   STAFF_INVITE_EXPIRED: 'この招待は期限が過ぎています。もう一度お送りください。',

@@ -5,11 +5,19 @@ import { formatDateTime } from '../../../../src/delivery-copy';
 import {
   INTEGRATION_COPY,
   checkDetailLabel,
+  paymentModeLabel,
   integrationServiceLabel,
   secretPurposeLabel,
   secretStatusLabel,
 } from '../../../../src/integration-copy';
-import { CheckButton, EnableButton, SecretActionButton, SecretForm, SettingsForm } from '../forms';
+import {
+  CheckButton,
+  EnableButton,
+  PaymentSettingsForm,
+  SecretActionButton,
+  SecretForm,
+  SettingsForm,
+} from '../forms';
 
 /**
  * 提携先ごとの設定（管理画面・外部連携 指示書 §4・§6・§9・§11）。
@@ -236,12 +244,94 @@ export default async function AdminIntegrationPage({
       */}
       {status.manageable ? (
         <>
-          <h2>{INTEGRATION_COPY.settingsHeading}</h2>
-          <SettingsForm status={status} />
+          {/*
+            ⚠️ **決済には決済の欄だけを出す。** 接続先と鍵の名前は
+               決済に無い概念で、並べると埋めるための嘘の値が入る。
+          */}
+          {status.payment === null ? (
+            <>
+              <h2>{INTEGRATION_COPY.settingsHeading}</h2>
+              <SettingsForm status={status} />
+            </>
+          ) : (
+            <>
+              <h2>{INTEGRATION_COPY.paymentHeading}</h2>
+              <p>{INTEGRATION_COPY.paymentIntro}</p>
+              {/*
+                ⚠️ **0 のときは「無料」ではなく「未設定」と伝える。**
+                   ここを取り違えると、設定した人も取り違える。
+              */}
+              {status.payment.salesSetupComplete ? (
+                <Notice
+                  tone="info"
+                  title={INTEGRATION_COPY.feeRateSet(
+                    String(status.payment.platformFeeRateBps / 100),
+                    String((10_000 - status.payment.platformFeeRateBps) / 100),
+                  )}
+                />
+              ) : (
+                <Notice tone="alert" title={INTEGRATION_COPY.feeRateNotSet} />
+              )}
+              <PaymentSettingsForm status={status} />
+            </>
+          )}
 
-          <h2>{INTEGRATION_COPY.secretHeading}</h2>
-          <p>{INTEGRATION_COPY.secretIntro}</p>
-          <SecretForm service={status.service} />
+          {/*
+            ⚠️ **決済には鍵の入力欄を出さない**（2026-08-19 決定）。
+               鍵は配備環境の Secret 管理に置く。画面から替えられる
+               仕組みは、再認証・二者承認・ローテーション・復旧経路まで
+               揃えた別仕様として扱う。ここに出すのは状態だけ。
+          */}
+          {status.payment === null ? (
+            <>
+              <h2>{INTEGRATION_COPY.secretHeading}</h2>
+              <p>{INTEGRATION_COPY.secretIntro}</p>
+              <SecretForm service={status.service} />
+            </>
+          ) : (
+            <>
+              <h2>{INTEGRATION_COPY.paymentKeyHeading}</h2>
+              <p>{INTEGRATION_COPY.paymentKeyIntro}</p>
+              <dl className="sengoku-detail">
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentSecretKeyLabel}</dt>
+                  <dd>
+                    {status.payment.secretKeyConfigured
+                      ? INTEGRATION_COPY.paymentConfigured
+                      : INTEGRATION_COPY.notConfigured}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentWebhookSecretLabel}</dt>
+                  <dd>
+                    {status.payment.webhookSecretConfigured
+                      ? INTEGRATION_COPY.paymentConfigured
+                      : INTEGRATION_COPY.notConfigured}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentModeLabel}</dt>
+                  <dd>{paymentModeLabel(status.payment.mode)}</dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentLastWebhookLabel}</dt>
+                  <dd>
+                    {status.payment.lastWebhookReceivedAt === null
+                      ? INTEGRATION_COPY.paymentNoWebhookYet
+                      : formatDateTime(status.payment.lastWebhookReceivedAt)}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentSettingsSourceLabel}</dt>
+                  <dd>
+                    {status.payment.settingsSource === 'database'
+                      ? INTEGRATION_COPY.paymentSourceDatabase
+                      : INTEGRATION_COPY.paymentSourceEnvironment}
+                  </dd>
+                </div>
+              </dl>
+            </>
+          )}
 
           <h3>{INTEGRATION_COPY.secretsHeading}</h3>
           {status.secrets.length === 0 ? (
@@ -262,7 +352,7 @@ export default async function AdminIntegrationPage({
                   {status.secrets.map((secret) => (
                     <tr key={secret.id}>
                       <td className="sengoku-table__nowrap">
-                        {secretPurposeLabel(secret.purpose)}
+                        {secretPurposeLabel(secret.purpose, status.service)}
                       </td>
                       {/* ⚠️ 出せるのはここまで。全文を返す経路は API に無い。 */}
                       <td className="sengoku-table__nowrap">

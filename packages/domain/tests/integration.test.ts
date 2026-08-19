@@ -35,6 +35,12 @@ function settings(overrides: Partial<IntegrationSettings> = {}): IntegrationSett
     timeoutMs: 10_000,
     maxAttempts: 5,
     enabled: false,
+    payment: {
+      apiVersion: null,
+      checkoutSuccessUrl: null,
+      checkoutCancelUrl: null,
+      platformFeeRateBps: 0,
+    },
     rowVersion: 1,
     ...overrides,
   };
@@ -111,7 +117,7 @@ describe('設定の書き換え', () => {
 describe('連携を有効にする', () => {
   const base = {
     settings: settings(),
-    hasActiveSecret: true,
+    activeSecretPurposes: ['hmac_secret'] as const,
     lastCheck: { succeeded: true, executedAt: FRESH },
     freshnessMs: CHECK_FRESHNESS_MS,
     now: NOW,
@@ -153,7 +159,7 @@ describe('連携を有効にする', () => {
   });
 
   it('有効な資格情報が無ければ有効にできない', () => {
-    const result = enableIntegration({ ...base, hasActiveSecret: false });
+    const result = enableIntegration({ ...base, activeSecretPurposes: [] });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INTEGRATION_SECRET_MISSING');
@@ -308,7 +314,7 @@ describe('鍵の識別子', () => {
   it('欠けていれば有効にできない', () => {
     const result = enableIntegration({
       settings: settings({ keyId: null }),
-      hasActiveSecret: true,
+      activeSecretPurposes: ['hmac_secret'] as const,
       lastCheck: { succeeded: true, executedAt: FRESH },
       freshnessMs: CHECK_FRESHNESS_MS,
       now: NOW,

@@ -61,7 +61,10 @@ import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.ser
 import { StaffController, StaffInvitationAcceptController } from './staff/staff.controller';
 import { StaffService } from './staff/staff.service';
 import { IntegrationController } from './integration/integration.controller';
-import { IntegrationService_ } from './integration/integration.service';
+import {
+  IntegrationService_,
+  type PaymentDeploymentStatus,
+} from './integration/integration.service';
 import { WalletDeliveryController } from './wallet-delivery/wallet-delivery.controller';
 import { WalletDeliveryAdminService } from './wallet-delivery/wallet-delivery.service';
 import {
@@ -126,6 +129,13 @@ export interface AppDependencies {
      * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
      */
     readonly describeEnvironment: (service: IntegrationServiceName) => EnvIntegrationSummary;
+    /**
+     * 決済の配備側の状態。
+     *
+     * ⚠️ **鍵そのもの・先頭・末尾を返させない。** 返すのは
+     * 「設定されているか」「テストか本番か」「最後に知らせが届いた時刻」まで。
+     */
+    readonly describePaymentDeployment: () => Promise<PaymentDeploymentStatus>;
     readonly repository: IntegrationRepository & {
       ensureSettings(
         id: string,
@@ -167,7 +177,8 @@ export interface AppDependencies {
     readonly repository: OrderRepository;
     readonly commonUserLinks: CommonUserLinkRepository;
     readonly random: RandomPort;
-    readonly platformFeeRateBps: number;
+    /** ⚠️ 呼び出しのたびに引く。管理画面で変えたら次の注文から効く。 */
+    readonly resolvePlatformFeeRateBps: () => Promise<number>;
     readonly reservationMinutes: number;
     readonly internalJobToken?: string | undefined;
   };
@@ -349,7 +360,7 @@ export class AppModule implements NestModule {
               deps.orders.random,
               deps.audit,
               {
-                platformFeeRateBps: deps.orders.platformFeeRateBps,
+                resolvePlatformFeeRateBps: deps.orders.resolvePlatformFeeRateBps,
                 reservationMinutes: deps.orders.reservationMinutes,
               },
             ),
@@ -407,6 +418,7 @@ export class AppModule implements NestModule {
                     integrations.appEnvironment,
                     integrations.probe,
                     integrations.describeEnvironment,
+                    integrations.describePaymentDeployment,
                   ),
               },
             ]),
