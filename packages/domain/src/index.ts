@@ -556,11 +556,33 @@ export {
   type OrderPaymentExpectation,
 } from './payment/provider-event';
 
+export {
+  CREDENTIAL_VERIFICATION_LIMIT,
+  PAYMENT_CREDENTIAL_STATUSES,
+  acceptingGeneration,
+  activateGeneration,
+  canAcceptPayments,
+  retireGeneration,
+  verificationOrder,
+  type ActivateGenerationInput,
+  type ActivatedGenerations,
+  type PaymentCredentialGeneration,
+  type PaymentCredentialStatus,
+} from './payment/credential';
+
 export type {
   PaymentGatewayPort,
   CreateCheckoutSessionInput,
   CheckoutSessionCreated,
 } from './ports/payment';
+
+export type {
+  PaymentCredentialRepository,
+  RegisterCredentialCommand,
+  RecordCredentialCheckCommand,
+  ActivateCredentialCommand,
+  OpenedPaymentCredential,
+} from './ports/payment-credential';
 
 export type {
   PaymentRepository,

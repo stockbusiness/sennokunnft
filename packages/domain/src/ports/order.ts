@@ -294,6 +294,14 @@ export type WebhookClaim =
 
 export interface PaymentRepository {
   /**
+   * その世代で処理した決済の件数（`UD-118`）。
+   *
+   * ⚠️ **件数だけ。** 金額を返さない。画面に要るのは「まだ使われているか」
+   * の判断材料までで、売上はここから読むものではない。
+   */
+  countByCredential(credentialId: string): Promise<number>;
+
+  /**
    * 受け取った知らせを記録し、処理してよいかを返す。
    *
    * ⚠️ **`(provider, event_id)` の UNIQUE で決める。** 「探して無ければ書く」

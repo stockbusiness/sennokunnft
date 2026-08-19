@@ -12,6 +12,15 @@ export interface VerifiedIdentity {
   readonly provider: string;
   readonly expiresAt: Date;
   /**
+   * トークンが発行された時刻（JWT の `iat`）。無ければ `undefined`。
+   *
+   * ⚠️ **「いま本人が操作している」ことの根拠に使う**（`UD-118` の再認証）。
+   * 取り返しのつかない操作の前に、発行から一定時間内であることを求める。
+   * ⚠️ **認可の根拠にしない。** 新しいトークンであることは、権限があることを
+   * 意味しない。権限は DB のロールとオーナーの印で決める。
+   */
+  readonly issuedAt?: Date;
+  /**
    * 認証プロバイダが確認済みのメールアドレス（あれば）。
    *
    * ⚠️ **権限の判断に使わない。** 使ってよいのは

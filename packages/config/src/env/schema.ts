@@ -90,6 +90,23 @@ const apiEnvObject = baseEnvObject.extend({
   PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
   PAYMENT_WEBHOOK_SECRET: z.string().min(1).optional(),
 
+  /**
+   * 緊急上書き（`UD-118`・`docs/PAYMENT_CREDENTIAL_ROTATION.md` §8）。
+   *
+   * ⚠️ **既定は無効。** 有効にすると、DB の世代ではなく環境変数の鍵を使う。
+   * 管理画面へ入れない・オーナーが全員不在、という場面で決済を復旧する
+   * ためだけのもの。
+   *
+   * ⚠️ **既定で有効にしない。** 既定で有効だと、二重管理が黙って復活する。
+   * どちらの鍵が効いているのか、事故が起きるまで誰も気づけない。
+   *
+   * ⚠️ **有効な間は、管理画面の先頭と起動ログに警告を出す。**
+   */
+  PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
   // --- Stripe（決済 Phase P2） -------------------------------------------
   /**
    * 秘密鍵。`sk_test_` か `sk_live_` で始まる。
@@ -244,6 +261,19 @@ const apiEnvObject = baseEnvObject.extend({
 
 const workerEnvObject = baseEnvObject.extend({
   DATABASE_URL: z.string().min(1),
+
+  /*
+    決済（`UD-118` の復旧 CLI が使う）。
+
+    ⚠️ **worker が決済を処理するわけではない。** 管理画面へ入れないときに
+       世代を取り込み・有効化するための逃げ道が要る。
+    ⚠️ 取り込みは**一度限りの移行**。worker が起動のたびに環境変数から
+       読み直す作りにはしない。
+  */
+  PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_API_VERSION: z.string().min(1).optional(),
   WORKER_BATCH_SIZE: integerFromEnv(1, 1000, 10),
   WORKER_POLL_INTERVAL_MS: integerFromEnv(100, 3_600_000, 5000),
 

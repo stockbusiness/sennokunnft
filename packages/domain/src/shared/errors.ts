@@ -154,6 +154,13 @@ export const DOMAIN_ERROR_CODES = [
    * 作らないための符号。
    */
   'LEGAL_CONSENT_VERSION_MISMATCH',
+  // --- 決済資格情報の世代（`UD-118`）---
+  /** 接続確認を通っていないので有効化できない。 */
+  'PAYMENT_CREDENTIAL_CHECK_REQUIRED',
+  /** その世代は有効化できる状態にない（退役済み・すでに受付中など）。 */
+  'PAYMENT_CREDENTIAL_NOT_ACTIVATABLE',
+  /** まだ使われているので退役させられない。 */
+  'PAYMENT_CREDENTIAL_IN_USE',
   /**
    * Wallet へ送るイベントを組み立てられなかった。
    *

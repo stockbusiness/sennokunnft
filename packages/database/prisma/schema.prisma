@@ -92,6 +92,8 @@ model Account {
   createdLegalVersions   LegalDocumentVersion[] @relation("LegalVersionAuthor")
   publishedLegalVersions LegalDocumentVersion[] @relation("LegalVersionPublisher")
   legalConsents          LegalConsent[]
+  registeredPaymentCredentials PaymentCredential[] @relation("PaymentCredentialRegistrar")
+  activatedPaymentCredentials  PaymentCredential[] @relation("PaymentCredentialActivator")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -310,6 +312,62 @@ model LegalConsent {
   @@unique([accountId, versionId])
   @@index([accountId, kind, version(sort: Desc)])
   @@map("legal_consents")
+}
+
+
+/// 決済資格情報の世代（`UD-118`・`docs/PAYMENT_CREDENTIAL_ROTATION.md`）。
+///
+/// ⚠️ **運営会社が変わっても過去の注文を返金できるようにするための表。**
+/// 決済事業者側の識別子はアカウントに紐づくので、鍵を上書きすると
+/// 過去の注文が返金不能になる。だから世代で持つ。
+///
+/// ⚠️ **削除しない。** 消すと、その世代で処理した決済の返金経路が消える。
+/// `payments.credential_id` は `onDelete: Restrict` で縛ってある。
+///
+/// ⚠️ 下記の索引は Prisma では表せないため、マイグレーションが正:
+///   - `payment_credentials_one_accepting`（新規受付は常に 1 世代）
+model PaymentCredential {
+  id                      String    @id @default(uuid()) @db.Uuid
+  provider                String
+  /// staging / production
+  environment             String
+  /// 1 から始まる連番。⚠️ (provider, environment) ごとに一意。
+  generation              Int
+  /// 決済事業者側のアカウント識別子（acct_…）。⚠️ **秘密ではない。** 画面に出す。
+  accountRef              String?   @map("account_ref")
+  /// 運営が付ける覚え書き。⚠️ 秘密を書かせない。
+  label                   String?
+  /// pending / active / retired
+  status                  String    @default("pending")
+  secretKeyCiphertext     String    @map("secret_key_ciphertext")
+  secretKeyNonce          String    @map("secret_key_nonce")
+  secretKeyAuthTag        String    @map("secret_key_auth_tag")
+  webhookSecretCiphertext String    @map("webhook_secret_ciphertext")
+  webhookSecretNonce      String    @map("webhook_secret_nonce")
+  webhookSecretAuthTag    String    @map("webhook_secret_auth_tag")
+  keyVersion              String    @map("key_version")
+  apiVersion              String?   @map("api_version")
+  /// 直近の接続確認。⚠️ **成功していないと有効化できない**（CHECK で縛る）。
+  lastCheckSucceeded      Boolean?  @map("last_check_succeeded")
+  lastCheckAt             DateTime? @map("last_check_at") @db.Timestamptz(6)
+  lastWebhookReceivedAt   DateTime? @map("last_webhook_received_at") @db.Timestamptz(6)
+  registeredByAccountId   String    @map("registered_by_account_id") @db.Uuid
+  activatedByAccountId    String?   @map("activated_by_account_id") @db.Uuid
+  /// active でも新規受付だけ止められる。⚠️ 返金と照会は続く。
+  acceptsNewPayments      Boolean   @default(false) @map("accepts_new_payments")
+  activatedAt             DateTime? @map("activated_at") @db.Timestamptz(6)
+  retiredAt               DateTime? @map("retired_at") @db.Timestamptz(6)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registeredBy Account        @relation("PaymentCredentialRegistrar", fields: [registeredByAccountId], references: [id], onDelete: Restrict)
+  activatedBy  Account?       @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
+  payments     Payment[]
+  webhookEvents WebhookEvent[]
+
+  @@unique([provider, environment, generation])
+  @@index([provider, environment, status, generation(sort: Desc)])
+  @@map("payment_credentials")
 }
 
 // ============================================================================
@@ -608,7 +666,14 @@ model Payment {
   createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  /// この決済をどの世代の鍵で処理したか（`UD-118`）。
+  /// ⚠️ **返金と照会はこの世代の鍵で行う。** 無いと、運営会社の切り替え後に
+  /// 「どの鍵で返せばよいか」を誰も判断できない。
+  /// ⚠️ 移行のため NULL を許す。既存行を埋めたあとに締める。
+  credentialId  String?        @map("credential_id") @db.Uuid
+
   order         Order          @relation(fields: [orderId], references: [id])
+  credential    PaymentCredential? @relation(fields: [credentialId], references: [id], onDelete: Restrict)
   webhookEvents WebhookEvent[]
 
   /// ⚠️ 試行ごとに 1 行。失敗した行も消さない（決済 Phase P2 の決定 B）。
@@ -620,6 +685,7 @@ model Payment {
   @@unique([provider, providerPaymentRef])
   @@index([orderId])
   @@index([orderId, createdAt(sort: Desc)], map: "payments_order_created_idx")
+  @@index([credentialId], map: "payments_credential_idx")
   @@map("payments")
 }
 
@@ -662,8 +728,14 @@ model WebhookEvent {
   /// ⚠️ `Restrict`。既定の `SetNull` にすると、注文を消したときに
   /// 受信の記録だけが親を失って残る。注文と決済のデータは消さない決まり
   /// （指示書 §9.3）なので、消そうとした時点で止める。
-  order   Order?   @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  /// どの世代の署名で検証が通ったか（`UD-118`）。
+  /// ⚠️ 旧アカウントからも知らせは届き続ける。これが無いと、
+  /// 届いているのに処理されない事象を追えない。
+  credentialId String? @map("credential_id") @db.Uuid
+
+  order      Order?             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment    Payment?           @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  credential PaymentCredential? @relation(fields: [credentialId], references: [id], onDelete: Restrict)
 
   /// ⚠️ **本文の全体を保存しない**（指示書 §10）。残すのは digest だけ。
   /// カード情報・個人情報・秘密が混ざる余地を作らない。

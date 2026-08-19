@@ -17,9 +17,29 @@ import {
   type Actor,
   type TokenVerifierPort,
 } from '@sengoku/auth';
+import type { ClockPort } from '@sengoku/domain';
 
 export const PUBLIC_KEY = 'sengoku:public';
 export const REQUIRED_ACTION_KEY = 'sengoku:required-action';
+export const FRESH_AUTH_KEY = 'sengoku:fresh-auth';
+
+/**
+ * 再認証の有効時間（`UD-118` 決定 2026-08-19）。
+ *
+ * ⚠️ **パスワードを再入力させない。** 認証は Supabase 側にあり、こちらで
+ * パスワードを受け取る経路を作るべきではない。「最近ログインし直したか」
+ * をトークンの発行時刻で見る。
+ */
+export const FRESH_AUTH_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * 取り返しのつかない操作の前に、最近の認証を求める（`UD-118`）。
+ *
+ * ⚠️ **権限の代わりにしない。** 新しいトークンであることは、権限が
+ * あることを意味しない。`RequireAction` と併せて使う。
+ */
+export const RequireFreshAuth = (): MethodDecorator & ClassDecorator =>
+  SetMetadata(FRESH_AUTH_KEY, true);
 
 /**
  * 認証を要求しないエンドポイントの印。
@@ -45,6 +65,13 @@ export interface AuthenticatedRequest extends Request {
    * ここに置いてよい用途は、招待の宛先との突き合わせだけ。
    */
   verifiedEmail?: string;
+  /**
+   * トークンの発行時刻（`UD-118` の再認証）。
+   *
+   * ⚠️ **`Actor` へ入れない。** 認可判定に渡る値へ混ぜると、いつか
+   * 「新しいトークンなら権限あり」という判定が書かれる。
+   */
+  tokenIssuedAt?: Date;
 }
 
 /** ハンドラの引数として現在のアクターを受け取る。 */
@@ -79,6 +106,12 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly tokenVerifier: TokenVerifierPort,
     private readonly accounts: AccountLookupPort,
+    /**
+     * ⚠️ **`Date.now()` を直に呼ばない。** 再認証の判定に現在時刻が要るが、
+     * 直に読むと試験で時刻を動かせず、「いつでも古い」か「いつでも新しい」
+     * かのどちらかしか試せない。
+     */
+    private readonly clock: ClockPort,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -89,6 +122,8 @@ export class AuthGuard implements CanActivate {
       REQUIRED_ACTION_KEY,
       targets,
     );
+    const needsFreshAuth =
+      this.reflector.getAllAndOverride<boolean>(FRESH_AUTH_KEY, targets) ?? false;
 
     const actor = await this.resolveActor(request, isPublic);
     request.actor = actor;
@@ -113,7 +148,33 @@ export class AuthGuard implements CanActivate {
       }
       throw new ForbiddenException();
     }
+
+    /*
+      ⚠️ **認可のあとに見る。** 先に見ると、権限の無い人へ
+         「ログインし直してください」と案内してしまう。
+      ⚠️ **401 で返す。** 403 だと「権限が無い」と読まれ、ログインし直せば
+         通ることが伝わらない。
+    */
+    if (needsFreshAuth && !this.isFreshlyAuthenticated(request)) {
+      throw new UnauthorizedException('re-authentication required');
+    }
     return true;
+  }
+
+  /**
+   * 最近ログインし直したか。
+   *
+   * ⚠️ **発行時刻が分からなければ通さない。** 「無いから通す」にすると、
+   * `iat` を落としたトークンで再認証を素通りできる。
+   */
+  private isFreshlyAuthenticated(request: AuthenticatedRequest): boolean {
+    const issuedAt = request.tokenIssuedAt;
+    if (issuedAt === undefined) {
+      return false;
+    }
+    const age = this.clock.now().getTime() - issuedAt.getTime();
+    // ⚠️ 未来に発行されたトークンも通さない（時計のずれを装った引き延ばし）。
+    return age >= 0 && age <= FRESH_AUTH_WINDOW_MS;
   }
 
   private async resolveActor(request: AuthenticatedRequest, isPublic: boolean): Promise<Actor> {
@@ -121,6 +182,7 @@ export class AuthGuard implements CanActivate {
     //    招待を引き取れてしまう（同じ request が再利用されることは無いが、
     //    ここを暗黙の前提にしない）。
     request.verifiedEmail = undefined;
+    request.tokenIssuedAt = undefined;
     const token = extractBearerToken(request.headers.authorization);
     if (token === null) {
       if (isPublic) {
@@ -142,6 +204,7 @@ export class AuthGuard implements CanActivate {
     const { provider, subject } = verified.identity;
     // 招待の突き合わせにだけ使う。認可には渡さない（`AuthenticatedRequest` 参照）。
     request.verifiedEmail = verified.identity.email;
+    request.tokenIssuedAt = verified.identity.issuedAt;
     const existing = await this.accounts.findByAuthSubject(provider, subject);
     // 初回アクセスならここで作る。作られるロールは常に buyer。
     const account = existing ?? (await this.accounts.provision(provider, subject));

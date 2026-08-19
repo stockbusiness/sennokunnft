@@ -275,3 +275,37 @@ function safeErrorSummary(error: unknown): string {
   }
   return 'stripe request failed';
 }
+
+/**
+ * 新しい鍵で決済事業者へ問い合わせ、アカウント識別子を得る（`UD-118`）。
+ *
+ * ⚠️ **業務データを送らない。** アカウントを読むだけの呼び出しにする。
+ * 試し打ちで本物の決済や顧客を作らない。
+ *
+ * ⚠️ **失敗の詳細を返さない。** 例外の本文には、送った鍵の一部や
+ * 内部の URL が混ざりうる。呼び出し側へ渡すのは成否だけにする。
+ *
+ * ⚠️ **これが通って初めて「別のアカウントかどうか」が確定する。**
+ * 二者承認をやめた（2026-08-19 決定）代わりの守りなので、
+ * 有効化の前に必ず通す。
+ */
+export async function probeStripeAccount(
+  secretKey: string,
+  apiVersion: string | null,
+): Promise<{ readonly ok: true; readonly accountRef: string } | { readonly ok: false }> {
+  try {
+    const client = new Stripe(secretKey, {
+      ...(apiVersion === null ? {} : { apiVersion: apiVersion as Stripe.LatestApiVersion }),
+    });
+    /*
+      ⚠️ **`retrieveCurrent()` を使う。** 「この鍵が属するアカウント」を
+         読む呼び出し。`retrieve(id)` は別アカウントを読む口なので、
+         こちらの用途には合わない（そもそも id が分からない）。
+    */
+    const account = await client.accounts.retrieveCurrent();
+    return account.id === '' ? { ok: false } : { ok: true, accountRef: account.id };
+  } catch {
+    // ⚠️ 例外を握りつぶすのではなく、**外へ出さない**。理由は上のとおり。
+    return { ok: false };
+  }
+}

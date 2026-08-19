@@ -32,6 +32,9 @@ import {
   type AdminListingListResponse,
   adminOrderListResponseSchema,
   adminOrderDetailSchema,
+  paymentCredentialListResponseSchema,
+  type PaymentCredentialListResponse,
+  type RegisterPaymentCredentialRequest,
   legalVersionListResponseSchema,
   legalVersionSchema,
   type LegalVersionListResponse,
@@ -568,5 +571,55 @@ export function publishLegalVersion(
     `/api/v1/admin/legal/${encodeURIComponent(kind)}/publish`,
     legalVersionSchema,
     json(request, 'POST'),
+  );
+}
+
+// --- 決済資格情報の世代（`UD-118`）----------------------------------------
+
+/**
+ * ⚠️ **鍵を返す口はない。** 取得できるのは状態と事業者アカウント識別子まで。
+ * 値・先頭・末尾 4 文字のいずれも返らない（2026-08-19 決定）。
+ */
+export function fetchPaymentCredentials(): Promise<AdminResult<PaymentCredentialListResponse>> {
+  return callAdmin('/api/v1/admin/payment-credentials', paymentCredentialListResponseSchema);
+}
+
+/**
+ * 世代を登録する。
+ *
+ * ⚠️ **この値をどこにも残さない。** 通知にも、状態にも、ログにも。
+ * 登録したあとは二度と表示できない。
+ */
+export function registerPaymentCredential(
+  request: RegisterPaymentCredentialRequest,
+): Promise<AdminResult<PaymentCredentialListResponse>> {
+  return callAdmin(
+    '/api/v1/admin/payment-credentials',
+    paymentCredentialListResponseSchema,
+    json(request, 'POST'),
+  );
+}
+
+/** 接続テスト。⚠️ 有効化の前に必ず通す。 */
+export function checkPaymentCredential(
+  id: string,
+): Promise<AdminResult<PaymentCredentialListResponse>> {
+  return callAdmin(
+    `/api/v1/admin/payment-credentials/${encodeURIComponent(id)}/check`,
+    paymentCredentialListResponseSchema,
+    { method: 'POST' },
+  );
+}
+
+/** 有効化・受付切替・退役。⚠️ 本番では確認の入力が要る。 */
+export function actOnPaymentCredential(
+  id: string,
+  action: 'activate' | 'stop-accepting' | 'resume-accepting' | 'retire',
+  confirmation: string | null,
+): Promise<AdminResult<PaymentCredentialListResponse>> {
+  return callAdmin(
+    `/api/v1/admin/payment-credentials/${encodeURIComponent(id)}/${action}`,
+    paymentCredentialListResponseSchema,
+    json({ confirmation }, 'POST'),
   );
 }

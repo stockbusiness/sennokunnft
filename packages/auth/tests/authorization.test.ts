@@ -69,6 +69,10 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'legal.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
   // 同意は本人が行う。会員なら誰でも持つ。
   'legal.consent': { anonymous: false, buyer: true, operator: true, auditor: true },
+  // --- 決済資格情報の世代（`UD-118`）---
+  'payment_credential.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ 印が無い operator は通らない。入金先が変わる操作。
+  'payment_credential.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
 };
 
 describe('権限マトリクスの全セル検証（Z-1）', () => {
@@ -253,6 +257,7 @@ describe('オーナーの印', () => {
     'integration.manage',
     'integration.manage_secret',
     'legal.publish',
+    'payment_credential.manage',
   ] as const;
 
   for (const action of STAFF_ACTIONS) {
