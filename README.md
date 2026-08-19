@@ -185,8 +185,9 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sennokunnft_e2e pnpm 
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sennokunnft_e2e pnpm e2e
 ```
 
-> スマホ幅の「横にはみ出さない」検査は文字の幅を測るので、和文フォントが要る。
-> 手元に無ければ `sudo apt-get install -y fonts-ipafont-gothic`（CI も同じものを入れている）。
+> 和文フォントが無くても検査は通る（CI の run #87 で確認）。入れておくと、
+> 失敗したときのスクリーンショットや trace が読める。
+> `sudo apt-get install -y fonts-ipafont-gothic`
 
 `DATABASE_URL` の有無で起動する構成が変わる。
 API を立てない場合は「API が落ちているときの画面」を、立てる場合は
