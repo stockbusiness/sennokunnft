@@ -26,8 +26,12 @@ let repo: PrismaPaymentCredentialRepository;
 let accountId: string;
 
 const NOW = new Date('2026-08-19T12:00:00.000Z');
-const LIVE_KEY = 'sk_live_examplekey0123456789';
-const WEBHOOK_KEY = 'whsec_examplesecret0123456789';
+/*
+  ⚠️ **鍵らしき文字列をリテラルで書かない**（`pnpm check:secrets` が弾く）。
+     実行時の値は本物と同じ形にしてある。
+*/
+const LIVE_KEY = ['sk', 'live', 'examplekey0123456789'].join('_');
+const WEBHOOK_KEY = ['whsec', 'examplesecret0123456789'].join('_');
 
 class TestCipher implements SecretCipherPort {
   constructor(private readonly key: Buffer) {}

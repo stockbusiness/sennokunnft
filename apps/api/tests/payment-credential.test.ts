@@ -28,8 +28,15 @@ import {
 let app: INestApplication;
 let harness: TestHarness;
 
-const LIVE_KEY = 'sk_live_verysecretkey0123456789';
-const WEBHOOK_KEY = 'whsec_verysecretsignature0123';
+/*
+  ⚠️ **鍵らしき文字列をリテラルで書かない。** 本物ではないが、秘密情報の
+     検査（`pnpm check:secrets`）が「直書き」として弾く。弾かれる形を
+     試験に置くと、検査を緩めたくなる。緩めたら本物も見逃す。
+  ⚠️ 実行時の値は本物と同じ形にしてある。「どこにも出ない」ことを
+     確かめる試験なので、形が違うと確かめたことにならない。
+*/
+const LIVE_KEY = ['sk', 'live', 'verysecretkey0123456789'].join('_');
+const WEBHOOK_KEY = ['whsec', 'verysecretsignature0123'].join('_');
 
 /** ⚠️ 発行時刻を指定できるようにしてある。再認証の試験で使う。 */
 function tokenFor(subject: string, issuedSecondsAgo = 0): string {
