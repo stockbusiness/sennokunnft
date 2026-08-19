@@ -36,8 +36,16 @@ async function main(): Promise<void> {
         authSubject: 'seed-operator',
         displayName: '開発用の運営',
         role: 'operator',
+        /*
+          ⚠️ **オーナーの印を付けてある。** 手元では、これが無いと
+             スタッフ管理・外部連携・法務文書の公開が一切できない。
+             昇格 API は作っていない（`UD-803`）ので、印を配れる人が
+             どこにもいない状態になる。
+          ⚠️ **本番では実行されない**（冒頭で `APP_ENV=production` を弾く）。
+        */
+        isOwner: true,
       },
-      update: { role: 'operator' },
+      update: { role: 'operator', isOwner: true },
     });
 
     const samples = [

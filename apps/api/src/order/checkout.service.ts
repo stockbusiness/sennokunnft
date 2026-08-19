@@ -15,6 +15,17 @@ import { DomainErrorException } from '../common/domain-error.filter';
 
 export interface CheckoutServiceConfig {
   readonly provider: string;
+  /**
+   * 最終確認画面に出すべき事項（特商法12条の6）を、いま掲げられるか。
+   *
+   * ⚠️ **「表示したか」ではなく「表示できるか」。** 実際に出すのは画面の
+   * 仕事で、ここは出すものが揃っているかだけを見る。
+   *
+   * ⚠️ **揃っていなければ支払い口を作らせない。** 表示義務を果たせない
+   * 状態での通信販売は、販売そのものが法に触れる。手数料率が 0 のときに
+   * 作らせないのと同じ考え方で、「売れない」ほうへ倒す。
+   */
+  readonly canDiscloseCheckoutTerms: () => Promise<boolean>;
 }
 
 /**
@@ -51,6 +62,24 @@ export class CheckoutService {
     //    注文IDの総当たりで存在を確かめられる。
     if (order === null || order.accountId !== input.accountId) {
       throw new DomainErrorException('ARTWORK_NOT_AVAILABLE');
+    }
+
+    /*
+      ⚠️ **在庫や金額より先に見る。** 掲げるものが無ければ、そもそも
+         この申込みを受けられない。あとから弾くと、購入者に手間を
+         かけさせてから断ることになる。
+      ⚠️ 購入者には設定の中身を見せない。手数料率が未設定のときと
+         同じ符号にして、「準備中」とだけ伝える。
+    */
+    if (!(await this.config.canDiscloseCheckoutTerms())) {
+      await this.audit.record({
+        actorAccountId: input.accountId,
+        action: 'checkout.rejected',
+        targetType: 'order',
+        targetId: order.id,
+        summary: { reason: 'TOKUSHOHO_NOT_PUBLISHED', orderNumber: order.orderNumber },
+      });
+      throw new DomainErrorException('SALES_SETUP_INCOMPLETE');
     }
 
     const attempts = await this.payments.listAttempts(order.id);

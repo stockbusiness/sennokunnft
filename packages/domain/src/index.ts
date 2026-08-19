@@ -184,6 +184,14 @@ export {
 } from './legal/render';
 
 export {
+  CHECKOUT_NOTICE_FIELD_KEYS,
+  canDiscloseCheckoutTerms,
+  checkoutNoticeFrom,
+  type CheckoutLegalNotice,
+  type CheckoutNoticeFieldKey,
+} from './legal/checkout-notice';
+
+export {
   CONSENT_REQUIRED_KINDS,
   evaluateConsentRequirement,
   requiresConsent,

@@ -109,6 +109,20 @@ export const LEGAL_COPY = {
   consentRequired: '利用規約への同意にチェックを入れてください。',
   consentMismatch: '規約が更新されました。お手数ですが、画面を読み込み直してください。',
 
+  // --- 購入の最終確認画面（特商法12条の6）---
+  /**
+   * ⚠️ **「特商法のページを見てください」で済ませない。** 通信販売では、
+   * 申込みの**最終確認画面そのもの**に出す必要がある。リンクだけでは
+   * 要件を満たさない。
+   */
+  checkoutTermsHeading: 'お申し込みの条件',
+  checkoutTermsFull: '特定商取引法に基づく表記（全文）',
+  checkoutTermsTerms: '利用規約',
+  /** 掲げられないときの案内。⚠️ 設定の中身を購入者に見せない。 */
+  checkoutTermsUnavailable: '現在、この作品の購入準備を行っています',
+  checkoutTermsUnavailableHint:
+    'お手数ですが、しばらくしてからもう一度ご確認ください。ご迷惑をおかけいたします。',
+
   errorNotDraft: 'すでに公開されている版は書き換えられません。画面を読み込み直してください。',
   errorIncomplete: '公開に必要な項目が入力されていません。',
   errorInvalid: '入力内容をご確認ください。HTMLタグは使えません。',

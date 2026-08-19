@@ -5,8 +5,8 @@ import {
   TOKUSHOHO_FIELD_KEYS,
   TOKUSHOHO_FIELD_MAX,
 } from '@sengoku/domain';
-import { renderLegalBody } from '@sengoku/domain';
-import type { LegalBlock, LegalDocumentKind } from '@sengoku/domain';
+import { renderLegalBody, checkoutNoticeFrom, CHECKOUT_NOTICE_FIELD_KEYS } from '@sengoku/domain';
+import type { CheckoutLegalNotice, LegalBlock, LegalDocumentKind } from '@sengoku/domain';
 
 /*
   ⚠️ **web はドメインへ直接依存できない**（`check:deps` の許可表）。
@@ -14,8 +14,8 @@ import type { LegalBlock, LegalDocumentKind } from '@sengoku/domain';
      ここで書き直さないこと。書き直すと、管理画面の下書きと公開ページで
      見出しの解釈が食い違う。
 */
-export { renderLegalBody };
-export type { LegalBlock, LegalDocumentKind };
+export { renderLegalBody, checkoutNoticeFrom, CHECKOUT_NOTICE_FIELD_KEYS };
+export type { CheckoutLegalNotice, LegalBlock, LegalDocumentKind };
 import { z } from '@sengoku/validation';
 
 /**

@@ -68,8 +68,16 @@ import type {
   LegalConsentRecord,
   RecordConsentCommand,
   ConsentRequiredKind,
+  TokushohoFields,
 } from '@sengoku/domain';
-import { canManuallyResend, err, ok, reserveSupply, PAYMENT_API_ENDPOINT } from '@sengoku/domain';
+import {
+  canManuallyResend,
+  err,
+  ok,
+  reserveSupply,
+  PAYMENT_API_ENDPOINT,
+  TOKUSHOHO_FIELD_KEYS,
+} from '@sengoku/domain';
 import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
 
@@ -846,6 +854,20 @@ export class InMemoryLegalDocuments implements LegalDocumentRepository {
     this.rows.push(version);
   }
 
+  /**
+   * その種類の版をすべて取り除く。
+   *
+   * ⚠️ **本物には無い操作。** 法務文書は消さない。ここにあるのは、
+   * 「まだ公開していない状態」を試験で作るためだけ。
+   */
+  removeAll(kind: LegalDocumentKind): void {
+    for (let i = this.rows.length - 1; i >= 0; i -= 1) {
+      if (this.rows[i]?.kind === kind) {
+        this.rows.splice(i, 1);
+      }
+    }
+  }
+
   listVersions(kind: LegalDocumentKind): Promise<readonly LegalDocumentVersion[]> {
     return Promise.resolve(
       this.rows.filter((row) => row.kind === kind).sort((a, b) => b.version - a.version),
@@ -1495,6 +1517,33 @@ export interface TestHarness extends AppDependencies {
   readonly legalConsents: InMemoryLegalConsents;
 }
 
+/**
+ * 公開済みの特商法表記（試験用）。
+ *
+ * ⚠️ **中身は試験用の文字列。** 本物の表記ではない。実際の文面は
+ * `UD-111` の法務確認を経て、管理画面から入力する。
+ */
+export function publishedTokushoho(): LegalDocumentVersion {
+  const fields = Object.fromEntries(
+    TOKUSHOHO_FIELD_KEYS.map((key) => [key, `試験用: ${key}`]),
+  ) as unknown as TokushohoFields;
+  return {
+    id: 'tokushoho-seed',
+    kind: 'tokushoho',
+    version: 1,
+    status: 'published',
+    title: '特定商取引法に基づく表記',
+    bodyText: null,
+    tokushoho: fields,
+    effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+    requiresReconsent: false,
+    publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+    createdByAccountId: 'account-seed',
+    publishedByAccountId: 'account-seed',
+    createdAt: new Date('2026-05-01T00:00:00.000Z'),
+  };
+}
+
 export const TEST_TOKEN_SECRET = 'test-token-secret';
 export const TEST_ISSUER = 'https://auth.test';
 export const TEST_AUDIENCE = 'sennokunnft-test';
@@ -1650,6 +1699,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   );
   const clock = new FixedClock(TEST_NOW);
   const legalRepository = new InMemoryLegalDocuments();
+  /*
+    ⚠️ **既定で特商法表記を公開済みにしておく。** 掲げるものが無ければ
+       支払い口を作らせない決まりなので、これが無いと決済の試験がすべて
+       「販売準備未完了」で落ちる。**その決まり自体を確かめる試験は、
+       `harness.legalRepository.removeAll('tokushoho')` で未公開へ戻す。**
+  */
+  legalRepository.seed(publishedTokushoho());
   const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
     version: '0.1.0',

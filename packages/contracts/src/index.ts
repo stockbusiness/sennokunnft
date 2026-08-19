@@ -206,6 +206,9 @@ export {
   type SaveLegalDraftRequest,
   type TokushohoFieldsInput,
   renderLegalBody,
+  checkoutNoticeFrom,
+  CHECKOUT_NOTICE_FIELD_KEYS,
+  type CheckoutLegalNotice,
   type LegalBlock,
   type LegalDocumentKind,
 } from './legal';

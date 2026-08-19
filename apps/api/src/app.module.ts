@@ -36,6 +36,7 @@ import type {
   EnvIntegrationSummary,
   ProbeOutcome,
 } from '@sengoku/domain';
+import { canDiscloseCheckoutTerms } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
 import { AuthGuard } from './auth/auth.guard';
@@ -420,7 +421,25 @@ export class AppModule implements NestModule {
                     deps.clock,
                     deps.ids,
                     deps.audit,
-                    { provider: payments.provider },
+                    {
+                      provider: payments.provider,
+                      /*
+                        ⚠️ **法務文書を繋いでいない配備では、売らせない。**
+                           「確かめられないから通す」にすると、表示義務を
+                           果たせないまま販売できてしまう。配線の欠けは
+                           運営が直せるが、法に触れた販売は取り消せない。
+                      */
+                      canDiscloseCheckoutTerms: async () => {
+                        if (legalDocuments === undefined) {
+                          return false;
+                        }
+                        const effective = await legalDocuments.documents.findEffective(
+                          'tokushoho',
+                          deps.clock.now(),
+                        );
+                        return canDiscloseCheckoutTerms(effective?.tokushoho ?? null);
+                      },
+                    },
                   ),
               },
               {

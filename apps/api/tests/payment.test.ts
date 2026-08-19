@@ -19,6 +19,7 @@ import {
   TEST_NOW,
   TEST_TOKEN_SECRET,
   TEST_WEBHOOK_SECRET,
+  publishedTokushoho,
   type TestHarness,
 } from './helpers/doubles';
 
@@ -545,5 +546,68 @@ describe('支払い口の期限切れ', () => {
 
     const artwork = await harness.artworks.findById(ARTWORK_ID);
     expect(artwork?.reservedCount).toBe(0);
+  });
+});
+
+/**
+ * 特商法表記が無ければ売らせない（特商法12条の6）。
+ *
+ * ⚠️ **この組の主題は「掲げるものが無ければ売れない」こと。**
+ * 表示義務を果たせない状態での通信販売は、販売そのものが法に触れる。
+ * 手数料率が 0 のときに支払い口を作らせないのと同じ扱いにしてある。
+ */
+describe('特商法表記と支払い口', () => {
+  it('特商法表記が未公開なら支払い口を作れない', async () => {
+    seedPurchasable();
+    const token = actorToken('buyer');
+    const order = await createOrder(token);
+    // ⚠️ 既定では公開済みにしてある。ここだけ未公開へ戻す。
+    harness.legalRepository.removeAll('tokushoho');
+
+    const response = await createCheckout(order.id, token).expect(409);
+
+    expect(response.body.error.code).toBe('SALES_SETUP_INCOMPLETE');
+  });
+
+  it('断ったことを記録に残す。⚠️ 購入者には設定の中身を見せない', async () => {
+    seedPurchasable();
+    const token = actorToken('buyer');
+    const order = await createOrder(token);
+    harness.legalRepository.removeAll('tokushoho');
+
+    const response = await createCheckout(order.id, token).expect(409);
+
+    // 応答に理由の詳細を載せない。
+    expect(JSON.stringify(response.body)).not.toContain('TOKUSHOHO');
+
+    const rejected = harness.audit.entries.filter((entry) => entry.action === 'checkout.rejected');
+    expect(rejected.at(-1)?.summary).toMatchObject({ reason: 'TOKUSHOHO_NOT_PUBLISHED' });
+  });
+
+  it('公開済みなら作れる', async () => {
+    seedPurchasable();
+    const token = actorToken('buyer');
+    const order = await createOrder(token);
+    await createCheckout(order.id, token).expect(201);
+  });
+
+  /*
+    ⚠️ **項目が 1 つでも空なら売らせない。** 半端に出すと、出ている
+       項目だけを見て「表示している」と思い込む。
+  */
+  it('返品特約が空欄なら作れない', async () => {
+    seedPurchasable();
+    const token = actorToken('buyer');
+    const order = await createOrder(token);
+
+    const complete = publishedTokushoho();
+    const fields = complete.tokushoho;
+    if (fields === null) {
+      throw new Error('seed is broken');
+    }
+    harness.legalRepository.removeAll('tokushoho');
+    harness.legalRepository.seed({ ...complete, tokushoho: { ...fields, returnPolicy: '' } });
+
+    await createCheckout(order.id, token).expect(409);
   });
 });
