@@ -12,6 +12,7 @@ import {
   PrismaCommonUserLinkRepository,
   PrismaIntegrationRepository,
   PrismaWalletDeliveryOutboxRepository,
+  PrismaOrderRepository,
   type PrismaClient,
 } from '@sengoku/database';
 import {
@@ -21,9 +22,11 @@ import {
   parseEncryptionKeys,
   SystemClock,
 } from '@sengoku/integrations';
+import { RELEASE_BATCH_SIZE } from '@sengoku/domain';
 import { createLogger } from '@sengoku/observability';
 import { createCommonUserLinkJob } from './common-user-job';
 import { createWalletDeliveryJob } from './wallet-delivery-job';
+import { createReservationReleaseJob } from './reservation-release-job';
 import { createWalletDeliveryResolver } from './wallet-delivery-config';
 import { WorkerRunner, type JobHandler } from './runner';
 
@@ -168,7 +171,32 @@ async function bootstrap(): Promise<void> {
     logger.info({ batchSize: env.WALLET_DELIVERY_BATCH_SIZE }, 'Wallet 配送を有効化しました');
   }
 
-  // 発行ジョブ・期限切れ回収は Phase 5-6 で追加する。
+  /*
+    期限切れのお取り置きの解放（決済 Phase P1・指示書 §4.4）。
+
+    ⚠️ **フラグで切らない。** 解放しないと、決済されなかった枠が
+       永久に押さえられたままになり、在庫があるのに買えなくなる。
+       止めてよい仕事ではないので、常に登録する。
+
+    ⚠️ **API 側の内部エンドポイントと二重に持つ。** どちらか一方だけを
+       置くと、worker を常駐させない配備（UD-302 未決）では誰も掃除せず、
+       常駐させる配備では cron を設定し忘れる。同じ処理を 2 経路から
+       呼んでも、条件付き更新が二重解放を防ぐ。
+  */
+  {
+    const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+    const releaseClock = new SystemClock();
+    handlers.push(
+      createReservationReleaseJob({
+        orders: new PrismaOrderRepository(prisma),
+        logger,
+        now: () => releaseClock.now(),
+        batchSize: RELEASE_BATCH_SIZE,
+      }),
+    );
+  }
+
+  // 発行ジョブは Phase 5-6 で追加する。
 
   const runner = new WorkerRunner({
     handlers,

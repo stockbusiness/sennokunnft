@@ -7,6 +7,8 @@ import {
   TEST_DATABASE_URL,
   createTestClient,
   integrationTestsAvailable,
+  orderLineSeedFields,
+  orderSeedFields,
   resetDatabase,
 } from '../helpers/database';
 
@@ -67,6 +69,7 @@ async function seedEntitlement(): Promise<string> {
       totalAmount: 1000,
       totalCurrency: 'JPY',
       idempotencyKey: randomUUID(),
+      ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 1000 }),
     },
   });
   const listing = await prisma.listing.create({
@@ -81,6 +84,7 @@ async function seedEntitlement(): Promise<string> {
       unitPriceAmount: 1000,
       unitPriceCurrency: 'JPY',
       quantity: 1,
+      ...orderLineSeedFields({ creatorAccountId: accountId, unitPriceAmount: 1000, quantity: 1 }),
     },
   });
   const entitlement = await prisma.entitlement.create({

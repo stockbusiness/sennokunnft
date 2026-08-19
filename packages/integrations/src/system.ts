@@ -5,6 +5,7 @@ import type {
   IdGeneratorPort,
   IdempotencyKeyPort,
   IssuedClaimToken,
+  RandomPort,
 } from '@sengoku/domain';
 import { mintIdempotencyPayload } from '@sengoku/domain';
 
@@ -32,6 +33,19 @@ export class FixedClock implements ClockPort {
 export class UuidGenerator implements IdGeneratorPort {
   generate(): string {
     return randomUUID();
+  }
+}
+
+/**
+ * 暗号論的に安全な乱数。
+ *
+ * ⚠️ **`Math.random()` を使わない。** 出力を数個観測すれば内部状態を
+ * 復元でき、以後の値を予測できる。注文番号のように「他人のものを
+ * 当てられては困る」値には使えない。
+ */
+export class CryptoRandom implements RandomPort {
+  bytes(length: number): Uint8Array {
+    return randomBytes(length);
   }
 }
 

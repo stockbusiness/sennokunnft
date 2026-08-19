@@ -27,6 +27,8 @@ import {
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
   PrismaIdempotencyStore,
+  PrismaOrderRepository,
+  PrismaCommonUserLinkRepository,
   PrismaClaimRepository,
   PrismaNonceStore,
   type PrismaClient,
@@ -42,6 +44,7 @@ import {
   SystemClock,
   contentHash,
   UuidGenerator,
+  CryptoRandom,
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
@@ -245,6 +248,22 @@ async function bootstrap(): Promise<void> {
       auditLogs: new PrismaAuditLogReadRepository(prisma),
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
+      /*
+        注文と在庫の仮引当（決済 Phase P0・P1）。
+
+        ⚠️ **手数料率は設定から渡す。** ブラウザからは受け取らない（指示書 §4.2）。
+           既定 0 は「まだ決めていない」の意味で、決定ではない（UD-109）。
+        ⚠️ **`INTERNAL_JOB_TOKEN` が無ければ内部ジョブの経路は生えない。**
+           「未設定なら素通し」にすると、設定を忘れた環境で外から在庫を操作できる。
+      */
+      orders: {
+        repository: new PrismaOrderRepository(prisma),
+        commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
+        random: new CryptoRandom(),
+        platformFeeRateBps: env.PLATFORM_FEE_RATE_BPS,
+        reservationMinutes: env.ORDER_RESERVATION_MINUTES,
+        internalJobToken: env.INTERNAL_JOB_TOKEN,
+      },
       tokenVerifier,
       clock: new SystemClock(),
       ids: new UuidGenerator(),

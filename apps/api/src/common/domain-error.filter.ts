@@ -36,6 +36,12 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   MINT_ALREADY_EXISTS: HttpStatus.CONFLICT,
   MINT_ATTEMPTS_EXHAUSTED: HttpStatus.CONFLICT,
   IDEMPOTENCY_CONFLICT: HttpStatus.CONFLICT,
+  // --- 注文と決済（決済 Phase P0・P1）---
+  // 設定の誤り。利用者の操作では起こらないので 5xx 側に置く。
+  INVALID_FEE_RATE: HttpStatus.INTERNAL_SERVER_ERROR,
+  ORDER_TRANSITION_NOT_ALLOWED: HttpStatus.CONFLICT,
+  ORDER_IDEMPOTENCY_MISMATCH: HttpStatus.CONFLICT,
+  ORDER_TOO_MANY_ITEMS: HttpStatus.BAD_REQUEST,
   // --- 運営スタッフの招待と権限（`UD-803`）---
   STAFF_INVITE_INVALID: HttpStatus.BAD_REQUEST,
   // ⚠️ 「宛先が違う」も「もう使えない」もこれ 1 つ。
@@ -99,6 +105,13 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   MINT_ALREADY_EXISTS: 'すでに発行済みです。',
   MINT_ATTEMPTS_EXHAUSTED: '発行処理が完了しませんでした。運営までお問い合わせください。',
   IDEMPOTENCY_CONFLICT: '同じ操作が別の内容で送信されました。もう一度お試しください。',
+  // 利用者に原因は無い。時間をおいて試せることだけ伝える。
+  INVALID_FEE_RATE: 'ただいまお手続きできませんでした。しばらくしてからお試しください。',
+  // ⚠️ どの状態からどの状態へ、を文言に出さない。内部の進み方を教えることになる。
+  ORDER_TRANSITION_NOT_ALLOWED: 'この操作は、いまのご注文の状態では行えません。',
+  ORDER_IDEMPOTENCY_MISMATCH:
+    '先ほどのお手続きとは別の商品が指定されました。画面を開き直してお試しください。',
+  ORDER_TOO_MANY_ITEMS: '一度にご注文いただけるのは1点までです。',
   STAFF_INVITE_INVALID: 'この内容では招待できません。宛先と役割をご確認ください。',
   STAFF_INVITE_NOT_OPEN: 'この招待はお使いいただけません。',
   STAFF_INVITE_EXPIRED: 'この招待は期限が過ぎています。もう一度お送りください。',

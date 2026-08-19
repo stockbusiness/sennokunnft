@@ -1,4 +1,5 @@
-import type { Artwork, Listing } from '@sengoku/domain';
+import type { Artwork, Listing, OrderView, ReservationStatus } from '@sengoku/domain';
+import { Prisma } from '../../generated/client';
 import type { Artwork as ArtworkRow, Listing as ListingRow } from '../../generated/client';
 
 /**
@@ -83,4 +84,80 @@ export function decodeCursor(raw: string | undefined): Cursor | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 注文を画面向けの形へ読み出すときの `include`。
+ *
+ * ⚠️ **`select` を絞ってある関連だけを引く。** 何も指定せずに関連ごと引くと、
+ * 決済事業者側の識別子まで応答へ載る道ができる。ここでは
+ * 「決済行が有るか」「受取権が何件か」だけが要る。
+ */
+/** 冪等キーの識別表示に使う長さ。⚠️ 全体を層の外へ出さない。 */
+const IDEMPOTENCY_KEY_PREFIX_LENGTH = 8;
+
+export const ORDER_VIEW_INCLUDE = {
+  lines: true,
+  reservations: { orderBy: [{ createdAt: 'desc' }] },
+  payments: { select: { id: true } },
+  entitlements: { select: { id: true } },
+} satisfies Prisma.OrderInclude;
+
+type OrderRowWithRelations = Prisma.OrderGetPayload<{ include: typeof ORDER_VIEW_INCLUDE }>;
+
+export function toOrderView(row: OrderRowWithRelations): OrderView {
+  const line = row.lines[0];
+  // 予約は新しい順。有効なものがあればそれを、無ければ最後の 1 件を見せる。
+  // ⚠️ 「無い」と「解放済み」を同じ表示にしない。運用が判断できなくなる。
+  const reservation =
+    row.reservations.find((entry) => entry.status === 'reserved') ?? row.reservations[0];
+  return {
+    id: row.id,
+    orderNumber: row.orderNumber,
+    accountId: row.accountId,
+    creatorAccountId: row.creatorAccountId,
+    status: row.status as OrderView['status'],
+    paymentStatus: row.paymentStatus as OrderView['paymentStatus'],
+    fulfillmentStatus: row.fulfillmentStatus as OrderView['fulfillmentStatus'],
+    refundStatus: row.refundStatus as OrderView['refundStatus'],
+    currency: row.totalCurrency.trim(),
+    subtotalAmount: row.subtotalAmount,
+    discountAmount: row.discountAmount,
+    totalAmount: row.totalAmount,
+    platformFeeRateBps: row.platformFeeRateBps,
+    platformFeeAmount: row.platformFeeAmount,
+    creatorAmount: row.creatorAmount,
+    reservationExpiresAt: row.reservedUntil,
+    paidAt: row.paidAt,
+    // ⚠️ ここで切り詰める。全体を層の外へ出さない。
+    idempotencyKeyPrefix: row.idempotencyKey.slice(0, IDEMPOTENCY_KEY_PREFIX_LENGTH),
+    createdAt: row.createdAt,
+    item:
+      line === undefined
+        ? null
+        : {
+            id: line.id,
+            listingId: line.listingId,
+            artworkId: line.artworkId,
+            creatorAccountId: line.creatorAccountId,
+            titleSnapshot: line.artworkTitleSnapshot,
+            unitPriceAmount: line.unitPriceAmount,
+            unitPriceCurrency: line.unitPriceCurrency.trim(),
+            quantity: line.quantity,
+            totalAmount: line.totalAmount,
+          },
+    reservation:
+      reservation === undefined
+        ? null
+        : {
+            id: reservation.id,
+            status: reservation.status as ReservationStatus,
+            quantity: reservation.quantity,
+            expiresAt: reservation.expiresAt,
+            consumedAt: reservation.consumedAt,
+            releasedAt: reservation.releasedAt,
+          },
+    hasPayment: row.payments.length > 0,
+    entitlementCount: row.entitlements.length,
+  };
 }

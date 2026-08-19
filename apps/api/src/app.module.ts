@@ -21,6 +21,9 @@ import type {
   StaffMemberRepository,
   IntegrationRepository,
   AuditLogReadPort,
+  OrderRepository,
+  CommonUserLinkRepository,
+  RandomPort,
   WalletDeliveryAdminPort,
   WalletDeliveryOutboxPort,
   IntegrationEnvironment,
@@ -59,6 +62,13 @@ import { IntegrationController } from './integration/integration.controller';
 import { IntegrationService_ } from './integration/integration.service';
 import { WalletDeliveryController } from './wallet-delivery/wallet-delivery.controller';
 import { WalletDeliveryAdminService } from './wallet-delivery/wallet-delivery.service';
+import { OrderController, AdminOrderController } from './order/order.controller';
+import { OrderService } from './order/order.service';
+import {
+  INTERNAL_JOB_CONFIG,
+  InternalJobsController,
+  type InternalJobConfig,
+} from './order/internal-jobs.controller';
 import { AuditLogController } from './audit/audit.controller';
 import { AuditLogQueryService } from './audit/audit.service';
 import { HealthController } from './health/health.controller';
@@ -134,6 +144,24 @@ export interface AppDependencies {
   /** 監査ログの閲覧（指示書 §5）。 */
   readonly auditLogs?: AuditLogReadPort;
   readonly idempotency: IdempotencyStore;
+  /**
+   * 注文と在庫の仮引当（決済 Phase P0・P1）。
+   *
+   * ⚠️ **手数料率をここで受け取る。** ブラウザからは受け取らない
+   * （指示書 §4.2）。既定 0 は「まだ決めていない」の意味で、
+   * 決定ではない（`UD-109`）。
+   *
+   * ⚠️ `internalJobToken` が無ければ内部ジョブの経路を生やさない。
+   * 「未設定なら素通し」にすると、設定を忘れた環境で外から在庫を操作できる。
+   */
+  readonly orders: {
+    readonly repository: OrderRepository;
+    readonly commonUserLinks: CommonUserLinkRepository;
+    readonly random: RandomPort;
+    readonly platformFeeRateBps: number;
+    readonly reservationMinutes: number;
+    readonly internalJobToken?: string | undefined;
+  };
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
@@ -214,6 +242,7 @@ export class AppModule implements NestModule {
     const integrations = deps.integrations;
     const walletDeliveries = deps.walletDeliveries;
     const auditLogs = deps.auditLogs;
+    const internalJobToken = deps.orders.internalJobToken;
     return {
       module: AppModule,
       controllers: [
@@ -224,6 +253,11 @@ export class AppModule implements NestModule {
         CreatorCatalogController,
         StaffController,
         StaffInvitationAcceptController,
+        OrderController,
+        AdminOrderController,
+        ...(internalJobToken === undefined || internalJobToken === ''
+          ? []
+          : [InternalJobsController]),
         ...(integrations === undefined ? [] : [IntegrationController]),
         ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
         ...(auditLogs === undefined ? [] : [AuditLogController]),
@@ -273,6 +307,32 @@ export class AppModule implements NestModule {
           provide: IdempotencyService,
           useFactory: () => new IdempotencyService(deps.idempotency, deps.clock),
         },
+        {
+          provide: OrderService,
+          useFactory: () =>
+            new OrderService(
+              deps.orders.repository,
+              deps.listings,
+              deps.artworks,
+              deps.orders.commonUserLinks,
+              deps.clock,
+              deps.ids,
+              deps.orders.random,
+              deps.audit,
+              {
+                platformFeeRateBps: deps.orders.platformFeeRateBps,
+                reservationMinutes: deps.orders.reservationMinutes,
+              },
+            ),
+        },
+        ...(internalJobToken === undefined || internalJobToken === ''
+          ? []
+          : [
+              {
+                provide: INTERNAL_JOB_CONFIG,
+                useFactory: (): InternalJobConfig => ({ token: internalJobToken }),
+              },
+            ]),
         ...(integrations === undefined
           ? []
           : [

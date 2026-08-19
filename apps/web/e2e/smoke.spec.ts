@@ -110,6 +110,20 @@ test.describe('スマートフォン幅', () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
+  /*
+    ⚠️ 注文の一覧は表にしていない。指示書 §9.1 が求める項目を表にすると
+       幅 48rem になり、狭い画面では金額が「￥12,00」で切れ、作品名が
+       一文字ずつ縦に割れた。1 件 1 枚の札に倒してある。
+       ここは「そう直したこと」を守るための検査。
+  */
+  test('注文の一覧が横にはみ出さない', async ({ page }) => {
+    await page.goto('/admin/orders');
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
   test('本文の文字が小さすぎない', async ({ page }) => {
     // 40代以上を主な想定利用者としているため、本文を 16px 未満にしない。
     await page.goto('/');

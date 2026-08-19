@@ -76,6 +76,9 @@ model Account {
   updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   orders               Order[]
+  /// 自分が出品者として受けた注文（1 注文 1 クリエイター）。
+  createdOrders        Order[]              @relation("OrderCreator")
+  createdOrderLines    OrderLine[]          @relation("OrderLineCreator")
   entitlements         Entitlement[]        @relation("EntitlementPurchaser")
   claimedEntitlements  Entitlement[]        @relation("EntitlementClaimer")
   auditLogs            AuditLog[]
@@ -266,6 +269,7 @@ model Artwork {
   listings     Listing[]
   orderLines   OrderLine[]
   entitlements Entitlement[]
+  reservations InventoryReservation[]
 
   @@index([status])
   /// 出品者が「自分の作品」を引くための索引。一覧のたびに全件走査させない。
@@ -296,8 +300,9 @@ model Listing {
   createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  artwork    Artwork     @relation(fields: [artworkId], references: [id])
-  orderLines OrderLine[]
+  artwork      Artwork                @relation(fields: [artworkId], references: [id])
+  orderLines   OrderLine[]
+  reservations InventoryReservation[]
 
   @@index([artworkId])
   @@index([status, startsAt, endsAt])
@@ -309,11 +314,19 @@ model Listing {
 // 注文と決済
 // ============================================================================
 
+/// 注文の進み具合（決済 Phase P0・P1・指示書 §7）。
+///
+/// ⚠️ `failed` と `refunded` は**新しい注文では使わない**。
+/// 決済の失敗は `payment_status`、返金は `refund_status` が持つ。
+/// 列挙型から消すと過去の行が読めなくなるため、値だけ残してある。
+/// 新しい注文がそこへ遷移しないことは、ドメインの遷移表が守る。
 enum OrderStatus {
   pending
+  checkout_created
   paid
-  failed
   expired
+  cancelled
+  failed
   refunded
 }
 
@@ -333,12 +346,34 @@ enum OrderSource {
 
 model Order {
   id             String      @id @default(uuid()) @db.Uuid
+  /// 人が読み上げ、問い合わせで使う番号。⚠️ 参照の正は `id` のまま。
+  orderNumber    String      @unique @map("order_number")
   accountId      String      @map("account_id") @db.Uuid
+  /// 共通顧客ID。まだ解決できていない購入者があるため NULL を許す。
+  commonUserId   String?     @map("common_user_id")
+  /// ⚠️ 1 注文 1 クリエイター（指示書 §3-4）。明細と必ず一致させる。
+  creatorAccountId String    @map("creator_account_id") @db.Uuid
   status         OrderStatus @default(pending)
   /// 出自。既定は購入。Fixture だけが `STAGING_FIXTURE` を入れる。
   source         OrderSource @default(PURCHASE)
+  /// 商品の税込価格（単価 × 数量）。
+  subtotalAmount Int         @map("subtotal_amount")
+  /// 値引額。⚠️ 今回は常に 0。列と計算だけ先に用意してある。
+  discountAmount Int         @default(0) @map("discount_amount")
+  /// 購入者が支払う額。`subtotal - discount` と CHECK 制約で一致させる。
   totalAmount    Int         @map("total_amount")
   totalCurrency  String      @map("total_currency") @db.Char(3)
+  /// 注文時点の手数料率。⚠️ **bps（1/100 %）の整数**。
+  /// 率を小数で持つと、金額に掛けた瞬間に誤差が入る。
+  platformFeeRateBps Int     @default(0) @map("platform_fee_rate_bps")
+  platformFeeAmount  Int     @default(0) @map("platform_fee_amount")
+  /// クリエイター配分額。`total - platformFee` と CHECK 制約で一致させる。
+  creatorAmount      Int     @map("creator_amount")
+  /// ⚠️ 4 つの状態を 1 本に詰め込まない（指示書 §7）。
+  /// 「決済は成功したが付与に失敗した」を表せなくなる。
+  paymentStatus     String   @default("not_started") @map("payment_status")
+  fulfillmentStatus String   @default("not_started") @map("fulfillment_status")
+  refundStatus      String   @default("none") @map("refund_status")
   /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
   idempotencyKey String      @map("idempotency_key")
   /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
@@ -348,13 +383,19 @@ model Order {
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   account      Account       @relation(fields: [accountId], references: [id])
+  creator      Account       @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
   lines        OrderLine[]
   payments     Payment[]
   entitlements Entitlement[]
+  reservations InventoryReservation[]
 
+  /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
+  /// アプリの重複チェックではなく、DB の制約で担保する。
   @@unique([accountId, idempotencyKey])
   @@index([status, reservedUntil])
   @@index([accountId, createdAt])
+  @@index([creatorAccountId, createdAt(sort: Desc)])
+  @@index([paymentStatus, createdAt(sort: Desc)])
   /// Fixture 由来の行を洗い出して掃除するため。
   @@index([source, createdAt])
   @@map("orders")
@@ -367,19 +408,61 @@ model OrderLine {
   orderId              String   @map("order_id") @db.Uuid
   listingId            String   @map("listing_id") @db.Uuid
   artworkId            String   @map("artwork_id") @db.Uuid
+  /// ⚠️ 出品者。注文時点のものを持つ。作品の持ち主が変わっても動かさない。
+  creatorAccountId     String   @map("creator_account_id") @db.Uuid
   artworkTitleSnapshot String   @map("artwork_title_snapshot")
   unitPriceAmount      Int      @map("unit_price_amount")
   unitPriceCurrency    String   @map("unit_price_currency") @db.Char(3)
   quantity             Int
+  /// 単価 × 数量。CHECK 制約で一致を守る。
+  totalAmount          Int      @map("total_amount")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   order        Order         @relation(fields: [orderId], references: [id])
   listing      Listing       @relation(fields: [listingId], references: [id])
   artwork      Artwork       @relation(fields: [artworkId], references: [id])
+  creator      Account       @relation("OrderLineCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
   entitlements Entitlement[]
 
-  @@index([orderId])
+  /// ⚠️ **MVP は 1 注文 1 明細**（指示書 §5.2）。
+  /// `order_id` だけの UNIQUE が「明細は 1 本まで」を DB に守らせる。
+  @@unique([orderId], map: "order_lines_single_item_per_order")
   @@map("order_lines")
+}
+
+/// 在庫の仮引当（決済 Phase P0・P1・指示書 §5.3）。
+///
+/// ⚠️ **在庫を減らす前の「押さえ」を、注文とは別の行として持つ。**
+/// 注文の列に期限だけ書く方式だと、「解放したか」を注文の状態から
+/// 推測することになり、二重解放と解放漏れのどちらも静かに起こる。
+/// 行にして状態を持たせると、解放は「reserved の行を released にする」
+/// という 1 回しか成立しない操作になる。
+///
+/// ⚠️ 部分 UNIQUE 索引 `inventory_reservations_one_active_per_order`
+/// （`WHERE status = 'reserved'`）が「1 注文に有効な予約は 1 件」を守る。
+/// Prisma のスキーマでは条件付き索引を書けないため、
+/// **手書きのマイグレーション側にだけ存在する**。消さないこと。
+model InventoryReservation {
+  id         String    @id @default(uuid()) @db.Uuid
+  orderId    String    @map("order_id") @db.Uuid
+  listingId  String    @map("listing_id") @db.Uuid
+  artworkId  String    @map("artwork_id") @db.Uuid
+  quantity   Int
+  /// `reserved` / `consumed` / `released`。CHECK 制約で縛る。
+  status     String    @default("reserved")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  artwork Artwork @relation(fields: [artworkId], references: [id], onDelete: Restrict)
+
+  /// 期限切れの掃き出しで使う。全件走査させない。
+  @@index([status, expiresAt], map: "inventory_reservations_expiry_idx")
+  @@map("inventory_reservations")
 }
 
 enum PaymentStatus {
@@ -397,12 +480,22 @@ model Payment {
   id                 String        @id @default(uuid()) @db.Uuid
   orderId            String        @map("order_id") @db.Uuid
   provider           String
+  /// Stripe Checkout Session（Phase P2 で埋める）。
   providerSessionRef String?       @map("provider_session_ref")
+  /// Stripe Payment Intent（Phase P2 で埋める）。
   providerPaymentRef String?       @map("provider_payment_ref")
+  /// Stripe Charge（Phase P2 で埋める）。
+  providerChargeRef  String?       @map("provider_charge_ref")
+  /// 決済事業者へ渡す冪等キー。⚠️ 業務の冪等キーとは別物。
+  providerIdempotencyKey String?   @map("provider_idempotency_key")
   status             PaymentStatus @default(pending)
   amount             Int
   currency           String        @db.Char(3)
   amountRefunded     Int           @default(0) @map("amount_refunded")
+  paidAt             DateTime?     @map("paid_at") @db.Timestamptz(6)
+  failureCode        String?       @map("failure_code")
+  /// ⚠️ 外部の応答本文をそのまま入れない。運用が読むための短い要約だけ。
+  failureMessageSafe String?       @map("failure_message_safe")
   createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 

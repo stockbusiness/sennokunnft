@@ -38,17 +38,14 @@ export { validateQuantity, MAX_QUANTITY_PER_ORDER } from './value-objects/quanti
 
 export { createStateMachine, type StateMachine, type TransitionTable } from './state/transition';
 export {
-  ORDER_STATUSES,
   ENTITLEMENT_STATUSES,
   MINT_JOB_STATUSES,
   ARTWORK_STATUSES,
   LISTING_STATUSES,
-  orderStateMachine,
   entitlementStateMachine,
   mintJobStateMachine,
   artworkStateMachine,
   listingStateMachine,
-  type OrderStatus,
   type EntitlementStatus,
   type MintJobStatus,
   type ArtworkStatus,
@@ -403,3 +400,70 @@ export {
 
 export { MANAGED_INTEGRATION_SERVICES, isManagedFromAdmin } from './integration/service';
 export type { EnvIntegrationSummary } from './ports/integration';
+
+// --- 注文（決済 Phase P0・P1）------------------------------------------------
+
+export {
+  ORDER_STATUSES,
+  PAYMENT_STATUSES,
+  FULFILLMENT_STATUSES,
+  REFUND_STATUSES,
+  transitionOrderStatus,
+  transitionPaymentStatus,
+  transitionFulfillmentStatus,
+  transitionRefundStatus,
+  isOrderFinal,
+  isOrderStatus,
+  isOrderPaymentStatus,
+  isFulfillmentStatus,
+  isRefundStatus,
+  type OrderStatus,
+  type OrderPaymentStatus,
+  type FulfillmentStatus,
+  type RefundStatus,
+} from './order/order-status';
+
+export {
+  BPS_DENOMINATOR,
+  DEFAULT_PLATFORM_FEE_RATE_BPS,
+  calculateOrderAmounts,
+  type PricingInput,
+  type OrderAmounts,
+} from './order/pricing';
+
+export { ORDER_NUMBER_PATTERN, generateOrderNumber, isOrderNumber } from './order/order-number';
+
+export {
+  DEFAULT_RESERVATION_MINUTES,
+  createOrder,
+  type CreateOrderInput,
+  type OrderDraft,
+  type OrderItemDraft,
+} from './order/create-order';
+
+export {
+  RESERVATION_STATUSES,
+  RELEASE_BATCH_SIZE,
+  canRelease,
+  isExpired,
+  isReservationStatus,
+  releaseReservationRecord,
+  consumeReservationRecord,
+  type Reservation,
+  type ReservationStatus,
+} from './order/reservation';
+
+export type { RandomPort } from './ports/index';
+
+export type {
+  OrderRepository,
+  CreateOrderCommand,
+  CreateOrderOutcome,
+  OrderItemCommand,
+  OrderView,
+  OrderItemView,
+  ReservationView,
+  ReleasedReservation,
+  OrderListQuery,
+  OrderListPage,
+} from './ports/order';

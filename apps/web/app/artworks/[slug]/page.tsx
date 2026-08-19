@@ -64,11 +64,24 @@ export default async function ArtworkDetailPage({ params }: { params: Promise<{ 
         </dl>
 
         {/*
-          お申し込みは Phase 3。
-          ⚠️ 押せるボタンを置かないのは、押せるのに何も起きない導線を作らないため。
-             押せない見た目にしておけば、最初から期待させずに済む。
+          お申し込みの導線。
+
+          ⚠️ **買えるときだけ出す。** 押せるのに何も起きないボタンを置かない。
+          ⚠️ **ここでログインを要求しない。** 先にログインさせてから
+             「売り切れです」と言うのは、いちばん人を怒らせる順序。
+             確認画面で在庫を見てから案内する。
+          ⚠️ 出品が無い（`listingId` が空）ときは、押す先が無いので出さない。
         */}
-        {artwork.purchasable ? (
+        {artwork.purchasable && artwork.listingId !== null ? (
+          <p className="sengoku-artwork-detail__action">
+            <a
+              className="sengoku-button sengoku-button--large"
+              href={`/checkout/${artwork.listingId}`}
+            >
+              {SITE_COPY.purchaseCta}
+            </a>
+          </p>
+        ) : artwork.purchasable ? (
           <p className="sengoku-action-pending">{SITE_COPY.purchaseComingSoon}</p>
         ) : null}
 

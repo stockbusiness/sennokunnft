@@ -493,6 +493,20 @@ button {
 }
 
 /*
+  値に添える補足。
+
+  ⚠️ **行を変える。** `span` のまま置くと値の直後へ続いてしまい、
+  「未設定（0%）手数料率はまだ決まっていません」のように、
+  値と説明が 1 つの文に見える。実際に画面で確認して見つかった。
+*/
+.sengoku-facts__hint {
+  display: block;
+  margin-top: var(--sengoku-space-1);
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-small);
+}
+
+/*
  * 押せない案内。
  *
  * ⚠️ **押せる見た目にしない。** 朱色のボタンにして何も起きないより、
@@ -690,6 +704,61 @@ button {
  * 表は狭い画面で必ずはみ出す。
  * ページ全体を横スクロールさせず、表だけをスクロールさせる。
  */
+/*
+  注文の一覧（1 件 1 枚の札）。
+
+  ⚠️ **表にしなかった理由を残す。** 指示書 §9.1 が求める項目は 10 個あり、
+  表にすると幅 48rem になる。420px の画面では横スクロールの中に半分が隠れ、
+  金額が「￥12,00」で切れ、作品名が一文字ずつ縦に割れた。
+  管理画面はスマホ操作を前提にする決まりなので、札に倒してある。
+*/
+.sengoku-order-list {
+  list-style: none;
+  margin: var(--sengoku-space-4) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sengoku-space-4);
+}
+
+.sengoku-order-card {
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-paper);
+  padding: var(--sengoku-space-4);
+}
+
+.sengoku-order-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sengoku-space-2);
+  justify-content: space-between;
+}
+
+/* ⚠️ 注文番号は読み上げる値。折り返させない。 */
+.sengoku-order-card__number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sengoku-order-card__item {
+  margin: var(--sengoku-space-2) 0 0;
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-lead);
+}
+
+/* 札の中では上下の罫線を持たない。札の枠が区切りになっている。 */
+.sengoku-facts--compact {
+  border: 0;
+  padding: var(--sengoku-space-2) 0 0;
+}
+
+@media (min-width: 60rem) {
+  .sengoku-order-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .sengoku-table-scroll {
   overflow-x: auto;
   margin-top: var(--sengoku-space-4);
@@ -858,6 +927,31 @@ button {
 .sengoku-button:disabled {
   cursor: progress;
   opacity: 0.6;
+}
+
+/*
+  申し込みのような、そのページで一番したいこと。
+
+  ⚠️ **狭い画面では横幅いっぱいにする。** 指で押す的が小さいと、
+  押し損ねて別の場所に触れる。利用者は 60 代の方が中心で、
+  「押したのに反応しない」は「壊れている」と受け取られる。
+*/
+.sengoku-button--large {
+  min-height: 60px;
+  width: 100%;
+  font-size: var(--sengoku-text-lead);
+}
+
+@media (min-width: 40rem) {
+  .sengoku-button--large {
+    width: auto;
+    min-width: 18rem;
+  }
+}
+
+/* 申し込みの導線を、facts の直後で少し離して置く。 */
+.sengoku-artwork-detail__action {
+  margin: var(--sengoku-space-4) 0 0;
 }
 
 /* 取り消し側の操作。押し間違えを誘わないよう、地の色を持たせない。 */

@@ -157,21 +157,53 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 
 ### 3.4 `orders` — 注文
 
-| 列                          | 型          | 制約                         | 説明                                                   |
-| --------------------------- | ----------- | ---------------------------- | ------------------------------------------------------ |
-| `id`                        | UUID        | PK                           |                                                        |
-| `account_id`                | UUID        | NOT NULL, FK → `accounts.id` | 購入者                                                 |
-| `status`                    | TEXT        | NOT NULL                     | `pending` / `paid` / `failed` / `expired` / `refunded` |
-| `total_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`       | 明細合計のスナップショット                             |
-| `total_currency`            | CHAR(3)     | NOT NULL                     |                                                        |
-| `idempotency_key`           | TEXT        | NOT NULL                     | 注文作成の冪等キー                                     |
-| `reserved_until`            | TIMESTAMPTZ | NULL                         | 仮引当の期限                                           |
-| `paid_at`                   | TIMESTAMPTZ | NULL                         |                                                        |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                     |                                                        |
+| 列                          | 型          | 制約                         | 説明                                                                          |
+| --------------------------- | ----------- | ---------------------------- | ----------------------------------------------------------------------------- |
+| `id`                        | UUID        | PK                           |                                                                               |
+| `order_number`              | TEXT        | NOT NULL, UNIQUE             | 人が読み上げる番号。**参照の正は `id`**                                       |
+| `account_id`                | UUID        | NOT NULL, FK → `accounts.id` | 購入者                                                                        |
+| `common_user_id`            | TEXT        | NULL                         | 共通顧客ID。解決できていない購入者があるため NULL 可                          |
+| `creator_account_id`        | UUID        | NOT NULL, FK → `accounts.id` | 出品者。**1 注文 1 クリエイター**                                             |
+| `status`                    | TEXT        | NOT NULL                     | `pending` / `checkout_created` / `paid` / `expired` / `cancelled`             |
+| `payment_status`            | TEXT        | NOT NULL                     | `not_started` / `pending` / `succeeded` / `failed` / `cancelled` / `refunded` |
+| `fulfillment_status`        | TEXT        | NOT NULL                     | `not_started` / `processing` / `fulfilled` / `failed`                         |
+| `refund_status`             | TEXT        | NOT NULL                     | `none` / `pending` / `partially_refunded` / `refunded` / `failed`             |
+| `subtotal_amount`           | INTEGER     | NOT NULL, CHECK `>= 0`       | 単価 × 数量                                                                   |
+| `discount_amount`           | INTEGER     | NOT NULL DEFAULT 0           | 今回は常に 0。列と計算だけ先に用意                                            |
+| `total_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`       | `subtotal - discount` と一致（CHECK）                                         |
+| `total_currency`            | CHAR(3)     | NOT NULL                     |                                                                               |
+| `platform_fee_rate_bps`     | INTEGER     | NOT NULL DEFAULT 0           | 注文時点の手数料率。**bps の整数**（0〜10000）                                |
+| `platform_fee_amount`       | INTEGER     | NOT NULL DEFAULT 0           |                                                                               |
+| `creator_amount`            | INTEGER     | NOT NULL                     | `total - platform_fee` と一致（CHECK）                                        |
+| `idempotency_key`           | TEXT        | NOT NULL                     | 注文作成の冪等キー                                                            |
+| `reserved_until`            | TIMESTAMPTZ | NULL                         | 仮引当の期限                                                                  |
+| `paid_at`                   | TIMESTAMPTZ | NULL                         |                                                                               |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                     |                                                                               |
 
 - `UNIQUE (account_id, idempotency_key)` — 同一利用者の二重注文を防ぐ
+- `UNIQUE (order_number)`
+- CHECK `orders_total_matches_subtotal` / `orders_split_matches_total`
+- CHECK `orders_fee_rate_range`（0〜10000）/ `orders_amounts_non_negative`
+- CHECK `orders_paid_has_time` — 決済成功・`paid` なら `paid_at` が入る
 - INDEX `(status, reserved_until)` — 期限切れ回収ワーカー用
-- INDEX `(account_id, created_at DESC)`
+- INDEX `(account_id, created_at DESC)` / `(creator_account_id, created_at DESC)`
+- INDEX `(payment_status, created_at DESC)`
+
+⚠️ **状態を 4 本に分けてある（決済 Phase P0・指示書 §7）。**
+1 本に詰めると「決済は成功したが付与に失敗した」を表せない。
+表せない状態が起きたとき、その行は必ずどちらかの嘘になる。
+
+⚠️ **`failed` / `refunded` は新しい注文では使わない。** 列挙型の値としては
+過去の行のために残してあるが、決済の失敗は `payment_status`、返金は
+`refund_status` が持つ。新しい注文がそこへ遷移しないことは、
+ドメインの遷移表（`packages/domain/src/order/order-status.ts`）が守る。
+
+⚠️ **手数料率を小数で持たない。** 率を金額に掛けた瞬間に誤差が入る。
+10% は `1000`。配分額は `total - platform_fee` の**引き算**で出す。
+それぞれ独立に計算すると、丸めの向き次第で合計が合わなくなる。
+
+❓ **未決定 `UD-109` / `UD-114`:** 手数料率と、決済会社の手数料の負担者。
+既定 0 は「まだ決めていない」であって決定ではない。
 
 ✅ **事実:** 購入者は**ログイン必須**（Claim時の本人照合に必要なため `account_id` は NOT NULL）。
 
@@ -181,19 +213,54 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 
 ### 3.5 `order_lines` — 注文明細
 
-| 列                       | 型          | 制約                         | 説明                 |
-| ------------------------ | ----------- | ---------------------------- | -------------------- |
-| `id`                     | UUID        | PK                           |                      |
-| `order_id`               | UUID        | NOT NULL, FK → `orders.id`   |                      |
-| `listing_id`             | UUID        | NOT NULL, FK → `listings.id` | 参照用               |
-| `artwork_id`             | UUID        | NOT NULL, FK → `artworks.id` | 参照用               |
-| `artwork_title_snapshot` | TEXT        | NOT NULL                     | **注文時点の作品名** |
-| `unit_price_amount`      | INTEGER     | NOT NULL                     | **注文時点の単価**   |
-| `unit_price_currency`    | CHAR(3)     | NOT NULL                     |                      |
-| `quantity`               | INTEGER     | NOT NULL, CHECK `>= 1`       |                      |
-| `created_at`             | TIMESTAMPTZ | NOT NULL                     |                      |
+| 列                       | 型          | 制約                         | 説明                   |
+| ------------------------ | ----------- | ---------------------------- | ---------------------- |
+| `id`                     | UUID        | PK                           |                        |
+| `order_id`               | UUID        | NOT NULL, FK → `orders.id`   |                        |
+| `listing_id`             | UUID        | NOT NULL, FK → `listings.id` | 参照用                 |
+| `artwork_id`             | UUID        | NOT NULL, FK → `artworks.id` | 参照用                 |
+| `artwork_title_snapshot` | TEXT        | NOT NULL                     | **注文時点の作品名**   |
+| `unit_price_amount`      | INTEGER     | NOT NULL                     | **注文時点の単価**     |
+| `unit_price_currency`    | CHAR(3)     | NOT NULL                     |                        |
+| `creator_account_id`     | UUID        | NOT NULL, FK → `accounts.id` | **注文時点の出品者**   |
+| `quantity`               | INTEGER     | NOT NULL, CHECK `>= 1`       |                        |
+| `total_amount`           | INTEGER     | NOT NULL                     | `単価 × 数量`（CHECK） |
+| `created_at`             | TIMESTAMPTZ | NOT NULL                     |                        |
 
-- INDEX `(order_id)`
+- `UNIQUE (order_id)` — `order_lines_single_item_per_order`
+
+⚠️ **MVP は 1 注文 1 明細**（指示書 §5.2）。`order_id` だけの UNIQUE が
+「明細は 1 本まで」を DB に守らせる。複数クリエイターのカートを作らせない
+ための最後の砦で、将来グッズで複数明細を許すときは、この制約を外す
+1 行の移行で済む。
+
+### 3.5-2 `inventory_reservations` — 在庫の仮引当
+
+| 列                          | 型          | 制約                         | 説明                                 |
+| --------------------------- | ----------- | ---------------------------- | ------------------------------------ |
+| `id`                        | UUID        | PK                           |                                      |
+| `order_id`                  | UUID        | NOT NULL, FK → `orders.id`   |                                      |
+| `listing_id`                | UUID        | NOT NULL, FK → `listings.id` |                                      |
+| `artwork_id`                | UUID        | NOT NULL, FK → `artworks.id` |                                      |
+| `quantity`                  | INTEGER     | NOT NULL, CHECK `> 0`        |                                      |
+| `status`                    | TEXT        | NOT NULL                     | `reserved` / `consumed` / `released` |
+| `expires_at`                | TIMESTAMPTZ | NOT NULL                     |                                      |
+| `consumed_at`               | TIMESTAMPTZ | NULL                         |                                      |
+| `released_at`               | TIMESTAMPTZ | NULL                         |                                      |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                     |                                      |
+
+- 部分 UNIQUE `inventory_reservations_one_active_per_order`
+  （`(order_id) WHERE status = 'reserved'`）
+- INDEX `(status, expires_at)` — 期限切れの掃き出し用
+- 外部キーはすべて `ON DELETE RESTRICT`（注文・決済データを物理削除させない）
+
+⚠️ **押さえを注文の列（期限だけ）で表さず、行にしてある。** 列だと
+「解放したか」を注文の状態から推測することになり、二重解放と解放漏れの
+どちらも静かに起こる。行にして状態を持たせると、解放は
+「`reserved` の行を `released` にする」という**1 回しか成立しない操作**になる。
+
+⚠️ **部分 UNIQUE は Prisma のスキーマで表せない。** 手書きの
+マイグレーション側にだけ存在する。消さないこと。
 
 ### 3.6 `payments` — 決済
 
@@ -208,10 +275,20 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 | `amount`                    | INTEGER     | NOT NULL                         |                                                                        |
 | `currency`                  | CHAR(3)     | NOT NULL                         |                                                                        |
 | `amount_refunded`           | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0` |                                                                        |
+| `provider_charge_ref`       | TEXT        | NULL                             | 課金参照（Phase P2 で埋める）                                          |
+| `provider_idempotency_key`  | TEXT        | NULL                             | 決済事業者へ渡す冪等キー。**業務の冪等キーとは別物**                   |
+| `paid_at`                   | TIMESTAMPTZ | NULL                             |                                                                        |
+| `failure_code`              | TEXT        | NULL                             |                                                                        |
+| `failure_message_safe`      | TEXT        | NULL                             | ⚠️ 外部の応答本文をそのまま入れない。短い要約だけ                      |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                                                        |
 
 - `UNIQUE (provider, provider_payment_ref)` （NULL は複数可）
+- CHECK `payments_succeeded_has_time` — `succeeded` なら `paid_at` が入る
 - INDEX `(order_id)`
+
+⚠️ **決済 Phase P0・P1 では、この表へ書き込む経路が無い。** 受け皿だけを
+先に用意してある。管理画面から成功状態にする API も作っていない
+（指示書 §9.3）。決済の確定は Phase P2 の Webhook だけが行う。
 
 ### 3.7 `webhook_events` — 外部Webhook受信記録（冪等性の要）
 
