@@ -92,6 +92,7 @@ export {
 
 export {
   createPaymentConfigResolver,
+  createPlatformFeeRateResolver,
   type EnvPaymentConfig,
   type PaymentConfigResolution,
   type PaymentConfigResolver,

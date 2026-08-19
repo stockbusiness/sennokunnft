@@ -51,6 +51,7 @@ import {
   StripePaymentGateway,
   ResolvingPaymentGateway,
   createPaymentConfigResolver,
+  createPlatformFeeRateResolver,
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
@@ -324,16 +325,17 @@ async function bootstrap(): Promise<void> {
 
   /*
     手数料率。
+    ⚠️ **資格情報とは別に引く。** 率は決済事業者の設定ではなく販売の条件で、
+       事業者が `fake`（鍵を持たない手元・E2E）でも要る。束ねると、
+       鍵の無い環境で率が 0 に落ちる。
     ⚠️ **注文のたびに引く。** 引いた値は注文へスナップショットされるので、
        あとから率を変えても**過去の注文は動かない**。
-    ⚠️ **解決できないときは 0 を返す。** 0 は「無料」ではなく
-       「販売設定が未完了」の意味で、支払い口を作らせない側へ倒れる。
-       ここで環境変数の値へ勝手に戻すと、管理画面で止めた意図を裏切る。
   */
-  const resolvePlatformFeeRateBps = async (): Promise<number> => {
-    const resolved = await paymentConfigResolver();
-    return resolved.ok ? resolved.config.platformFeeRateBps : 0;
-  };
+  const resolvePlatformFeeRateBps = createPlatformFeeRateResolver({
+    integrations: integrations?.repository ?? null,
+    appEnvironment: integrations?.appEnvironment ?? 'staging',
+    fallbackBps: env.PLATFORM_FEE_RATE_BPS,
+  });
 
   const app = await NestFactory.create(
     AppModule.register({

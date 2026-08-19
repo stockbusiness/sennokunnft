@@ -11,7 +11,11 @@ import {
   type IntegrationSettings,
   type PaymentSettingsFields,
 } from '@sengoku/domain';
-import { createPaymentConfigResolver, ResolvingPaymentGateway } from '@sengoku/integrations';
+import {
+  createPaymentConfigResolver,
+  createPlatformFeeRateResolver,
+  ResolvingPaymentGateway,
+} from '@sengoku/integrations';
 
 /*
   ⚠️ **同じ規則が 2 か所にある。**
@@ -263,5 +267,82 @@ describe('解決するゲートウェイ', () => {
 describe('販売設定の完了判定', () => {
   it('0 は未完了', () => {
     expect(isSalesSetupComplete({ ...COMPLETE, platformFeeRateBps: 0 })).toBe(false);
+  });
+});
+
+describe('手数料率の解決', () => {
+  /*
+    ⚠️ この検査は、実際に起きた不具合から来ている。
+       率を資格情報と束ねて解決していたため、鍵を持たない環境
+       （`PAYMENT_PROVIDER=fake` の手元・E2E）で率が 0 に落ちた。
+       結果は「作家さまの取り分＝売上全額」と「購入手続きに進めない」。
+       率は決済事業者の設定ではなく販売の条件なので、別に引く。
+  */
+  it('鍵が無くても、環境変数の率で解決できる', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: repositoryDouble({ settings: null }),
+      appEnvironment: 'staging',
+      fallbackBps: 2000,
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  it('保管庫が無くても解決できる', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: null,
+      appEnvironment: 'staging',
+      fallbackBps: 2000,
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  it('DB に率が入っていれば、そちらが正', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: repositoryDouble({
+        settings: settings({ payment: { ...COMPLETE, platformFeeRateBps: 1500 } }),
+      }),
+      appEnvironment: 'staging',
+      fallbackBps: 2000,
+    });
+    expect(await resolve()).toBe(1500);
+  });
+
+  /*
+    設定行は管理画面を開いただけでできる。行の有無で見ると、
+    一度開いただけで環境変数の値が無視される。
+  */
+  it('行はあるが率が 0 なら、環境変数へ落ちる', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: repositoryDouble({
+        settings: settings({ payment: { ...COMPLETE, platformFeeRateBps: 0 } }),
+      }),
+      appEnvironment: 'staging',
+      fallbackBps: 2000,
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  /*
+    ⚠️ 「連携を止める」のはお金の受け口であって、取り分の約束ではない。
+       止めたからといって率を 0 に戻すと、再開したときに
+       「手数料が消えている」ことに気づけない。
+  */
+  it('連携を止めていても、率は変わらない', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: repositoryDouble({ settings: settings({ enabled: false }) }),
+      appEnvironment: 'staging',
+      fallbackBps: 1000,
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  /* どちらも 0 なら 0 のまま。勝手に既定値を入れない。 */
+  it('どちらも未設定なら 0 のまま', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      integrations: repositoryDouble({ settings: null }),
+      appEnvironment: 'staging',
+      fallbackBps: 0,
+    });
+    expect(await resolve()).toBe(0);
   });
 });

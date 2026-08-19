@@ -141,3 +141,43 @@ export function createPaymentConfigResolver(
     };
   };
 }
+
+/**
+ * 手数料率だけを引く。
+ *
+ * ⚠️ **資格情報とは別に引く。** 率は決済事業者の設定ではなく、販売の
+ * 条件。事業者が `fake`（鍵を持たない手元・E2E）でも率は要る。
+ * 資格情報と束ねていたせいで、鍵の無い環境で率が 0 に落ち、
+ * 「作家さまの取り分＝売上全額」「購入手続きに進めない」が起きた。
+ *
+ * ⚠️ **「連携を止めている」ことは率に影響しない。** 止めるのは
+ * お金の受け口であって、取り分の約束ではない。
+ *
+ * 解決の規則:
+ *
+ * 1. DB に率が入っていれば（0 より大きければ）、DB が正
+ * 2. 入っていなければ環境変数へ落ちる
+ *
+ * ⚠️ **「行があるか」ではなく「値が入っているか」で判定する。** 設定行は
+ * 管理画面を開いただけでできる。行の有無で見ると、画面を一度開いた
+ * だけで環境変数の値が無視される。
+ *
+ * ⚠️ **どちらも 0 なら 0 のまま返す。** 0 は「無料」ではなく
+ * 「まだ決めていない」。ここで勝手に既定値を入れると、
+ * 決めていないまま売れてしまう。
+ */
+export function createPlatformFeeRateResolver(options: {
+  readonly integrations: IntegrationRepository | null;
+  readonly appEnvironment: IntegrationEnvironment;
+  readonly fallbackBps: number;
+}): () => Promise<number> {
+  return async (): Promise<number> => {
+    const settings =
+      options.integrations === null
+        ? null
+        : await options.integrations.findSettings('payment', options.appEnvironment);
+
+    const fromDatabase = settings?.payment.platformFeeRateBps ?? 0;
+    return fromDatabase > 0 ? fromDatabase : options.fallbackBps;
+  };
+}
