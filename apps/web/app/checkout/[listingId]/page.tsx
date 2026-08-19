@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import { EmptyState, Notice, PageHeader, PriceTag } from '@sengoku/ui';
-import { fetchPublicListing } from '../../../src/api-client';
+import { checkoutNoticeFrom, CHECKOUT_NOTICE_FIELD_KEYS } from '@sengoku/contracts';
+import { fetchLegalDocument, fetchPublicListing } from '../../../src/api-client';
+import { LEGAL_COPY, TOKUSHOHO_LABEL } from '../../../src/legal-copy';
 import { isLoggedIn } from '../../../src/auth/current';
 import { ORDER_COPY } from '../../../src/order-copy';
 import { CheckoutForm } from './forms';
@@ -43,6 +45,36 @@ export default async function CheckoutPage({ params }: { params: Promise<{ listi
       <>
         <PageHeader title={ORDER_COPY.checkoutTitle} />
         <EmptyState title={ORDER_COPY.soldOutTitle} hint={ORDER_COPY.soldOutHint} />
+        <p className="sengoku-back-link">
+          <a href={`/artworks/${listing.artworkSlug}`}>← {ORDER_COPY.backToCatalog}</a>
+        </p>
+      </>
+    );
+  }
+
+  /*
+    お申し込みの条件（特商法12条の6）。
+
+    ⚠️ **「特商法のページを見てください」では足りない。** 通信販売では
+       申込みの**最終確認画面そのもの**に出す必要がある。とくに返品特約は、
+       ここに出していないとこちらの条件が効かず、法定の解除権が適用される。
+
+    ⚠️ **掲げられないなら、申し込ませない。** API 側でも支払い口を
+       作らせないが、画面でも先に止める。押せるのに断られる形にすると、
+       手間をかけさせてから断ることになる。
+  */
+  const tokushoho = await fetchLegalDocument('tokushoho');
+  const notice = tokushoho.ok
+    ? checkoutNoticeFrom(tokushoho.data.version?.tokushoho ?? null)
+    : null;
+  if (notice === null) {
+    return (
+      <>
+        <PageHeader title={ORDER_COPY.checkoutTitle} />
+        <EmptyState
+          title={LEGAL_COPY.checkoutTermsUnavailable}
+          hint={LEGAL_COPY.checkoutTermsUnavailableHint}
+        />
         <p className="sengoku-back-link">
           <a href={`/artworks/${listing.artworkSlug}`}>← {ORDER_COPY.backToCatalog}</a>
         </p>
@@ -92,6 +124,32 @@ export default async function CheckoutPage({ params }: { params: Promise<{ listi
           <PriceTag price={listing.price} />
         </dd>
       </dl>
+
+      {/*
+        お申し込みの条件（特商法12条の6）。
+        ⚠️ **たたんで隠さない。** 開かないと読めない形にすると、
+           「表示した」と言えるかどうかが怪しくなる。
+      */}
+      <section className="sengoku-checkout-terms">
+        <h2>{LEGAL_COPY.checkoutTermsHeading}</h2>
+        <dl className="sengoku-legal__fields">
+          {CHECKOUT_NOTICE_FIELD_KEYS.map((key) => (
+            <div key={key}>
+              <dt>{TOKUSHOHO_LABEL[key] ?? key}</dt>
+              <dd>{notice[key]}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="sengoku-form__hint">
+          <a href="/legal/tokushoho" target="_blank" rel="noreferrer">
+            {LEGAL_COPY.checkoutTermsFull}
+          </a>
+          {' ／ '}
+          <a href="/legal/terms" target="_blank" rel="noreferrer">
+            {LEGAL_COPY.checkoutTermsTerms}
+          </a>
+        </p>
+      </section>
 
       {/*
         ⚠️ 「買えました」と読める言葉を置かない。この時点ではまだ

@@ -1133,3 +1133,23 @@ button {
   padding: var(--sengoku-space-2) 0;
   border-bottom: 1px solid var(--sengoku-keisen);
 }
+
+/*
+  購入の最終確認画面に出す「お申し込みの条件」（特商法12条の6）。
+
+  ⚠️ **たたんで隠さない。** 開かないと読めない形にすると、
+     「表示した」と言えるかどうかが怪しくなる。目立たせすぎず、
+     しかし必ず目に入る位置に置く。
+*/
+.sengoku-checkout-terms {
+  margin: var(--sengoku-space-6) 0;
+  padding: var(--sengoku-space-4);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-paper);
+}
+
+.sengoku-checkout-terms h2 {
+  margin: 0 0 var(--sengoku-space-2);
+  font-size: var(--sengoku-text-title);
+}

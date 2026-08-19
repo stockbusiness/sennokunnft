@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createDevToken } from '@sengoku/integrations';
 import { createHmac } from 'node:crypto';
 import {
@@ -31,6 +31,56 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
       aud: E2E_AUDIENCE,
       exp: Math.floor(Date.now() / 1000) + 3600,
     });
+  }
+
+  /**
+   * 特商法表記を公開しておく。
+   *
+   * ⚠️ **これが無いと購入手続きへ進めない**（特商法12条の6）。掲げるものが
+   * 無ければ確認画面も支払い口も断られる。本番と同じ経路（管理API）で公開する。
+   *
+   * ⚠️ 中身は試験用の文字列。実際の文面は `UD-111` の法務確認を経て、
+   * 管理画面から入力する。
+   */
+  async function ensureTokushohoPublished(
+    request: APIRequestContext,
+    operatorToken: string,
+    page: Page,
+  ): Promise<void> {
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const draft = await request.put(`${apiBaseURL}/api/v1/admin/legal/tokushoho/draft`, {
+      headers,
+      data: {
+        title: '特定商取引法に基づく表記',
+        tokushoho: {
+          sellerName: 'E2E事業者',
+          representativeName: 'E2E 太郎',
+          address: '東京都千代田区1-1-1',
+          phoneNumber: '03-0000-0000',
+          contactEmail: 'e2e@example.com',
+          priceDescription: '各作品ページに表示された金額（税込）',
+          additionalFees: 'なし',
+          paymentMethods: 'クレジットカード',
+          paymentTiming: 'お申し込み時',
+          deliveryTiming: 'お支払い確認後すみやかに',
+          returnPolicy: 'デジタル商品のため、お客様都合による返品はお受けできません。',
+          operatingEnvironment: '一般的なウェブブラウザ',
+        },
+      },
+    });
+    expect(draft.status()).toBe(200);
+
+    const published = await request.post(`${apiBaseURL}/api/v1/admin/legal/tokushoho/publish`, {
+      headers,
+      // ⚠️ 過去の日付では公開できない。少し先を指定して、すぐにまたぐ。
+      data: { effectiveFrom: new Date(Date.now() + 1000).toISOString() },
+    });
+    expect(published.status()).toBe(201);
+    // ⚠️ 施行日が来るまで待つ。「公開済み＝いま有効」ではない。
+    await page.waitForTimeout(1500);
   }
 
   test('作品を出品し、購入者が申し込むと在庫が押さえられる', async ({ request, page, context }) => {
@@ -72,6 +122,8 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
     const listing = (await listingResponse.json()) as { id: string };
     expect((await post(`/api/v1/admin/listings/${listing.id}/activate`)).status()).toBe(200);
 
+    await ensureTokushohoPublished(request, operator, page);
+
     // --- 2. ログインしていなければ、申し込みではなくログインへ案内する ------
     // ⚠️ 追い返さない。売り切れの確認より先にログインを強いると、
     //    ログインし終えてから「買えません」と言うことになる。
@@ -100,6 +152,17 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
     await expect(page.getByText(`E2E購入 ${suffix}`)).toBeVisible();
     await expect(page.getByText('12,000')).toBeVisible();
     await expect(page.getByText('（税込）')).toBeVisible();
+
+    /*
+      ⚠️ **お申し込みの条件が確認画面に出ていること**（特商法12条の6）。
+         とくに返品特約は、ここに出していないとこちらの条件が効かず、
+         法定の解除権が適用される。リンクだけでは要件を満たさない。
+    */
+    await expect(page.getByRole('heading', { name: 'お申し込みの条件' })).toBeVisible();
+    await expect(page.getByText('返品・キャンセルについて')).toBeVisible();
+    await expect(
+      page.getByText('デジタル商品のため、お客様都合による返品はお受けできません。'),
+    ).toBeVisible();
 
     // --- 4. 申し込むと「決済準備中」へ進む ----------------------------------
     await Promise.all([
@@ -178,6 +241,8 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
     });
     const listing = (await listingResponse.json()) as { id: string };
     await post(`/api/v1/admin/listings/${listing.id}/activate`);
+
+    await ensureTokushohoPublished(request, operator, page);
 
     // --- 2. 購入者が申し込む ------------------------------------------------
     const buyer = `e2e-payer-${suffix}`;
