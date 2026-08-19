@@ -29,6 +29,8 @@ export const withApi = databaseUrl !== undefined && databaseUrl !== '';
 
 /** 通しシナリオで使う署名鍵。テスト専用の固定値で、本番では使えない（起動時ガード）。 */
 export const E2E_TOKEN_SECRET = 'e2e-admin-token-secret';
+/** 擬似決済の署名に使う秘密。⚠️ テスト専用の固定値。 */
+export const E2E_WEBHOOK_SECRET = 'e2e-payment-webhook-secret';
 export const E2E_ISSUER = 'sennokunnft-e2e';
 export const E2E_AUDIENCE = 'sennokunnft';
 export { apiBaseURL };
@@ -56,6 +58,15 @@ const apiServer: ServerSpec = {
     SUPABASE_JWT_ISSUER: E2E_ISSUER,
     SUPABASE_JWT_AUDIENCE: E2E_AUDIENCE,
     MEDIA_STORAGE_DIR: './.e2e-media',
+    /*
+      決済（決済 Phase P2）。⚠️ **Stripe へは繋がない。**
+      擬似実装でも署名の作り方と検証の手順は本物と同じなので、
+      購入の流れを最後まで通せる。
+    */
+    PAYMENT_PROVIDER: 'fake',
+    PAYMENT_WEBHOOK_SECRET: E2E_WEBHOOK_SECRET,
+    // ✅ 承認済み 20%。0 のままだと支払い口を作れない。
+    PLATFORM_FEE_RATE_BPS: '2000',
     LOG_LEVEL: 'warn',
   },
 };

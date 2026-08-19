@@ -61,6 +61,25 @@ export const DOMAIN_ERROR_CODES = [
   // --- 注文（決済 Phase P0・P1）---
   /** 注文時の手数料率が受け付けられない値。 */
   'INVALID_FEE_RATE',
+  // --- 決済（決済 Phase P2）---
+  /**
+   * 販売の設定が完了していない。
+   *
+   * ⚠️ **手数料率 0 は「無料」ではなく「未設定」**（`UD-109` の決定）。
+   * 0 のまま売ると、あとから率を決めても過去の注文は 0% のままになる。
+   * 売れないほうが取り返しがつく。
+   */
+  'SALES_SETUP_INCOMPLETE',
+  /** その注文では決済を始められない（支払済み・期限切れなど）。 */
+  'CHECKOUT_NOT_ALLOWED',
+  /** 在庫のお取り置きの期限が過ぎている。 */
+  'RESERVATION_EXPIRED',
+  /** 決済事業者から届いた内容が、こちらの注文と食い違う。 */
+  'PAYMENT_MISMATCH',
+  /** 決済事業者とのやり取りに失敗した。 */
+  'PAYMENT_PROVIDER_ERROR',
+  /** Webhook の署名を検証できなかった。 */
+  'WEBHOOK_SIGNATURE_INVALID',
   /**
    * その状態からその状態へは移せない。
    *

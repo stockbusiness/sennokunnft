@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import type { AdminOrderView, OrderView as OrderViewResponse } from '@sengoku/contracts';
+import type {
+  AdminOrderDetail,
+  AdminOrderView,
+  OrderView as OrderViewResponse,
+} from '@sengoku/contracts';
 import {
   createOrder,
   generateOrderNumber,
@@ -13,6 +17,7 @@ import {
   type OrderRepository,
   type OrderStatus,
   type OrderView,
+  type PaymentRepository,
   type RandomPort,
   type ReleasedReservation,
 } from '@sengoku/domain';
@@ -52,6 +57,13 @@ export class OrderService {
      * 待たせると「買えない」だけが利用者に残る。列は NULL を許してある。
      */
     private readonly commonUserLinks: CommonUserLinkRepository,
+    /**
+     * 決済の記録（決済 Phase P2）。
+     *
+     * ⚠️ **無い環境では `null`。** 「渡すが中で落ちる」形にすると、
+     * 決済を繋いでいない配備で運営の詳細画面が 500 になる。
+     */
+    private readonly payments: PaymentRepository | null,
     private readonly clock: ClockPort,
     private readonly ids: IdGeneratorPort,
     private readonly random: RandomPort,
@@ -193,9 +205,60 @@ export class OrderService {
     return toBuyerView(order);
   }
 
-  async findForAdmin(orderId: string): Promise<AdminOrderView | null> {
+  async findForAdmin(orderId: string): Promise<AdminOrderDetail | null> {
     const order = await this.orders.findById(orderId);
-    return order === null ? null : toAdminView(order);
+    if (order === null) {
+      return null;
+    }
+
+    /*
+      決済の追跡（指示書 §13）。
+      ⚠️ **決済の口が無い環境では、この節ごと出さない。** 空の表を出すと、
+         「まだ来ていない」のか「そもそも繋がっていない」のか分からない。
+    */
+    if (this.payments === null) {
+      return toAdminView(order);
+    }
+
+    const [attempts, webhooks] = await Promise.all([
+      this.payments.listAttempts(order.id),
+      this.payments.listWebhookReceipts(order.id),
+    ]);
+
+    const succeeded = attempts.find((attempt) => attempt.status === 'succeeded');
+    return {
+      ...toAdminView(order),
+      payments: {
+        attempts: attempts.map((attempt) => ({
+          id: attempt.id,
+          provider: attempt.provider,
+          status: attempt.status,
+          // ⚠️ 識別子は出すが、支払いページの URL は出さない。
+          //    URL を持つ人は誰でもその注文を支払える。
+          sessionRef: attempt.sessionRef,
+          paymentRef: attempt.paymentRef,
+          chargeRef: attempt.chargeRef,
+          amount: attempt.amount,
+          currency: attempt.currency,
+          expiresAt: attempt.expiresAt?.toISOString() ?? null,
+          paidAt: attempt.paidAt?.toISOString() ?? null,
+          failureCode: attempt.failureCode,
+          createdAt: attempt.createdAt.toISOString(),
+        })),
+        webhooks: webhooks.map((receipt) => ({
+          eventType: receipt.eventType,
+          status: receipt.status,
+          livemode: receipt.livemode,
+          apiVersion: receipt.apiVersion,
+          attemptCount: receipt.attemptCount,
+          receivedAt: receipt.receivedAt.toISOString(),
+          processedAt: receipt.processedAt?.toISOString() ?? null,
+          lastErrorCode: receipt.lastErrorCode,
+        })),
+        // ⚠️ 受領がまだ無いときは「一致しない」ではなく「分からない」。
+        amountMatches: succeeded === undefined ? null : succeeded.amount === order.totalAmount,
+      },
+    };
   }
 
   async listForAdmin(query: {

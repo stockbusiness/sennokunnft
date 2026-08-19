@@ -147,3 +147,84 @@ export const releaseExpiredResponseSchema = z.object({
   orderIds: z.array(z.string()),
 });
 export type ReleaseExpiredResponse = z.infer<typeof releaseExpiredResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// 決済（決済 Phase P2）
+// ---------------------------------------------------------------------------
+
+/**
+ * 支払い口の作成の応答。
+ *
+ * ⚠️ **本文に受け取る項目は無い。** 金額も通貨も、注文IDから
+ * サーバーが引く。ここへ項目を足した瞬間、ブラウザから金額を
+ * 送れる道ができる（指示書 §4-6）。
+ */
+export const checkoutSessionResponseSchema = z.object({
+  /** 利用者を送る先。 */
+  checkoutUrl: z.string().url(),
+  /** この口が閉じる時刻。ISO 8601。 */
+  expiresAt: z.string(),
+  /** 既存の口を使い回したか。画面の文言を変えるために返す。 */
+  reused: z.boolean(),
+});
+export type CheckoutSessionResponse = z.infer<typeof checkoutSessionResponseSchema>;
+
+export const PAYMENT_ATTEMPT_STATUS_VALUES = [
+  'pending',
+  'succeeded',
+  'failed',
+  'cancelled',
+  'refunded',
+] as const;
+
+/** 運営が決済を追跡するための表示（指示書 §13）。 */
+export const paymentAttemptViewSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  status: z.enum(PAYMENT_ATTEMPT_STATUS_VALUES),
+  /** ⚠️ 識別子は出すが、秘密は出さない。問い合わせの突き合わせに要る。 */
+  sessionRef: z.string().nullable(),
+  paymentRef: z.string().nullable(),
+  chargeRef: z.string().nullable(),
+  amount: z.number().int().nonnegative(),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  expiresAt: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  /** ⚠️ 事業者の符号ではなく、こちらで決めた安全な符号。 */
+  failureCode: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PaymentAttemptView = z.infer<typeof paymentAttemptViewSchema>;
+
+export const webhookReceiptViewSchema = z.object({
+  eventType: z.string(),
+  status: z.enum(['received', 'processed', 'ignored', 'failed']),
+  livemode: z.boolean().nullable(),
+  apiVersion: z.string().nullable(),
+  attemptCount: z.number().int().nonnegative(),
+  receivedAt: z.string(),
+  processedAt: z.string().nullable(),
+  lastErrorCode: z.string().nullable(),
+});
+export type WebhookReceiptView = z.infer<typeof webhookReceiptViewSchema>;
+
+/** 運営の注文詳細に足す決済の情報。 */
+export const adminOrderPaymentsSchema = z.object({
+  attempts: z.array(paymentAttemptViewSchema),
+  webhooks: z.array(webhookReceiptViewSchema),
+  /** 注文金額と、事業者が受け取った額が一致しているか。 */
+  amountMatches: z.boolean().nullable(),
+});
+export type AdminOrderPayments = z.infer<typeof adminOrderPaymentsSchema>;
+
+/**
+ * 運営の注文詳細。
+ *
+ * ⚠️ **`payments` は省略できる。** 決済を繋いでいない配備では節ごと
+ * 出さない。空の表を出すと「まだ来ていない」のか「繋がっていない」のか
+ * 分からない。
+ */
+export const adminOrderDetailSchema = adminOrderViewSchema.extend({
+  payments: adminOrderPaymentsSchema.optional(),
+});
+export type AdminOrderDetail = z.infer<typeof adminOrderDetailSchema>;

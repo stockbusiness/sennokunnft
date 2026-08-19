@@ -61,6 +61,65 @@ export const ORDER_COPY = {
   retryTitle: 'ただいまお手続きできませんでした',
   retryHint: '少し時間をおいて、もう一度お試しください。',
 
+  // --- お支払い（決済 Phase P2） -------------------------------------------
+  /**
+   * ⚠️ **「購入完了」と書けるのは、決済会社からの通知を受けたあとだけ**
+   * （指示書 §12）。ブラウザが戻ってきただけでは書かない。
+   */
+  payTitle: 'お支払いへお進みください',
+  payDescription: 'お支払いのページへ移ります。カード情報はそちらでご入力ください。',
+  submitPay: 'お支払いへ進む',
+  submittingPay: 'お支払いのご用意をしています…',
+  payReuseNote: '先ほどのお支払いページへ、もう一度お進みいただけます。',
+
+  /** 戻ってきた直後。⚠️ まだ確定していない。 */
+  confirmingTitle: 'お支払いの結果を確認しています',
+  confirmingHint: 'そのままお待ちください。自動で切り替わります。',
+  /** 待っても確定しないとき。⚠️ 「失敗しました」と言い切らない。 */
+  confirmingSlowTitle: '確認に時間がかかっています',
+  confirmingSlowHint:
+    'お支払いは受け付けられている場合があります。このページを開いたままお待ちいただくか、時間をおいてもう一度ご確認ください。',
+
+  paidTitle: 'ご購入ありがとうございます',
+  paidDescription: '作品をご用意しています。準備が整いましたらお知らせします。',
+
+  payFailedTitle: 'お支払いを完了できませんでした',
+  /** ⚠️ 拒否の理由を具体的に出さない（指示書 §8）。次の行動だけを示す。 */
+  payFailedRetryHint: 'お取り置き時間内であれば、もう一度お試しいただけます。',
+  payFailedExpiredHint: 'お取り置き時間が終了しました。作品ページからやり直してください。',
+
+  payExpiredTitle: 'お取り置き時間が終了しました',
+  payExpiredHint: '作品ページから購入手続きをやり直してください。',
+
+  /** ⚠️ 内部の設定値を見せない（決定 C）。 */
+  setupIncompleteTitle: '購入の準備を行っています',
+  setupIncompleteHint: 'しばらくしてからもう一度お試しください。',
+
+  // --- 運営の決済表示（指示書 §13） ----------------------------------------
+  adminPaymentsHeading: 'お支払いの記録',
+  adminWebhooksHeading: '決済会社からの通知',
+  adminNoPayments: 'お支払いの記録はまだありません',
+  adminNoWebhooks: '通知はまだ届いていません',
+  columnAttemptStatus: '状態',
+  columnSessionRef: 'お支払いページの番号',
+  columnPaymentRef: 'お支払いの番号',
+  columnChargeRef: '受領の番号',
+  columnAttemptAmount: '金額',
+  columnAttemptExpires: '期限',
+  columnAttemptCreated: '作成',
+  columnFailureCode: '失敗の理由',
+  columnEventType: '種類',
+  columnWebhookStatus: '処理',
+  columnLivemode: '区分',
+  columnReceivedAt: '受信',
+  columnAttemptCount: '受信回数',
+  amountMatchesLabel: '金額の一致',
+  amountMatchesYes: '一致しています',
+  amountMatchesNo: '一致していません（要確認）',
+  amountMatchesUnknown: 'まだ受領がありません',
+  livemodeTest: 'テスト',
+  livemodeLive: '本番',
+
   // --- 運営の注文一覧・詳細 -------------------------------------------------
   adminTitle: '注文の管理',
   adminDescription: '受け付けた注文の一覧です。金額と状態は変更できません。',
@@ -209,4 +268,38 @@ export function formatFeeRate(bps: number): string {
  */
 export function shortId(value: string): string {
   return value.slice(0, 8);
+}
+
+const ATTEMPT_STATUS_LABELS: Readonly<Record<string, string>> = {
+  pending: 'お支払い待ち',
+  succeeded: '完了',
+  failed: '失敗',
+  cancelled: '取り消し',
+  refunded: '返金済み',
+};
+
+const WEBHOOK_STATUS_LABELS: Readonly<Record<string, string>> = {
+  received: '受信のみ',
+  processed: '処理済み',
+  ignored: '対象外',
+  failed: '処理できず',
+};
+
+export function attemptStatusLabel(status: string): string {
+  return ATTEMPT_STATUS_LABELS[status] ?? status;
+}
+
+export function webhookStatusLabel(status: string): string {
+  return WEBHOOK_STATUS_LABELS[status] ?? status;
+}
+
+/**
+ * 失敗の理由を、買う人に見せてよい言葉にする。
+ *
+ * ⚠️ **決済会社の符号をそのまま出さない**（指示書 §12）。
+ * `card_declined` と出しても、利用者にできることは何も無い。
+ * 出すのは「次に何をすればよいか」だけ。
+ */
+export function payFailureHint(reservationExpired: boolean): string {
+  return reservationExpired ? ORDER_COPY.payFailedExpiredHint : ORDER_COPY.payFailedRetryHint;
 }

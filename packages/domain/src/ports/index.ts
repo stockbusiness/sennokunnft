@@ -57,43 +57,15 @@ export interface IdempotencyKeyPort {
   deriveMintKey(entitlementId: string): string;
 }
 
-export interface CheckoutSessionRequest {
-  readonly orderId: string;
-  readonly amountMinor: number;
-  readonly currency: string;
-  readonly successUrl: string;
-  readonly cancelUrl: string;
-}
+/*
+  決済ゲートウェイの境界は `./payment.ts` へ移した（決済 Phase P2）。
 
-export interface CheckoutSession {
-  readonly providerSessionRef: string;
-  readonly redirectUrl: string;
-}
-
-export interface WebhookVerificationInput {
-  /** 署名検証には**パース前の生の本文**が必要。 */
-  readonly rawBody: Buffer;
-  readonly signatureHeader: string | undefined;
-  readonly receivedAt: Date;
-}
-
-export interface VerifiedWebhook {
-  readonly eventId: string;
-  readonly eventType: string;
-  readonly payload: unknown;
-}
-
-/**
- * 決済ゲートウェイ。
- *
- * 決済事業者は未決定（UD-702）。Phase 1 では Fake 実装のみを用意する。
- */
-export interface PaymentGatewayPort {
-  readonly provider: string;
-  createCheckoutSession(request: CheckoutSessionRequest): Promise<CheckoutSession>;
-  /** 署名検証。失敗したら例外ではなく `null` を返し、呼び出し側が 400 を返す。 */
-  verifyWebhook(input: WebhookVerificationInput): VerifiedWebhook | null;
-}
+  ⚠️ **ここにあった Phase 1 の下書きは消してある。** 決済事業者が
+  未決（`UD-702`）だったころの形で、成功・失敗の区別も、金額の照合も
+  持っていなかった。2 つ並べておくと、新しく書く人がどちらを実装すべきか
+  分からず、古いほうを実装して「署名は通るのに注文が進まない」になる。
+  境界は 1 つだけにする。
+*/
 
 export interface MintRequest {
   readonly entitlementId: string;

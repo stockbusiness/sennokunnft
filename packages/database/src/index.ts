@@ -23,6 +23,7 @@ export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
 export { PrismaOrderRepository } from './repositories/order.repository';
+export { PrismaPaymentRepository } from './repositories/payment.repository';
 
 export { PrismaNonceStore } from './repositories/nonce.repository';
 

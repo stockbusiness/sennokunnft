@@ -185,6 +185,10 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sennokunnft_e2e pnpm 
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sennokunnft_e2e pnpm e2e
 ```
 
+> 和文フォントが無くても検査は通る（CI の run #87 で確認）。入れておくと、
+> 失敗したときのスクリーンショットや trace が読める。
+> `sudo apt-get install -y fonts-ipafont-gothic`
+
 `DATABASE_URL` の有無で起動する構成が変わる。
 API を立てない場合は「API が落ちているときの画面」を、立てる場合は
 「登録 → 公開 → 出品 → 閲覧」の通しシナリオを検証する。

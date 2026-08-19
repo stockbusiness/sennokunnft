@@ -131,8 +131,43 @@ jobs:
           pnpm db:migrate:deploy
           pnpm db:seed
 
+      # ブラウザ本体だけを取得する。`--with-deps` を外した理由:
+      # ubuntu-latest のイメージには Chromium の共有ライブラリが既に入っており、
+      # apt が実際に取ってくるのはフォントだけだった（run #84 のログで確認）。
+      # そのフォント 21MB の取得が Ubuntu ミラーの遅さに引きずられて
+      # 4分34秒（77kB/s）かかり、run #85 では 20 分の上限を食い潰して
+      # テストが 1 件も走らないまま打ち切られた。
+      # ブラウザ本体は CDN から 9 秒で落ちてくる。
+      # 共有ライブラリが将来欠けた場合は、次の e2e が Playwright 自身の
+      # 「Host system is missing dependencies」で不足パッケージ名ごと落ちる。
       - name: install browser
+        timeout-minutes: 5
         run: pnpm --filter @sengoku/web run e2e:install
+
+      # 日本語フォント。判定のためではなく、失敗したときのスクリーンショットや
+      # trace を読めるようにするために入れている。
+      #
+      # 当初は「スマホ幅の検査が文字幅を測るので必須」と考えていたが、
+      # run #87 で和文フォントが入らないまま（`fc-match :lang=ja` が
+      # DejaVu Sans）13 件すべて通った。幅の検査はフォントの有無では
+      # 変わらなかった。必須ではない。
+      #
+      # 止まらないようにしてある。run #86・#87 とも `apt-get update` が
+      # 索引の更新だけで 4 分を使い切った。ミラーが azure.archive.ubuntu.com
+      # から archive.ubuntu.com へ落ちる回で、取得量ではなくミラーの引きの
+      # 問題。見た目のためだけの取得で通しシナリオを 1 件も走らせないのは
+      # 本末転倒なので、失敗しても先へ進める。
+      - name: install fonts
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-ipafont-gothic
+
+      # 上の手順は落ちることがあるので、どのフォントで測ったのかを必ず残す。
+      # 幅の検査の結果が回によって変わったとき、ここを見れば理由が分かる。
+      - name: record font environment
+        run: fc-match -s :lang=ja | head -3
 
       - name: e2e
         run: pnpm e2e

@@ -187,3 +187,172 @@ export interface OrderRepository {
    */
   releaseExpiredReservations(now: Date, limit: number): Promise<readonly ReleasedReservation[]>;
 }
+
+// ---------------------------------------------------------------------------
+// 決済（決済 Phase P2）
+// ---------------------------------------------------------------------------
+
+/**
+ * 決済の試行がとりうる状態。
+ *
+ * ⚠️ **`not_started` は含めない。** 試行の行は支払い口を作ったときに
+ * 初めてできるので、「まだ始めていない」状態の行は存在しない。
+ * 注文側の `payment_status` には `not_started` があるが、それは
+ * 「試行が 1 つも無い」ことを表しており、別の話。
+ */
+export type PaymentAttemptStatus = Exclude<OrderPaymentStatus, 'not_started'>;
+
+/** 決済の試行 1 回ぶん。⚠️ 失敗した行も消さない。 */
+export interface PaymentAttemptView {
+  readonly id: string;
+  readonly provider: string;
+  readonly status: PaymentAttemptStatus;
+  readonly sessionRef: string | null;
+  readonly paymentRef: string | null;
+  readonly chargeRef: string | null;
+  readonly url: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  readonly expiresAt: Date | null;
+  readonly paidAt: Date | null;
+  readonly failureCode: string | null;
+  readonly createdAt: Date;
+}
+
+/** 支払い口を記録するときの値。 */
+export interface RecordCheckoutSessionCommand {
+  readonly paymentId: string;
+  readonly orderId: string;
+  readonly provider: string;
+  readonly sessionRef: string;
+  readonly paymentRef: string | null;
+  readonly url: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly idempotencyKey: string;
+  readonly expiresAt: Date;
+  readonly now: Date;
+}
+
+/** 決済成功を確定するときの値。 */
+export interface ConfirmPaymentCommand {
+  readonly orderId: string;
+  readonly provider: string;
+  readonly eventId: string;
+  readonly sessionRef: string | null;
+  readonly paymentRef: string | null;
+  readonly chargeRef: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  readonly paidAt: Date;
+  /** 次の工程へ渡す出来事のID。⚠️ 1 件だけ作る。 */
+  readonly outboxEventId: string;
+  readonly now: Date;
+}
+
+/** Webhook を受け取ったときの記録。 */
+export interface RecordWebhookCommand {
+  readonly id: string;
+  readonly provider: string;
+  readonly eventId: string;
+  readonly eventType: string;
+  readonly apiVersion: string | null;
+  readonly livemode: boolean;
+  /** ⚠️ 本文の全体ではなく、digest だけ。 */
+  readonly payloadDigest: string;
+  readonly orderId: string | null;
+  readonly now: Date;
+}
+
+/** 運営が追跡するための受信記録。⚠️ 本文は含まない。 */
+export interface WebhookReceiptRecord {
+  readonly eventType: string;
+  readonly status: 'received' | 'processed' | 'ignored' | 'failed';
+  readonly livemode: boolean | null;
+  readonly apiVersion: string | null;
+  readonly attemptCount: number;
+  readonly receivedAt: Date;
+  readonly processedAt: Date | null;
+  readonly lastErrorCode: string | null;
+}
+
+/** 受け取った知らせを処理してよいか。 */
+export type WebhookClaim =
+  | { readonly kind: 'claimed' }
+  /** すでに処理済み。⚠️ 成功として返す（相手に再送させない）。 */
+  | { readonly kind: 'duplicate' };
+
+export interface PaymentRepository {
+  /**
+   * 受け取った知らせを記録し、処理してよいかを返す。
+   *
+   * ⚠️ **`(provider, event_id)` の UNIQUE で決める。** 「探して無ければ書く」
+   * にすると、同時に届いた同じ知らせを 2 本とも処理してしまう。
+   */
+  claimWebhookEvent(command: RecordWebhookCommand): Promise<WebhookClaim>;
+
+  /** 処理の結果を記録する。⚠️ 本文も事業者の符号もそのまま入れない。 */
+  markWebhookProcessed(input: {
+    readonly provider: string;
+    readonly eventId: string;
+    readonly status: 'processed' | 'ignored' | 'failed';
+    readonly orderId: string | null;
+    readonly paymentId: string | null;
+    readonly errorCode: string | null;
+    readonly now: Date;
+  }): Promise<void>;
+
+  /** その注文の試行を新しい順に返す。 */
+  listAttempts(orderId: string): Promise<readonly PaymentAttemptView[]>;
+
+  /**
+   * その注文について受け取った知らせを新しい順に返す（運営の追跡用）。
+   *
+   * ⚠️ **本文は返さない。** 残しているのは digest だけで、そもそも
+   * 返せるものが無い（指示書 §13「Webhook Payload 全文表示」は禁止）。
+   */
+  listWebhookReceipts(orderId: string): Promise<readonly WebhookReceiptRecord[]>;
+
+  /** 支払い口を記録する。⚠️ 同じ冪等キーなら既存を返す。 */
+  recordCheckoutSession(command: RecordCheckoutSessionCommand): Promise<PaymentAttemptView>;
+
+  /**
+   * 決済の成功を、1 トランザクションで確定する（指示書 §7）。
+   *
+   * 実装の責務:
+   * 1. 決済行を `succeeded` にし、`paid_at` と参照IDを保存
+   * 2. 注文を `paid` にし、`paid_at` を保存
+   * 3. 仮引当を `consumed` にする
+   * 4. `payment.succeeded` の Outbox を **1 件だけ** 作る
+   *
+   * ⚠️ **在庫のカウンタは動かさない**（決済 Phase P2 の決定 A）。
+   * `reservedCount` を減らすのも `issuedCount` を増やすのも、
+   * 受取権を作るのと同じトランザクションの中でだけ行う（Phase P3）。
+   * ここで減らすと、受取権を作る前のわずかな間に販売枠が復活する。
+   *
+   * ⚠️ **再送で二重に確定しない。** 条件付き更新（`WHERE status = …`）で
+   * 進め、すでに進んでいたら何もせず `false` を返すこと。
+   */
+  confirmPayment(command: ConfirmPaymentCommand): Promise<boolean>;
+
+  /** 決済の失敗を記録する。⚠️ 注文は `checkout_created` のまま。 */
+  recordFailure(input: {
+    readonly orderId: string;
+    readonly sessionRef: string | null;
+    readonly paymentRef: string | null;
+    readonly failureCode: string;
+    readonly now: Date;
+  }): Promise<void>;
+
+  /**
+   * 支払い口の期限切れを記録し、注文と仮引当を閉じる。
+   *
+   * ⚠️ **既存の解放ジョブと二重に解放しない**（指示書 §8）。
+   * 条件付き更新で仮引当を掴んでから在庫を戻すこと。
+   */
+  expireCheckout(input: {
+    readonly orderId: string;
+    readonly sessionRef: string | null;
+    readonly now: Date;
+  }): Promise<boolean>;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateSerialNumbers,
   availableSupply,
-  commitReservation,
+  finalizeConsumedReservation,
   releaseReservation,
   reserveSupply,
   type SupplyCounters,
@@ -52,7 +52,7 @@ describe('在庫計算（TEST_STRATEGY §3.3）', () => {
     if (!reserved.ok) throw new Error('setup failed');
     const before = reserved.value.reservedCount + reserved.value.issuedCount;
 
-    const committed = commitReservation(reserved.value, 4);
+    const committed = finalizeConsumedReservation(reserved.value, 4);
     if (!committed.ok) throw new Error('expected success');
 
     expect(committed.value.reservedCount).toBe(0);
@@ -61,7 +61,7 @@ describe('在庫計算（TEST_STRATEGY §3.3）', () => {
   });
 
   it('仮引当のない確定を拒否する', () => {
-    expect(commitReservation(counters(), 1).ok).toBe(false);
+    expect(finalizeConsumedReservation(counters(), 1).ok).toBe(false);
   });
 
   it('どの操作でも reserved + issued が上限を超えない', () => {
@@ -69,7 +69,7 @@ describe('在庫計算（TEST_STRATEGY §3.3）', () => {
     for (let i = 0; i < 3; i += 1) {
       const reserved = reserveSupply(current, 1);
       if (!reserved.ok) throw new Error('expected success');
-      const committed = commitReservation(reserved.value, 1);
+      const committed = finalizeConsumedReservation(reserved.value, 1);
       if (!committed.ok) throw new Error('expected success');
       current = committed.value;
       expect(current.reservedCount + current.issuedCount).toBeLessThanOrEqual(current.maxSupply);

@@ -31,9 +31,9 @@ import {
   type AdminListing,
   type AdminListingListResponse,
   adminOrderListResponseSchema,
-  adminOrderViewSchema,
+  adminOrderDetailSchema,
   type AdminOrderListResponse,
-  type AdminOrderView,
+  type AdminOrderDetail,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
@@ -518,6 +518,6 @@ export function fetchAdminOrders(
   return callAdmin(`/api/v1/admin/orders?${params.toString()}`, adminOrderListResponseSchema);
 }
 
-export function fetchAdminOrder(orderId: string): Promise<AdminResult<AdminOrderView>> {
-  return callAdmin(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, adminOrderViewSchema);
+export function fetchAdminOrder(orderId: string): Promise<AdminResult<AdminOrderDetail>> {
+  return callAdmin(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, adminOrderDetailSchema);
 }

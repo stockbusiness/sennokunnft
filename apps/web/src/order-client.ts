@@ -1,4 +1,9 @@
-import { orderViewSchema, type OrderView } from '@sengoku/contracts';
+import {
+  checkoutSessionResponseSchema,
+  orderViewSchema,
+  type CheckoutSessionResponse,
+  type OrderView,
+} from '@sengoku/contracts';
 import { getWebEnv } from './env';
 import { currentAccessToken } from './auth/current';
 
@@ -153,10 +158,61 @@ export function orderErrorMessage(result: {
     if (result.code === 'LISTING_NOT_ACTIVE' || result.code === 'ARTWORK_NOT_PUBLISHED') {
       return 'ただいまこの作品はお取り扱いしておりません。';
     }
+    if (result.code === 'SALES_SETUP_INCOMPLETE') {
+      // ⚠️ 内部の設定値を見せない（決定 C）。
+      return '現在、この作品の購入準備を行っています。しばらくしてからもう一度お試しください。';
+    }
+    if (result.code === 'RESERVATION_EXPIRED') {
+      return 'お取り置き時間が終了しました。作品ページから購入手続きをやり直してください。';
+    }
+    if (result.code === 'CHECKOUT_NOT_ALLOWED') {
+      return 'このご注文は、いまお支払いにお進みいただけません。';
+    }
+    if (result.code === 'PAYMENT_PROVIDER_ERROR') {
+      return 'ただいまお支払いのお手続きができませんでした。しばらくしてからお試しください。';
+    }
     if (result.code === 'IDEMPOTENCY_CONFLICT') {
       return '先ほどのお手続きとは別の作品が指定されました。お手数ですが、作品のページからやり直してください。';
     }
     return 'ただいまお手続きできませんでした。少し時間をおいて、もう一度お試しください。';
   }
   return 'ただいまお手続きできませんでした。少し時間をおいて、もう一度お試しください。';
+}
+
+/**
+ * 支払いの口を作り、送り先を受け取る。
+ *
+ * ⚠️ **本文を送らない。** 金額も通貨も、注文IDからサーバーが引く。
+ * ここに項目を足した瞬間、ブラウザから金額を送れる道ができる。
+ */
+export async function createCheckoutSession(
+  orderId: string,
+): Promise<OrderResult<CheckoutSessionResponse>> {
+  const response = await call(`/api/v1/orders/${encodeURIComponent(orderId)}/checkout-session`, {
+    method: 'POST',
+  });
+  if (response === null) {
+    return { ok: false, reason: 'unauthenticated' };
+  }
+  if (response === 'unreachable') {
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, reason: 'unauthenticated' };
+    }
+    if (response.status === 404) {
+      return { ok: false, reason: 'not_found' };
+    }
+    if (response.status >= 400 && response.status < 500) {
+      return { ok: false, reason: 'rejected', code: await errorCode(response) };
+    }
+    return { ok: false, reason: 'unavailable' };
+  }
+
+  const parsed = checkoutSessionResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  return { ok: true, data: parsed.data };
 }

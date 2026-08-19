@@ -42,6 +42,16 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   ORDER_TRANSITION_NOT_ALLOWED: HttpStatus.CONFLICT,
   ORDER_IDEMPOTENCY_MISMATCH: HttpStatus.CONFLICT,
   ORDER_TOO_MANY_ITEMS: HttpStatus.BAD_REQUEST,
+  // --- 決済（決済 Phase P2）---
+  // ⚠️ 403 にしない。権限の話ではなく、販売の準備が終わっていない。
+  SALES_SETUP_INCOMPLETE: HttpStatus.CONFLICT,
+  CHECKOUT_NOT_ALLOWED: HttpStatus.CONFLICT,
+  RESERVATION_EXPIRED: HttpStatus.GONE,
+  // 事業者の知らせとこちらの記録が食い違う。利用者の操作の問題ではない。
+  PAYMENT_MISMATCH: HttpStatus.CONFLICT,
+  PAYMENT_PROVIDER_ERROR: HttpStatus.BAD_GATEWAY,
+  // ⚠️ 401 にしない。誰かの資格情報の問題ではなく、署名が合っていない。
+  WEBHOOK_SIGNATURE_INVALID: HttpStatus.BAD_REQUEST,
   // --- 運営スタッフの招待と権限（`UD-803`）---
   STAFF_INVITE_INVALID: HttpStatus.BAD_REQUEST,
   // ⚠️ 「宛先が違う」も「もう使えない」もこれ 1 つ。
@@ -112,6 +122,22 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ORDER_IDEMPOTENCY_MISMATCH:
     '先ほどのお手続きとは別の商品が指定されました。画面を開き直してお試しください。',
   ORDER_TOO_MANY_ITEMS: '一度にご注文いただけるのは1点までです。',
+  /*
+    ⚠️ **利用者に「手数料が未設定です」と言わない。** 内部の設定値は
+       買う人に関係が無く、伝えても何もできない。伝えるのは
+       「いまは買えない」ことと「あとでもう一度」だけ。
+  */
+  SALES_SETUP_INCOMPLETE:
+    '現在、この作品の購入準備を行っています。しばらくしてからもう一度お試しください。',
+  CHECKOUT_NOT_ALLOWED: 'このご注文は、いまお支払いにお進みいただけません。',
+  RESERVATION_EXPIRED:
+    'お取り置き時間が終了しました。作品ページから購入手続きをやり直してください。',
+  // 利用者に原因は無い。運営が調べる。
+  PAYMENT_MISMATCH: 'ただいまお手続きできませんでした。運営までお問い合わせください。',
+  PAYMENT_PROVIDER_ERROR:
+    'ただいまお支払いのお手続きができませんでした。しばらくしてからお試しください。',
+  // 外へ返す想定が無い。Webhook の送信元にだけ返る。
+  WEBHOOK_SIGNATURE_INVALID: 'ただいま処理できませんでした。',
   STAFF_INVITE_INVALID: 'この内容では招待できません。宛先と役割をご確認ください。',
   STAFF_INVITE_NOT_OPEN: 'この招待はお使いいただけません。',
   STAFF_INVITE_EXPIRED: 'この招待は期限が過ぎています。もう一度お送りください。',

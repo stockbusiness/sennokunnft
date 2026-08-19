@@ -47,6 +47,9 @@ export {
   assertWalletDeliveryConfig,
   assertMediaStorageConfig,
   assertSupabaseAuthConfig,
+  assertStripeConfig,
+  STRIPE_TEST_KEY_PREFIX,
+  STRIPE_LIVE_KEY_PREFIX,
   assertStagingFixtureAllowed,
   parseHmacKeys,
   type IntegrationTargets,
@@ -55,5 +58,6 @@ export {
   type WalletDeliveryTargets,
   type MediaStorageTargets,
   type SupabaseAuthTargets,
+  type StripeTargets,
   type StagingFixtureTargets,
 } from './env/guards';

@@ -33,6 +33,11 @@ export {
 export { FakeMintingAdapter } from './fake-minting';
 
 export { FakePaymentGateway, signWebhookPayload, WEBHOOK_TOLERANCE_MS } from './fake-payment';
+export {
+  StripePaymentGateway,
+  toFact as toStripePaymentFact,
+  type StripePaymentGatewayOptions,
+} from './stripe-payment';
 
 export {
   DevTokenVerifier,

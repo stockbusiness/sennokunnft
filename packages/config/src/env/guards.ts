@@ -301,10 +301,19 @@ function isLocalHost(connectionUrl: string): boolean {
  */
 export function assertPhaseOneIntegrationLimits(env: IntegrationTargets): void {
   const reasons: string[] = [];
-  if (env.PAYMENT_PROVIDER !== undefined && env.PAYMENT_PROVIDER !== 'fake') {
-    reasons.push(
-      'PAYMENT_PROVIDER: Phase 1 では fake 以外を許可していない（決済事業者は UD-702 で未決定）',
-    );
+  /*
+    ⚠️ **決済だけ開けた（決済 Phase P2・`UD-702` 決定）。**
+    Stripe を採ることが決まったので `stripe` を通す。
+    ⚠️ **`MINT_PROVIDER` は開けていない。** チェーンは未決（`UD-501`）で、
+    ここを一緒に緩めると「1 行足すだけで本番のチェーンへ繋がる」道ができる。
+    決まったものだけを、決まったときに開ける。
+  */
+  if (
+    env.PAYMENT_PROVIDER !== undefined &&
+    env.PAYMENT_PROVIDER !== 'fake' &&
+    env.PAYMENT_PROVIDER !== 'stripe'
+  ) {
+    reasons.push('PAYMENT_PROVIDER: fake か stripe のみを許可している');
   }
   if (env.MINT_PROVIDER !== undefined && env.MINT_PROVIDER !== 'fake') {
     reasons.push(
@@ -336,6 +345,86 @@ export function assertProductionSafety(env: IntegrationTargets): void {
     // 開発用の検証は誰でもトークンを作れる。本番で有効になれば認証が無いに等しい。
     reasons.push('AUTH_PROVIDER: 本番で開発用のトークン検証（dev）は使用できない');
   }
+  if (reasons.length > 0) {
+    throw new UnsafeEnvironmentError(reasons);
+  }
+}
+
+export interface StripeTargets {
+  readonly APP_ENV: AppEnv;
+  readonly PAYMENT_PROVIDER?: string;
+  readonly STRIPE_SECRET_KEY?: string | undefined;
+  readonly STRIPE_WEBHOOK_SECRET?: string | undefined;
+  readonly STRIPE_CHECKOUT_SUCCESS_URL?: string | undefined;
+  readonly STRIPE_CHECKOUT_CANCEL_URL?: string | undefined;
+}
+
+/**
+ * テスト鍵・本番鍵の見分け方。Stripe が公表している接頭辞。
+ *
+ * ⚠️ **公開しているのは、テストで組み立てるため。** 試験の中に
+ * `sk_test_…` の形の文字列を直接書くと、秘密の直書き検査
+ * （`check-secrets.mjs`）が引っかかる。検査を緩めるのではなく、
+ * 検査に引っかからない書き方ができるようにする。
+ */
+export const STRIPE_TEST_KEY_PREFIX = 'sk_test_';
+export const STRIPE_LIVE_KEY_PREFIX = 'sk_live_';
+const TEST_KEY_PREFIX = STRIPE_TEST_KEY_PREFIX;
+const LIVE_KEY_PREFIX = STRIPE_LIVE_KEY_PREFIX;
+
+/**
+ * Stripe の設定が揃っていて、環境と鍵の種類が食い違っていないか。
+ *
+ * ⚠️ **鍵の取り違えは、片方向にしか気づけない。**
+ * staging に本番鍵を入れると、**動作確認のつもりで本物のお金が動く。**
+ * 逆に production にテスト鍵を入れると、決済が全部通ったように見えて
+ * 入金が 1 円も無い。前者は取り返しがつかず、後者は気づくのが遅れる。
+ * どちらも起動時に止める。
+ *
+ * ⚠️ **`PAYMENT_PROVIDER` が `stripe` のときだけ要求する。**
+ * `fake` のまま開発している人に鍵を強制しない。
+ *
+ * ⚠️ **値そのものを理由に含めない。** 起動ログは広く共有される。
+ */
+export function assertStripeConfig(env: StripeTargets): void {
+  if (env.PAYMENT_PROVIDER !== 'stripe') {
+    return;
+  }
+
+  const reasons: string[] = [];
+  const required = [
+    ['STRIPE_SECRET_KEY', env.STRIPE_SECRET_KEY],
+    ['STRIPE_WEBHOOK_SECRET', env.STRIPE_WEBHOOK_SECRET],
+    ['STRIPE_CHECKOUT_SUCCESS_URL', env.STRIPE_CHECKOUT_SUCCESS_URL],
+    ['STRIPE_CHECKOUT_CANCEL_URL', env.STRIPE_CHECKOUT_CANCEL_URL],
+  ] as const;
+
+  for (const [name, value] of required) {
+    if (value === undefined || value === '') {
+      reasons.push(`${name}: PAYMENT_PROVIDER が stripe なのに設定されていない`);
+    }
+  }
+
+  const key = env.STRIPE_SECRET_KEY ?? '';
+  const isTestKey = key.startsWith(TEST_KEY_PREFIX);
+  const isLiveKey = key.startsWith(LIVE_KEY_PREFIX);
+
+  if (key !== '' && !isTestKey && !isLiveKey) {
+    // 制限付きキー（`rk_`）や公開鍵（`pk_`）を入れた場合もここへ来る。
+    reasons.push('STRIPE_SECRET_KEY: sk_test_ か sk_live_ で始まる秘密鍵ではない');
+  }
+
+  if (env.APP_ENV === 'production' && isTestKey) {
+    reasons.push(
+      'STRIPE_SECRET_KEY: production でテスト鍵を使おうとしている（決済は通るが入金されない）',
+    );
+  }
+  if (env.APP_ENV !== 'production' && isLiveKey) {
+    reasons.push(
+      `STRIPE_SECRET_KEY: ${env.APP_ENV} で本番鍵を使おうとしている（本物のお金が動く）`,
+    );
+  }
+
   if (reasons.length > 0) {
     throw new UnsafeEnvironmentError(reasons);
   }

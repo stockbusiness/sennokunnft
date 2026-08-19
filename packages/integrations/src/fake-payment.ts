@@ -1,10 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type {
-  CheckoutSession,
-  CheckoutSessionRequest,
-  PaymentGatewayPort,
-  VerifiedWebhook,
-  WebhookVerificationInput,
+import {
+  domainError,
+  err,
+  ok,
+  toSafeFailureCode,
+  type CheckoutSessionCreated,
+  type CreateCheckoutSessionInput,
+  type DomainError,
+  type PaymentGatewayPort,
+  type PaymentFactKind,
+  type ProviderPaymentFact,
+  type Result,
 } from '@sengoku/domain';
 
 /** 署名の鮮度の許容幅。これを超える古い通知はリプレイとみなす。 */
@@ -13,10 +19,13 @@ export const WEBHOOK_TOLERANCE_MS = 5 * 60 * 1000;
 /**
  * 開発・テスト用の擬似決済ゲートウェイ。
  *
- * ✅ 実決済サービスへ接続しない。決済事業者は未決定（UD-702）。
+ * ✅ 実決済サービスへ接続しない。Stripe の鍵を持たない人が、手元で
+ * 購入の流れを最後まで通せるようにするためにある（指示書 §5.4 の
+ * 「ローカルの非 Stripe 開発を阻害しない」）。
  *
- * 擬似実装ではあるが、**署名検証の手順は本物と同じ**にしてある。
- * ここを簡略化すると、実装を差し替えたときに検証手順の欠落に気付けない。
+ * 擬似実装ではあるが、**署名の作り方と検証の手順は Stripe と同じ**
+ * （`t=<unix秒>,v1=<hex>`、`HMAC-SHA256("<t>.<生の本文>")`）。
+ * ここを簡略化すると、本物へ差し替えたときに検証手順の欠落に気付けない。
  */
 export class FakePaymentGateway implements PaymentGatewayPort {
   public readonly provider = 'fake';
@@ -24,64 +33,123 @@ export class FakePaymentGateway implements PaymentGatewayPort {
   constructor(
     private readonly webhookSecret: string,
     private readonly checkoutBaseUrl = 'http://localhost:3000/fake-checkout',
+    private readonly now: () => Date = () => new Date(),
   ) {
     if (webhookSecret.length === 0) {
       throw new Error('webhook secret must not be empty');
     }
   }
 
-  createCheckoutSession(request: CheckoutSessionRequest): Promise<CheckoutSession> {
-    const providerSessionRef = `fake-session-${request.orderId}`;
-    return Promise.resolve({
-      providerSessionRef,
-      redirectUrl: `${this.checkoutBaseUrl}/${providerSessionRef}`,
-    });
+  createCheckoutSession(
+    input: CreateCheckoutSessionInput,
+  ): Promise<Result<CheckoutSessionCreated, DomainError>> {
+    /*
+      ⚠️ **冪等キーから口の識別子を導く。** 同じキーで 2 回呼ばれても
+      同じものを返す。本物の Stripe も冪等キーで同じ挙動をするので、
+      ここだけ毎回違う値を返すと、擬似のときだけ二重に口ができる。
+    */
+    const sessionRef = `fake_cs_${input.idempotencyKey}`;
+    return Promise.resolve(
+      ok({
+        sessionRef,
+        paymentRef: `fake_pi_${input.idempotencyKey}`,
+        url: `${this.checkoutBaseUrl}/${sessionRef}`,
+        expiresAt: input.expiresAt,
+      }),
+    );
   }
 
   /**
-   * Webhook の署名を検証する。
+   * 署名を検証して、業務の事象へ翻訳する。
    *
-   * 失敗時は例外ではなく `null` を返す。呼び出し側は 400 を返し、
-   * **本文を解釈も記録もしない**（検証前の本文は攻撃者が制御できるデータ）。
+   * ⚠️ **検証を通るまで本文を解釈しない。** 検証前の本文は
+   * 攻撃者が中身を決められるデータで、記録もしない。
    */
-  verifyWebhook(input: WebhookVerificationInput): VerifiedWebhook | null {
-    const header = input.signatureHeader;
-    if (header === undefined) {
-      return null;
-    }
-
-    const parsed = parseSignatureHeader(header);
+  verifyAndParseWebhook(
+    rawBody: Buffer,
+    signatureHeader: string,
+  ): Result<ProviderPaymentFact, DomainError> {
+    const parsed = parseSignatureHeader(signatureHeader);
     if (parsed === null) {
-      return null;
+      return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'signature header is malformed'));
     }
 
-    // 1. 鮮度の確認（リプレイ攻撃対策）。署名が正しくても古い通知は受け付けない。
-    const ageMs = Math.abs(input.receivedAt.getTime() - parsed.timestamp * 1000);
+    // 1. 鮮度。署名が正しくても古い通知は受け付けない（リプレイ対策）。
+    const ageMs = Math.abs(this.now().getTime() - parsed.timestamp * 1000);
     if (ageMs > WEBHOOK_TOLERANCE_MS) {
-      return null;
+      return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'signature is too old'));
     }
 
-    // 2. 生の本文から署名を再計算する。パース後の再シリアライズでは一致しない。
-    const expected = signWebhookPayload(this.webhookSecret, parsed.timestamp, input.rawBody);
+    // 2. 生の本文から署名を再計算する。組み直した JSON では一致しない。
+    const expected = signWebhookPayload(this.webhookSecret, parsed.timestamp, rawBody);
     if (!safeCompare(expected, parsed.signature)) {
-      return null;
+      return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'signature does not match'));
     }
 
     // 3. 検証を通過してから、はじめて本文を解釈する。
     let payload: unknown;
     try {
-      payload = JSON.parse(input.rawBody.toString('utf8'));
+      payload = JSON.parse(rawBody.toString('utf8'));
     } catch {
-      return null;
+      return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'body is not valid json'));
     }
 
-    const envelope = payload as { id?: unknown; type?: unknown };
-    if (typeof envelope.id !== 'string' || typeof envelope.type !== 'string') {
-      return null;
+    const fact = toFact(payload, parsed.timestamp);
+    if (fact === null) {
+      return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'body is not a known envelope'));
     }
-
-    return { eventId: envelope.id, eventType: envelope.type, payload };
+    return ok(fact);
   }
+}
+
+interface FakeEnvelope {
+  readonly id?: unknown;
+  readonly type?: unknown;
+  readonly livemode?: unknown;
+  readonly api_version?: unknown;
+  readonly data?: {
+    readonly order_id?: unknown;
+    readonly session_ref?: unknown;
+    readonly payment_ref?: unknown;
+    readonly charge_ref?: unknown;
+    readonly amount?: unknown;
+    readonly currency?: unknown;
+    readonly failure_code?: unknown;
+  };
+}
+
+/** 擬似の本文を、業務の事象へ畳む。 */
+function toFact(payload: unknown, timestampSec: number): ProviderPaymentFact | null {
+  const envelope = payload as FakeEnvelope;
+  if (typeof envelope.id !== 'string' || typeof envelope.type !== 'string') {
+    return null;
+  }
+  const data = envelope.data ?? {};
+  return {
+    kind: toKind(envelope.type),
+    eventId: envelope.id,
+    eventType: envelope.type,
+    apiVersion: typeof envelope.api_version === 'string' ? envelope.api_version : null,
+    livemode: envelope.livemode === true,
+    orderId: typeof data.order_id === 'string' ? data.order_id : null,
+    sessionRef: typeof data.session_ref === 'string' ? data.session_ref : null,
+    paymentRef: typeof data.payment_ref === 'string' ? data.payment_ref : null,
+    chargeRef: typeof data.charge_ref === 'string' ? data.charge_ref : null,
+    amount: typeof data.amount === 'number' ? data.amount : null,
+    currency: typeof data.currency === 'string' ? data.currency : null,
+    failureCode:
+      typeof data.failure_code === 'string' ? toSafeFailureCode(data.failure_code) : null,
+    occurredAt: new Date(timestampSec * 1000),
+  };
+}
+
+/** 擬似のイベント名を、Stripe の Adapter と同じ 3 つの事象へ畳む。 */
+function toKind(eventType: string): PaymentFactKind {
+  if (eventType === 'payment.succeeded') return 'succeeded';
+  if (eventType === 'payment.failed') return 'failed';
+  if (eventType === 'checkout.expired') return 'checkout_expired';
+  // ⚠️ 知らないものは無視する。拒否すると、相手が再送し続ける。
+  return 'ignored';
 }
 
 /** `t=<unix秒>,v1=<hex>` 形式のヘッダを解釈する。 */

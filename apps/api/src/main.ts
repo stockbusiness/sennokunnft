@@ -6,6 +6,7 @@ import {
   assertWalletDeliveryConfig,
   assertMediaStorageConfig,
   assertSupabaseAuthConfig,
+  assertStripeConfig,
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   loadEnv,
@@ -28,6 +29,7 @@ import {
   PrismaListingRepository,
   PrismaIdempotencyStore,
   PrismaOrderRepository,
+  PrismaPaymentRepository,
   PrismaCommonUserLinkRepository,
   PrismaClaimRepository,
   PrismaNonceStore,
@@ -45,12 +47,15 @@ import {
   contentHash,
   UuidGenerator,
   CryptoRandom,
+  FakePaymentGateway,
+  StripePaymentGateway,
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
   ReachabilityProbe,
 } from '@sengoku/integrations';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
+import type { PaymentGatewayPort } from '@sengoku/domain';
 import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
 import {
@@ -116,6 +121,13 @@ async function bootstrap(): Promise<void> {
     //    「画像の無い作品」ができあがる。表面化するのは配送の段。
     assertMediaStorageConfig(env);
     assertSupabaseAuthConfig(env);
+    /*
+      ⚠️ 鍵の取り違えを起動時に止める（決済 Phase P2・指示書 §11）。
+         staging に本番鍵を入れると、動作確認のつもりで本物のお金が動く。
+         production にテスト鍵を入れると、決済は全部通ったように見えて
+         入金が 1 円も無い。どちらも起動させない。
+    */
+    assertStripeConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       // 理由は変数名と説明のみで、値を含まない。
@@ -249,6 +261,34 @@ async function bootstrap(): Promise<void> {
     };
   })();
 
+  /*
+    決済ゲートウェイ。
+
+    ⚠️ **`fake` でも口を生やす。** Stripe の鍵を持たない人が手元で
+       購入の流れを最後まで通せるようにするため（指示書 §5.4）。
+       擬似実装でも署名の作り方と検証の手順は Stripe と同じにしてある。
+    ⚠️ **鍵が欠けていれば `null`。** 起動時の検査（`assertStripeConfig`）が
+       `stripe` のときは既に止めているので、ここへ来るのは
+       `PAYMENT_WEBHOOK_SECRET` を入れていない `fake` の場合だけ。
+  */
+  const paymentGateway = ((): PaymentGatewayPort | null => {
+    if (env.PAYMENT_PROVIDER === 'stripe') {
+      return new StripePaymentGateway({
+        // 上のガードで存在を確認済み。
+        secretKey: env.STRIPE_SECRET_KEY ?? '',
+        webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+        apiVersion: env.STRIPE_API_VERSION,
+        successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
+        cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
+      });
+    }
+    if (env.PAYMENT_WEBHOOK_SECRET === undefined) {
+      logger.warn({}, '決済の機能は無効です（PAYMENT_WEBHOOK_SECRET が未設定）。');
+      return null;
+    }
+    return new FakePaymentGateway(env.PAYMENT_WEBHOOK_SECRET);
+  })();
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -281,6 +321,25 @@ async function bootstrap(): Promise<void> {
         ⚠️ **`INTERNAL_JOB_TOKEN` が無ければ内部ジョブの経路は生えない。**
            「未設定なら素通し」にすると、設定を忘れた環境で外から在庫を操作できる。
       */
+      /*
+        決済（決済 Phase P2）。
+
+        ⚠️ **設定が揃っていなければ経路ごと生やさない。** 鍵が無いまま
+           Webhook の口だけ開くと、署名を確かめずに受けるか全部拒否するかの
+           どちらかになる。前者は誰でも「決済成功」を送れる。
+        ⚠️ **`livemode` の期待値は APP_ENV から決める。** 要求から
+           受け取れるようにすると、試験の知らせで本番の注文を確定できる。
+      */
+      payments:
+        paymentGateway === null
+          ? undefined
+          : {
+              gateway: paymentGateway,
+              repository: new PrismaPaymentRepository(prisma),
+              provider: env.PAYMENT_PROVIDER,
+              expectLivemode: env.APP_ENV === 'production',
+              logger,
+            },
       orders: {
         repository: new PrismaOrderRepository(prisma),
         commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
