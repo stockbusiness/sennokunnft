@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '../../generated/client';
 
 /**
@@ -49,7 +50,7 @@ export function createTestClient(): PrismaClient {
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      nft_tokens, mint_jobs, entitlements, order_lines, payments, orders,
+      nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, payments, orders,
       wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
       webhook_events, outbox_events, audit_logs
     RESTART IDENTITY CASCADE
@@ -88,4 +89,51 @@ export function violatesUniqueConstraint(error: unknown): boolean {
   return (
     error instanceof Error && /Unique constraint failed|duplicate key value/i.test(error.message)
   );
+}
+
+/**
+ * 注文の下地を作るときの、この試験では関心の無い列。
+ *
+ * 決済 Phase P0 で `orders` に必須の列が増えた（注文番号・出品者・
+ * 内訳の金額）。各テストがそれぞれ埋めると、値の意味が場所ごとにずれる。
+ *
+ * ⚠️ 手数料は 0 のまま。率は事業判断待ち（UD-109）で、
+ * ここに仮の率を置くと「決まった値」に見えてしまう。
+ */
+export function orderSeedFields(input: {
+  readonly creatorAccountId: string;
+  readonly totalAmount: number;
+}): {
+  readonly orderNumber: string;
+  readonly creatorAccountId: string;
+  readonly subtotalAmount: number;
+  readonly discountAmount: number;
+  readonly platformFeeRateBps: number;
+  readonly platformFeeAmount: number;
+  readonly creatorAmount: number;
+} {
+  return {
+    orderNumber: `TEST-${randomUUID()}`,
+    creatorAccountId: input.creatorAccountId,
+    subtotalAmount: input.totalAmount,
+    discountAmount: 0,
+    platformFeeRateBps: 0,
+    platformFeeAmount: 0,
+    creatorAmount: input.totalAmount,
+  };
+}
+
+/** 注文明細の下地。単価 × 数量を CHECK 制約が見るため、合計をここで揃える。 */
+export function orderLineSeedFields(input: {
+  readonly creatorAccountId: string;
+  readonly unitPriceAmount: number;
+  readonly quantity: number;
+}): {
+  readonly creatorAccountId: string;
+  readonly totalAmount: number;
+} {
+  return {
+    creatorAccountId: input.creatorAccountId,
+    totalAmount: input.unitPriceAmount * input.quantity,
+  };
 }

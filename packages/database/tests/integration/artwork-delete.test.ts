@@ -2,7 +2,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '../../generated/client';
 import { PrismaArtworkRepository } from '../../src/repositories/artwork.repository';
-import { createTestClient, integrationTestsAvailable, resetDatabase } from '../helpers/database';
+import {
+  createTestClient,
+  integrationTestsAvailable,
+  orderLineSeedFields,
+  orderSeedFields,
+  resetDatabase,
+} from '../helpers/database';
 
 /**
  * 作品の削除を、実 PostgreSQL に対して確かめる（`UD-113` 仮決定）。
@@ -94,6 +100,7 @@ suite('作品の削除', () => {
         totalAmount: 1000,
         totalCurrency: 'JPY',
         idempotencyKey: randomUUID(),
+        ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 1000 }),
       },
     });
     await prisma.orderLine.create({
@@ -105,6 +112,7 @@ suite('作品の削除', () => {
         unitPriceAmount: 1000,
         unitPriceCurrency: 'JPY',
         quantity: 1,
+        ...orderLineSeedFields({ creatorAccountId: accountId, unitPriceAmount: 1000, quantity: 1 }),
       },
     });
 

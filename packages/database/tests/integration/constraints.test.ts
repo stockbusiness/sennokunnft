@@ -4,6 +4,8 @@ import type { PrismaClient } from '../../generated/client';
 import {
   createTestClient,
   integrationTestsAvailable,
+  orderLineSeedFields,
+  orderSeedFields,
   resetDatabase,
   violatesConstraint,
   violatesUniqueConstraint,
@@ -219,6 +221,7 @@ suite('返金額の CHECK 制約', () => {
         totalAmount: 1000,
         totalCurrency: 'JPY',
         idempotencyKey: randomUUID(),
+        ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 1000 }),
       },
     });
 
@@ -252,6 +255,7 @@ suite('受取権の CHECK 制約', () => {
         totalAmount: 1000,
         totalCurrency: 'JPY',
         idempotencyKey: randomUUID(),
+        ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 1000 }),
       },
     });
     const listing = await prisma.listing.create({
@@ -266,6 +270,7 @@ suite('受取権の CHECK 制約', () => {
         unitPriceAmount: 1000,
         unitPriceCurrency: 'JPY',
         quantity: 1,
+        ...orderLineSeedFields({ creatorAccountId: accountId, unitPriceAmount: 1000, quantity: 1 }),
       },
     });
 
@@ -300,6 +305,7 @@ suite('受取権の CHECK 制約', () => {
         totalAmount: 0,
         totalCurrency: 'JPY',
         idempotencyKey: randomUUID(),
+        ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 0 }),
       },
     });
     const listing = await prisma.listing.create({
@@ -314,6 +320,7 @@ suite('受取権の CHECK 制約', () => {
         unitPriceAmount: 0,
         unitPriceCurrency: 'JPY',
         quantity: 1,
+        ...orderLineSeedFields({ creatorAccountId: accountId, unitPriceAmount: 0, quantity: 1 }),
       },
     });
 

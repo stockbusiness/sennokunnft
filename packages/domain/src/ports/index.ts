@@ -21,6 +21,17 @@ export interface IdGeneratorPort {
   generate(): string;
 }
 
+/**
+ * 予測されては困る値のもと。
+ *
+ * ⚠️ **`Math.random()` で実装しない。** 出力から内部状態を復元できる。
+ * 注文番号のように「他人のものを当てられては困る」値に使う。
+ */
+export interface RandomPort {
+  /** 暗号論的に安全な乱数を `length` バイト返す。 */
+  bytes(length: number): Uint8Array;
+}
+
 export interface IssuedClaimToken {
   /** 利用者に渡す平文。**保存・ログ出力してはならない。** */
   readonly token: string;

@@ -5,6 +5,8 @@ import { PrismaClaimRepository } from '../../src/repositories/claim.repository';
 import {
   createTestClient,
   integrationTestsAvailable,
+  orderLineSeedFields,
+  orderSeedFields,
   resetDatabase,
   violatesConstraint,
 } from '../helpers/database';
@@ -87,6 +89,7 @@ async function seedEntitlement(
       totalAmount: 1000,
       totalCurrency: 'JPY',
       idempotencyKey: randomUUID(),
+      ...orderSeedFields({ creatorAccountId: accountId, totalAmount: 1000 }),
     },
   });
   const listing = await prisma.listing.create({
@@ -101,6 +104,7 @@ async function seedEntitlement(
       unitPriceAmount: 1000,
       unitPriceCurrency: 'JPY',
       quantity: 1,
+      ...orderLineSeedFields({ creatorAccountId: accountId, unitPriceAmount: 1000, quantity: 1 }),
     },
   });
   const tokenHash = options.tokenHash ?? randomUUID();

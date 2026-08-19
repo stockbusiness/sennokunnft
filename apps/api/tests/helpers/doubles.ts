@@ -39,8 +39,20 @@ import type {
   WalletDeliveryStatusCounts,
   ProbeOutcome,
   EnvIntegrationSummary,
+  CommonUserLink,
+  CommonUserLinkRepository,
+  CreateOrderCommand,
+  CreateOrderOutcome,
+  DomainError,
+  OrderListPage,
+  OrderListQuery,
+  OrderRepository,
+  OrderView,
+  RandomPort,
+  ReleasedReservation,
+  Result,
 } from '@sengoku/domain';
-import { canManuallyResend } from '@sengoku/domain';
+import { canManuallyResend, err, ok, reserveSupply } from '@sengoku/domain';
 import { contentHash, InMemoryStorage } from '@sengoku/integrations';
 import type { AppDependencies } from '../../src/app.module';
 
@@ -650,9 +662,14 @@ function stripSealed(record: IntegrationSecret & { sealed?: SealedSecret }): Int
 }
 
 export class FixedClock implements ClockPort {
-  constructor(private readonly value: Date) {}
+  constructor(private value: Date) {}
   now(): Date {
     return new Date(this.value);
+  }
+
+  /** 時刻を進める。期限切れの試験で使う。 */
+  advanceMs(ms: number): void {
+    this.value = new Date(this.value.getTime() + ms);
   }
 }
 
@@ -825,6 +842,189 @@ function byLatestThenFailureFirst(a: ConnectionCheckRecord, b: ConnectionCheckRe
   return b.id.localeCompare(a.id);
 }
 
+/**
+ * 注文の保管庫（テスト用）。
+ *
+ * ⚠️ **在庫のカウンタを本当に動かす。** 予約を作るだけで作品側を
+ * 触らない Fake にすると、「予約したのに在庫が減らない」という
+ * 最も起きてほしくない不具合を、テストが素通りさせる。
+ *
+ * ⚠️ 排他は再現できない（単一スレッドなので割り込みが起きない）。
+ * 同時実行の検証は実 PostgreSQL の結合テストが受け持つ。
+ */
+export class InMemoryOrderRepository implements OrderRepository {
+  private readonly orders = new Map<string, OrderView>();
+  /** 冪等キーの索引。`accountId + key`。実装は DB の UNIQUE 制約。 */
+  private readonly byIdempotency = new Map<string, string>();
+  private readonly sequence: string[] = [];
+
+  constructor(private readonly artworks: InMemoryArtworkRepository) {}
+
+  async createWithReservation(
+    command: CreateOrderCommand,
+  ): Promise<Result<CreateOrderOutcome, DomainError>> {
+    const existingId = this.byIdempotency.get(`${command.accountId} ${command.idempotencyKey}`);
+    if (existingId !== undefined) {
+      const existing = this.orders.get(existingId);
+      if (existing === undefined || existing.item?.listingId !== command.item.listingId) {
+        return ok<CreateOrderOutcome>({ kind: 'conflict' });
+      }
+      return ok<CreateOrderOutcome>({ kind: 'reused', order: existing });
+    }
+
+    const artwork = await this.artworks.findById(command.item.artworkId);
+    if (artwork === null) {
+      return err({ code: 'ARTWORK_NOT_AVAILABLE', message: 'artwork not found' });
+    }
+    const reserved = reserveSupply(artwork, command.quantity);
+    if (!reserved.ok) {
+      return reserved;
+    }
+    await this.artworks.update({ ...artwork, reservedCount: reserved.value.reservedCount });
+
+    const view: OrderView = {
+      id: command.orderId,
+      orderNumber: command.orderNumber,
+      accountId: command.accountId,
+      creatorAccountId: command.creatorAccountId,
+      status: command.orderStatus,
+      paymentStatus: command.paymentStatus,
+      fulfillmentStatus: command.fulfillmentStatus,
+      refundStatus: command.refundStatus,
+      currency: command.currency,
+      subtotalAmount: command.amounts.subtotalAmount,
+      discountAmount: command.amounts.discountAmount,
+      totalAmount: command.amounts.totalAmount,
+      platformFeeRateBps: command.amounts.platformFeeRateBps,
+      platformFeeAmount: command.amounts.platformFeeAmount,
+      creatorAmount: command.amounts.creatorAmount,
+      reservationExpiresAt: command.reservationExpiresAt,
+      paidAt: null,
+      idempotencyKeyPrefix: command.idempotencyKey.slice(0, 8),
+      createdAt: command.now,
+      item: {
+        id: command.item.id,
+        listingId: command.item.listingId,
+        artworkId: command.item.artworkId,
+        creatorAccountId: command.item.creatorAccountId,
+        titleSnapshot: command.item.titleSnapshot,
+        unitPriceAmount: command.item.unitPriceAmount,
+        unitPriceCurrency: command.item.unitPriceCurrency,
+        quantity: command.item.quantity,
+        totalAmount: command.item.totalAmount,
+      },
+      reservation: {
+        id: command.reservationId,
+        status: 'reserved',
+        quantity: command.quantity,
+        expiresAt: command.reservationExpiresAt,
+        consumedAt: null,
+        releasedAt: null,
+      },
+      hasPayment: false,
+      entitlementCount: 0,
+    };
+    this.orders.set(view.id, view);
+    this.byIdempotency.set(`${command.accountId} ${command.idempotencyKey}`, view.id);
+    this.sequence.unshift(view.id);
+    return ok<CreateOrderOutcome>({ kind: 'created', order: view });
+  }
+
+  findById(orderId: string): Promise<OrderView | null> {
+    return Promise.resolve(this.orders.get(orderId) ?? null);
+  }
+
+  list(query: OrderListQuery): Promise<OrderListPage> {
+    const all = this.sequence
+      .map((id) => this.orders.get(id))
+      .filter((item): item is OrderView => item !== undefined)
+      .filter((item) => query.status === undefined || item.status === query.status)
+      .filter((item) => query.accountId === undefined || item.accountId === query.accountId);
+    const start = query.cursor === undefined ? 0 : Number.parseInt(query.cursor, 10);
+    const page = all.slice(start, start + query.limit);
+    const nextIndex = start + query.limit;
+    return Promise.resolve({
+      items: page,
+      nextCursor: nextIndex < all.length ? String(nextIndex) : null,
+    });
+  }
+
+  async releaseExpiredReservations(now: Date, limit: number): Promise<readonly ReleasedReservation[]> {
+    const released: ReleasedReservation[] = [];
+    for (const id of this.sequence) {
+      if (released.length >= limit) break;
+      const order = this.orders.get(id);
+      const reservation = order?.reservation;
+      if (order === undefined || reservation == null) continue;
+      // ⚠️ `reserved` かつ期限到来のものだけ。ここを緩めると再実行で二重に戻る。
+      if (reservation.status !== 'reserved' || reservation.expiresAt.getTime() > now.getTime()) {
+        continue;
+      }
+      const artworkId = order.item?.artworkId ?? '';
+      const artwork = await this.artworks.findById(artworkId);
+      if (artwork !== null) {
+        await this.artworks.update({
+          ...artwork,
+          reservedCount: artwork.reservedCount - reservation.quantity,
+        });
+      }
+      this.orders.set(id, {
+        ...order,
+        status: order.status === 'pending' || order.status === 'checkout_created' ? 'expired' : order.status,
+        reservation: { ...reservation, status: 'released', releasedAt: now },
+      });
+      released.push({
+        reservationId: reservation.id,
+        orderId: order.id,
+        artworkId,
+        quantity: reservation.quantity,
+      });
+    }
+    return released;
+  }
+}
+
+/** 共通顧客IDの紐付け（テスト用）。既定は未解決。 */
+export class InMemoryCommonUserLinks implements CommonUserLinkRepository {
+  private readonly links = new Map<string, CommonUserLink>();
+
+  seed(link: CommonUserLink): void {
+    this.links.set(link.accountId, link);
+  }
+
+  findByAccountId(accountId: string): Promise<CommonUserLink | null> {
+    return Promise.resolve(this.links.get(accountId) ?? null);
+  }
+
+  listDue(): Promise<readonly CommonUserLink[]> {
+    return Promise.resolve([]);
+  }
+
+  save(link: CommonUserLink): Promise<boolean> {
+    this.links.set(link.accountId, link);
+    return Promise.resolve(true);
+  }
+}
+
+/**
+ * 乱数（テスト用）。
+ *
+ * ⚠️ **決定論にしてあるのはテストのため。** 実装は CSPRNG を使う。
+ * ここを本番へ流用すると、注文番号が予測できるようになる。
+ */
+export class SequentialRandom implements RandomPort {
+  private counter = 0;
+
+  bytes(length: number): Uint8Array {
+    const out = new Uint8Array(length);
+    for (let index = 0; index < length; index += 1) {
+      this.counter = (this.counter + 7) % 251;
+      out[index] = this.counter;
+    }
+    return out;
+  }
+}
+
 export interface TestHarness extends AppDependencies {
   readonly artworks: InMemoryArtworkRepository;
   readonly listings: InMemoryListingRepository;
@@ -843,12 +1043,17 @@ export interface TestHarness extends AppDependencies {
     summary: EnvIntegrationSummary,
   ) => void;
   readonly auditLogReader: InMemoryAuditLogReader;
+  readonly clock: FixedClock;
+  readonly orderRepository: InMemoryOrderRepository;
+  readonly commonUserLinks: InMemoryCommonUserLinks;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
 export const TEST_ISSUER = 'https://auth.test';
 export const TEST_AUDIENCE = 'sennokunnft-test';
 export const TEST_NOW = new Date('2026-06-01T00:00:00.000Z');
+/** 内部ジョブの合言葉（テスト用）。⚠️ 実環境の値をここへ書かない。 */
+export const TEST_INTERNAL_JOB_TOKEN = 'test-internal-job-token-0123456789abcdef';
 
 /**
  * 冪等キーの保管庫（テスト用）。
@@ -971,10 +1176,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   };
   const deliveries = new InMemoryWalletDeliveries();
   const auditLogReader = new InMemoryAuditLogReader(audit);
+  const artworks = new InMemoryArtworkRepository(listings);
+  const orderRepository = new InMemoryOrderRepository(artworks);
+  const commonUserLinks = new InMemoryCommonUserLinks();
   return {
     version: '0.1.0',
     probes: [],
-    artworks: new InMemoryArtworkRepository(listings),
+    artworks,
     listings,
     idempotency: new InMemoryIdempotencyStore(),
     accounts,
@@ -1003,6 +1211,18 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     deliveries,
     auditLogs: auditLogReader,
     auditLogReader,
+    orderRepository,
+    commonUserLinks,
+    orders: {
+      repository: orderRepository,
+      commonUserLinks,
+      random: new SequentialRandom(),
+      // ⚠️ 既定 0。率は事業判断待ち（UD-109）で、テストに仮の率を
+      //    焼き付けると「決まった値」として扱われる。
+      platformFeeRateBps: 0,
+      reservationMinutes: 30,
+      internalJobToken: TEST_INTERNAL_JOB_TOKEN,
+    },
     // テストでは決定論的なキーにする。実装は CSPRNG を使う。
     generateStorageKey: (prefix, extension) =>
       `${prefix}/test/${String(keyCounter++)}.${extension}`,

@@ -17,6 +17,7 @@ export {
   SystemClock,
   FixedClock,
   UuidGenerator,
+  CryptoRandom,
   SequentialIdGenerator,
   Sha256ClaimTokenService,
   HmacIdempotencyKeyService,

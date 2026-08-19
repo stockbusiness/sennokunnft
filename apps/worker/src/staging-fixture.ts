@@ -102,7 +102,13 @@ export async function createStagingEntitlement(
 
     const locked = await tx.artwork.findUniqueOrThrow({
       where: { id: input.artworkId },
-      select: { maxSupply: true, reservedCount: true, issuedCount: true, title: true },
+      select: {
+        maxSupply: true,
+        reservedCount: true,
+        issuedCount: true,
+        title: true,
+        creatorAccountId: true,
+      },
     });
 
     // 在庫の判定は本番と同じドメイン関数を通す。
@@ -128,11 +134,23 @@ export async function createStagingEntitlement(
     const order = await tx.order.create({
       data: {
         accountId: account.id,
+        // ⚠️ 通常の購入の採番規則（SNK-…）と混ぜない。
+        //    一覧で見たときに Fixture 由来だと目で分かるようにする。
+        orderNumber: `FIXTURE-${issued.tokenHash.slice(0, 16).toUpperCase()}`,
         // ⚠️ `paid` にしない。決済していないものを決済済みと記録しない。
         status: 'pending',
         source: 'STAGING_FIXTURE',
+        // 1 注文 1 クリエイター。作品の持ち主をそのまま写す。
+        creatorAccountId: locked.creatorAccountId,
+        subtotalAmount: FIXTURE_PRICE_AMOUNT,
+        discountAmount: 0,
         totalAmount: FIXTURE_PRICE_AMOUNT,
         totalCurrency: 'JPY',
+        // ⚠️ 手数料率は事業判断待ち（UD-109）。Fixture で仮の率を置くと
+        //    「決まった値」に見えるため 0 のままにする。
+        platformFeeRateBps: 0,
+        platformFeeAmount: 0,
+        creatorAmount: FIXTURE_PRICE_AMOUNT,
         // 出自が分かる形にする。通常の購入とキー空間で衝突しない。
         idempotencyKey: `staging-fixture-${issued.tokenHash.slice(0, 32)}`,
         createdAt: now,
@@ -164,9 +182,11 @@ export async function createStagingEntitlement(
         listingId: listing.id,
         artworkId: input.artworkId,
         artworkTitleSnapshot: locked.title,
+        creatorAccountId: locked.creatorAccountId,
         unitPriceAmount: FIXTURE_PRICE_AMOUNT,
         unitPriceCurrency: 'JPY',
         quantity: 1,
+        totalAmount: FIXTURE_PRICE_AMOUNT,
         createdAt: now,
       },
     });

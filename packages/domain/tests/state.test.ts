@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ORDER_STATUSES,
   ENTITLEMENT_STATUSES,
   MINT_JOB_STATUSES,
-  orderStateMachine,
   entitlementStateMachine,
   mintJobStateMachine,
   type StateMachine,
@@ -34,24 +32,10 @@ function assertExhaustiveTransitions<S extends string>(
   }
 }
 
-describe('注文の状態遷移', () => {
-  it('全組み合わせが遷移表どおりに判定される', () => {
-    assertExhaustiveTransitions(orderStateMachine, ORDER_STATUSES);
-  });
-
-  it('決済確定は pending からのみ到達できる', () => {
-    const sources = ORDER_STATUSES.filter((status) =>
-      orderStateMachine.canTransition(status, 'paid'),
-    );
-    expect(sources).toEqual(['pending']);
-  });
-
-  it('failed / expired / refunded は終端', () => {
-    expect(orderStateMachine.isTerminal('failed')).toBe(true);
-    expect(orderStateMachine.isTerminal('expired')).toBe(true);
-    expect(orderStateMachine.isTerminal('refunded')).toBe(true);
-  });
-});
+/*
+  注文の状態遷移は `tests/order-status.test.ts` へ移した。
+  1 本の列から 4 本（注文・決済・付与・返金）へ分けたため。
+*/
 
 describe('受取権の状態遷移', () => {
   it('全組み合わせが遷移表どおりに判定される', () => {

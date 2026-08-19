@@ -178,6 +178,28 @@ const apiEnvObject = baseEnvObject.extend({
   WALLET_DELIVERY_SECRET: z.string().min(8).optional(),
   /** 応答を待つ上限。待ち続けると配送ワーカーが詰まる。 */
   WALLET_DELIVERY_TIMEOUT_MS: integerFromEnv(1000, 60_000, 10_000),
+
+  /**
+   * プラットフォーム手数料率。**bps（1/100 %）の整数**。
+   *
+   * ⚠️ **既定 0 は「まだ決めていない」の意味であって、決定ではない。**
+   * 率は事業判断（`UD-109`）で、決まるまでは取らない側へ倒してある。
+   * 逆にしておくと、決める前に取ってしまった注文の返金が要る。
+   *
+   * ⚠️ **小数で持たない。** 率を金額に掛けた瞬間に誤差が入る。
+   * 10% は `1000`。
+   */
+  PLATFORM_FEE_RATE_BPS: integerFromEnv(0, 10_000, 0),
+  /** 在庫のお取り置き時間（分）。指示書 §4.3 の既定は 30 分。 */
+  ORDER_RESERVATION_MINUTES: integerFromEnv(1, 1440, 30),
+  /**
+   * 内部ジョブ（期限切れ解放など）を呼ぶための合言葉。
+   *
+   * ⚠️ **未設定なら経路ごと生やさない。** 「設定が無ければ誰でも呼べる」
+   * にすると、設定を忘れた環境で外から在庫操作ができてしまう。
+   * ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけ。
+   */
+  INTERNAL_JOB_TOKEN: z.string().min(32).optional(),
 });
 
 const workerEnvObject = baseEnvObject.extend({

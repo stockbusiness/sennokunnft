@@ -1,23 +1,16 @@
 import { createStateMachine, type TransitionTable } from './transition';
 
-/**
- * 注文の状態（DOMAIN_MODEL.md §4.1）。
- *
- * `pending → paid` の契機は**決済 Webhook のみ**。
- * 成功画面への到達で `paid` にする遷移はここに存在しない。
- */
-export const ORDER_STATUSES = ['pending', 'paid', 'failed', 'expired', 'refunded'] as const;
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
+/*
+  注文の状態は `order/order-status.ts` へ移した（決済 Phase P0・P1）。
 
-const orderTable: TransitionTable<OrderStatus> = {
-  pending: ['paid', 'failed', 'expired'],
-  paid: ['refunded'],
-  failed: [],
-  expired: [],
-  refunded: [],
-};
+  ⚠️ **ここに残しておかない。** 以前は 1 本の列に
+  `pending / paid / failed / expired / refunded` を詰め込んでいたが、
+  「決済は成功したが付与に失敗した」のような組み合わせを表せない。
+  移した先では、注文・決済・付与・返金の 4 本に分けてある。
 
-export const orderStateMachine = createStateMachine(orderTable);
+  ⚠️ **2 つ置くと、片方だけ直される。** 使っていないほうが残っていると、
+  次に触る人がどちらを直せばよいか分からない。消して 1 本にする。
+*/
 
 /**
  * 受取権の状態（DOMAIN_MODEL.md §4.2）。
