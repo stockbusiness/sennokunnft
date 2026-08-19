@@ -1,8 +1,10 @@
 import {
   artworkDetailSchema,
   artworkListResponseSchema,
+  publicListingSchema,
   type ArtworkDetail,
   type ArtworkListResponse,
+  type PublicListing,
 } from '@sengoku/contracts';
 import { getWebEnv } from './env';
 
@@ -74,6 +76,32 @@ export async function fetchArtworkDetail(slug: string): Promise<FetchResult<Artw
   }
 
   const parsed = artworkDetailSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid_response' };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * 出品の詳細（購入手続きの確認画面で使う）。
+ *
+ * ⚠️ **ここで得た価格を注文へ送らない。** 表示のためだけに使う。
+ * 金額はサーバーが DB から決める（指示書 §4.2）。
+ */
+export async function fetchPublicListing(id: string): Promise<FetchResult<PublicListing>> {
+  const response = await fetchJson(`/api/v1/listings/${encodeURIComponent(id)}`);
+  if (response === null) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (response.status === 404) {
+    // 下書きの出品・非公開作品の出品もここに来る。存在を区別しない。
+    return { ok: false, reason: 'not_found' };
+  }
+  if (!response.ok) {
+    return { ok: false, reason: 'unavailable' };
+  }
+
+  const parsed = publicListingSchema.safeParse(await response.json());
   if (!parsed.success) {
     return { ok: false, reason: 'invalid_response' };
   }

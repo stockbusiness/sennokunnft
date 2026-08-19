@@ -30,6 +30,10 @@ import {
   type AdminArtworkListResponse,
   type AdminListing,
   type AdminListingListResponse,
+  adminOrderListResponseSchema,
+  adminOrderViewSchema,
+  type AdminOrderListResponse,
+  type AdminOrderView,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
@@ -494,4 +498,26 @@ export function discardIntegrationSecret(
     integrationStatusSchema,
     { method: 'POST' },
   );
+}
+
+/**
+ * 注文の一覧（指示書 §9.1）。
+ *
+ * ⚠️ **書き換える口をここへ足さない。** 金額の修正・お支払い済みへの変更・
+ * 注文の削除は API 側に存在しない（指示書 §9.3）。呼び出し側だけ用意すると、
+ * 「画面にはあるのに動かない」操作が生まれる。
+ */
+export function fetchAdminOrders(
+  query: { readonly limit?: number; readonly status?: string } = {},
+): Promise<AdminResult<AdminOrderListResponse>> {
+  const params = new URLSearchParams();
+  params.set('limit', String(query.limit ?? 20));
+  if (query.status !== undefined && query.status !== '') {
+    params.set('status', query.status);
+  }
+  return callAdmin(`/api/v1/admin/orders?${params.toString()}`, adminOrderListResponseSchema);
+}
+
+export function fetchAdminOrder(orderId: string): Promise<AdminResult<AdminOrderView>> {
+  return callAdmin(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, adminOrderViewSchema);
 }

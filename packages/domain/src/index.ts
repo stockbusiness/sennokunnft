@@ -431,11 +431,7 @@ export {
   type OrderAmounts,
 } from './order/pricing';
 
-export {
-  ORDER_NUMBER_PATTERN,
-  generateOrderNumber,
-  isOrderNumber,
-} from './order/order-number';
+export { ORDER_NUMBER_PATTERN, generateOrderNumber, isOrderNumber } from './order/order-number';
 
 export {
   DEFAULT_RESERVATION_MINUTES,

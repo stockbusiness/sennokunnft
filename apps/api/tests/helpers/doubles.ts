@@ -949,7 +949,10 @@ export class InMemoryOrderRepository implements OrderRepository {
     });
   }
 
-  async releaseExpiredReservations(now: Date, limit: number): Promise<readonly ReleasedReservation[]> {
+  async releaseExpiredReservations(
+    now: Date,
+    limit: number,
+  ): Promise<readonly ReleasedReservation[]> {
     const released: ReleasedReservation[] = [];
     for (const id of this.sequence) {
       if (released.length >= limit) break;
@@ -970,7 +973,10 @@ export class InMemoryOrderRepository implements OrderRepository {
       }
       this.orders.set(id, {
         ...order,
-        status: order.status === 'pending' || order.status === 'checkout_created' ? 'expired' : order.status,
+        status:
+          order.status === 'pending' || order.status === 'checkout_created'
+            ? 'expired'
+            : order.status,
         reservation: { ...reservation, status: 'released', releasedAt: now },
       });
       released.push({

@@ -19,7 +19,12 @@ export const SITE_COPY = {
   notFoundTitle: 'お探しの作品は見つかりませんでした',
   notFoundHint: '販売が終了しているか、URL が変更された可能性があります。',
   backToCatalog: '作品一覧へ戻る',
+  /**
+   * ⚠️ 出品が無い作品でだけ使う。買える作品には本物の導線を出す。
+   *    押せるのに何も起きないボタンは置かない。
+   */
   purchaseComingSoon: 'お申し込み機能は準備中です。',
+  purchaseCta: '購入手続きへ進む',
   catalogTitle: '作品一覧',
   supplyLabel: 'お求めいただける数',
   priceLabel: '価格',

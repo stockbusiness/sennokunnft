@@ -5,7 +5,9 @@ import type { RunnerLogger } from '../src/runner';
 
 const NOW = new Date('2026-08-19T01:00:00.000Z');
 
-function stubLogger(): RunnerLogger & { readonly lines: { payload: Record<string, unknown>; message: string }[] } {
+function stubLogger(): RunnerLogger & {
+  readonly lines: { payload: Record<string, unknown>; message: string }[];
+} {
   const lines: { payload: Record<string, unknown>; message: string }[] = [];
   return {
     lines,

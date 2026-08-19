@@ -197,7 +197,11 @@ describe('注文作成の冪等性（指示書 §4.5）', () => {
     const otherListingId = '22222222-2222-4222-8222-222222222222';
     harness.artworks.seed(sampleArtwork({ id: 'artwork-2', slug: 'other', maxSupply: 3 }));
     harness.listings.seed(
-      sampleListing({ id: otherListingId, artworkId: 'artwork-2', price: { amountMinor: 9000, currency: 'JPY' } }),
+      sampleListing({
+        id: otherListingId,
+        artworkId: 'artwork-2',
+        price: { amountMinor: 9000, currency: 'JPY' },
+      }),
     );
     const token = actorToken('buyer');
     const key = randomUUID();

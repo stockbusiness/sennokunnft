@@ -92,19 +92,23 @@ describe('注文金額の計算', () => {
 
   describe('受け付けない値', () => {
     it('負の金額', () => {
-      expect(calculateOrderAmounts({
-        subtotalAmount: -1,
-        discountAmount: 0,
-        platformFeeRateBps: 0,
-      }).ok).toBe(false);
+      expect(
+        calculateOrderAmounts({
+          subtotalAmount: -1,
+          discountAmount: 0,
+          platformFeeRateBps: 0,
+        }).ok,
+      ).toBe(false);
     });
 
     it('小数の金額', () => {
-      expect(calculateOrderAmounts({
-        subtotalAmount: 100.5,
-        discountAmount: 0,
-        platformFeeRateBps: 0,
-      }).ok).toBe(false);
+      expect(
+        calculateOrderAmounts({
+          subtotalAmount: 100.5,
+          discountAmount: 0,
+          platformFeeRateBps: 0,
+        }).ok,
+      ).toBe(false);
     });
 
     it('100% を超える率', () => {
@@ -120,19 +124,23 @@ describe('注文金額の計算', () => {
 
     it('小数の率', () => {
       // ⚠️ 率も整数（bps）で扱う。小数で持つと掛けた瞬間に誤差が入る。
-      expect(calculateOrderAmounts({
-        subtotalAmount: 1000,
-        discountAmount: 0,
-        platformFeeRateBps: 10.5,
-      }).ok).toBe(false);
+      expect(
+        calculateOrderAmounts({
+          subtotalAmount: 1000,
+          discountAmount: 0,
+          platformFeeRateBps: 10.5,
+        }).ok,
+      ).toBe(false);
     });
 
     it('商品価格を超える値引（支払額が負になる）', () => {
-      expect(calculateOrderAmounts({
-        subtotalAmount: 1000,
-        discountAmount: 1001,
-        platformFeeRateBps: 0,
-      }).ok).toBe(false);
+      expect(
+        calculateOrderAmounts({
+          subtotalAmount: 1000,
+          discountAmount: 1001,
+          platformFeeRateBps: 0,
+        }).ok,
+      ).toBe(false);
     });
   });
 });

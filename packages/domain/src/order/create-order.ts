@@ -6,7 +6,12 @@ import { reserveSupply, type SupplyCounters } from '../supply/supply';
 import { multiplyMoney, type Money } from '../value-objects/money';
 import { validateQuantity } from '../value-objects/quantity';
 import { calculateOrderAmounts, type OrderAmounts } from './pricing';
-import type { FulfillmentStatus, OrderPaymentStatus, OrderStatus, RefundStatus } from './order-status';
+import type {
+  FulfillmentStatus,
+  OrderPaymentStatus,
+  OrderStatus,
+  RefundStatus,
+} from './order-status';
 
 /**
  * 注文の組み立て（決済 Phase P1・指示書 §4.2）。

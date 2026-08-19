@@ -3,7 +3,8 @@
 記法は [README.md](./README.md) に従う。
 
 ✅ **事実:** Phase 2 時点で実装済みのエンドポイントは、ヘルスチェック・公開カタログ・管理カタログ。
-注文・決済・受取（Claim）は Phase 3 以降の契約定義であり、まだ実装していない。
+決済・受取（Claim）は Phase 3 以降の契約定義。注文と在庫の仮引当は
+決済 Phase P0・P1 で実装済み（決済そのものは未接続）。
 
 ---
 
@@ -344,42 +345,105 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | GET      | `/api/v1/artworks`        | 不要 | 公開作品一覧（カーソルページング） |
 | GET      | `/api/v1/artworks/{slug}` | 不要 | 作品詳細＋有効な出品               |
 
-#### 購入（要ログイン）
+#### 購入（要ログイン）✅ 決済 Phase P0・P1 で実装済
 
-| メソッド | パス                                   | 認証            | 説明                                           |
-| -------- | -------------------------------------- | --------------- | ---------------------------------------------- |
-| POST     | `/api/v1/orders`                       | buyer           | 注文作成（在庫仮引当）。`Idempotency-Key` 必須 |
-| GET      | `/api/v1/orders/{id}`                  | buyer(自分のみ) | 注文照会                                       |
-| POST     | `/api/v1/orders/{id}/checkout-session` | buyer(自分のみ) | 決済セッション作成。決済画面URLを返す          |
+| メソッド | パス                                   | 認証            | 説明                            |
+| -------- | -------------------------------------- | --------------- | ------------------------------- |
+| POST     | `/api/v1/orders`                       | buyer           | ✅ 注文作成（在庫仮引当）       |
+| GET      | `/api/v1/orders/{id}`                  | buyer(自分のみ) | ✅ 注文照会                     |
+| POST     | `/api/v1/orders/{id}/checkout-session` | buyer(自分のみ) | ❌ Phase P2。決済セッション作成 |
 
 `POST /api/v1/orders` リクエスト:
 
 ```json
-{ "listingId": "01J8...", "quantity": 1 }
+{ "listingId": "01J8...", "idempotencyKey": "6f9e...-uuid" }
 ```
+
+⚠️ **ここに載っていない項目を受け取らない**（指示書 §4.2）。
+商品価格・値引後価格・クリエイター配分額・プラットフォーム手数料・通貨・
+`creatorId`・`buyerUserId`・`commonUserId`・注文状態は、すべて
+**認証情報と DB からサーバーが決める**。契約（`packages/contracts/src/order.ts`）
+を 2 項目に閉じてあるので、増やすには契約を変えるしかない。
+
+⚠️ **数量を受け取っていない。** MVP は 1 注文 1 点で、DB の
+`order_lines_single_item_per_order` が「明細は 1 本まで」を守る。
+
+⚠️ **冪等キーは本文で受け取る。** `Idempotency-Key` ヘッダを使う既存の
+管理APIとは別の仕組みで、注文の場合は `orders (account_id, idempotency_key)`
+の UNIQUE がそのまま二重注文を止める。汎用の占有表を挟むと、
+「占有はできたが注文は作れなかった」ときの後始末が要る。
 
 応答 201:
 
 ```json
 {
+  "reused": false,
   "order": {
     "id": "01J8...",
+    "orderNumber": "SNK-20260819-4K7QM2XP",
     "status": "pending",
-    "total": { "amount": 12000, "currency": "JPY" },
-    "reservedUntil": "2026-01-01T00:30:00Z",
-    "lines": [
-      {
-        "artworkTitle": "作品名（注文時点のスナップショット）",
-        "unitPrice": { "amount": 12000, "currency": "JPY" },
-        "quantity": 1
-      }
-    ]
+    "paymentStatus": "not_started",
+    "fulfillmentStatus": "not_started",
+    "currency": "JPY",
+    "subtotalAmount": 12000,
+    "discountAmount": 0,
+    "totalAmount": 12000,
+    "reservationExpiresAt": "2026-08-19T00:30:00Z",
+    "createdAt": "2026-08-19T00:00:00Z",
+    "item": {
+      "artworkId": "01J8...",
+      "listingId": "01J8...",
+      "titleSnapshot": "作品名（注文時点のスナップショット）",
+      "unitPriceAmount": 12000,
+      "currency": "JPY",
+      "quantity": 1,
+      "totalAmount": 12000
+    }
   }
 }
 ```
 
+⚠️ **購入者向けの応答に手数料とクリエイター配分を含めない。** 購入者に
+関係が無く、事業の取り分を外へ晒すことになる。内訳を返すのは
+`/api/v1/admin/orders` だけ。
+
 > ✅ **決済完了の判定を応答に含めない。** `status` が `paid` になるのは Webhook 受信後のみ。
 > フロントは成功画面到達をもって完了扱いにせず、注文照会をポーリングする。
+
+冪等性（指示書 §4.5）:
+
+| 状況                   | 応答                                     |
+| ---------------------- | ---------------------------------------- |
+| 同じキー・同じ出品     | 201。最初の注文を `reused: true` で返す  |
+| 同じキー・**別の**出品 | 409 `IDEMPOTENCY_CONFLICT`               |
+| 同時に同じキー         | 注文は 1 件だけ。在庫も 1 つしか減らない |
+
+⚠️ **別の出品で前の注文を返さない。** 返すと、買ったつもりのない物を
+買わされる。
+
+#### 内部ジョブ（時計が叩く口）
+
+| メソッド | パス                                                 | 認証                   | 説明                      |
+| -------- | ---------------------------------------------------- | ---------------------- | ------------------------- |
+| POST     | `/api/v1/internal/jobs/release-expired-reservations` | `X-Internal-Job-Token` | ✅ 期限切れの仮引当を解放 |
+
+⚠️ **利用者のログインでは通さない。** ロール判定に載せると、
+「運営が呼べる操作」として管理画面に現れてしまう。これは人が押すボタンでは
+なく、時計が叩く口である。
+
+⚠️ **合言葉（`INTERNAL_JOB_TOKEN`）が未設定の環境では、この経路ごと生えない。**
+「未設定なら素通し」にすると、設定を忘れた環境で外から在庫を操作できる。
+
+⚠️ **合言葉の比較は定数時間で行う。** 文字列比較は先頭から一致した長さで
+所要時間が変わるため、繰り返し呼んで測ると 1 文字ずつ言い当てられる。
+
+応答 200:
+
+```json
+{ "releasedCount": 3, "orderIds": ["01J8...", "01J8...", "01J8..."] }
+```
+
+⚠️ **注文IDまで。** 購入者・作品名・金額は返さない。
 
 #### 受取（要ログイン）
 
@@ -425,10 +489,18 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | DELETE   | `/api/v1/admin/artworks/{id}`         | **完全削除**（`UD-113`）     |
 | POST     | `/api/v1/admin/listings`              | 出品作成                     |
 | PATCH    | `/api/v1/admin/listings/{id}`         | 出品更新（価格・状態）       |
-| GET      | `/api/v1/admin/orders`                | 注文一覧（絞り込み）         |
+| GET      | `/api/v1/admin/orders`                | ✅ 注文一覧（絞り込み）      |
+| GET      | `/api/v1/admin/orders/{id}`           | ✅ 注文詳細（内訳・予約）    |
 | GET      | `/api/v1/admin/entitlements`          | 受取権一覧（受取・発行状況） |
 | DELETE   | `/api/v1/admin/artworks/{id}`         | 作品の削除（`UD-113`）       |
 | POST     | `/api/v1/admin/mint-jobs/{id}/retry`  | 発行ジョブの手動再試行       |
+
+⚠️ **注文を書き換える管理APIは無い**（指示書 §9.3）。金額の直接書換え・
+`paid` への手動変更・在庫と無関係な予約作成・注文や決済データの物理削除は、
+いずれも経路そのものを作っていない。お支払いの確定は決済事業者からの
+Webhook だけが行う（Phase P2）。
+⚠️ **「運用で気をつける」で済ませない。** 一度作った口は、いつか
+「今回だけ」で使われる。作らなければ使えない。
 
 #### スタッフの管理（要 operator ロール **かつ** オーナーの印）
 

@@ -166,7 +166,9 @@ export interface OrderRepository {
    * ⚠️ 一意制約違反や CHECK 制約違反を握りつぶさない。
    * 握りつぶすと「作れなかったのに成功した」応答が返る。
    */
-  createWithReservation(command: CreateOrderCommand): Promise<Result<CreateOrderOutcome, DomainError>>;
+  createWithReservation(
+    command: CreateOrderCommand,
+  ): Promise<Result<CreateOrderOutcome, DomainError>>;
 
   findById(orderId: string): Promise<OrderView | null>;
 

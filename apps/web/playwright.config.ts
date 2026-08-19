@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const WEB_PORT = 3100;
+export const WEB_PORT = 3100;
 const API_PORT = 3101;
 const baseURL = `http://127.0.0.1:${WEB_PORT}`;
 const apiBaseURL = `http://127.0.0.1:${API_PORT}`;

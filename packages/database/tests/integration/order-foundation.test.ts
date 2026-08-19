@@ -118,31 +118,31 @@ suite('注文の金額の CHECK 制約', () => {
   it('100% を超える手数料率を拒否する', async () => {
     // bps（1/100 %）なので上限は 10000。率を小数で持たない。
     const seeded = await seed();
-    await expect(
-      createOrderRow(seeded, { platformFeeRateBps: 10_001 }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'orders_fee_rate_range'));
+    await expect(createOrderRow(seeded, { platformFeeRateBps: 10_001 })).rejects.toSatisfy(
+      (error) => violatesConstraint(error, 'orders_fee_rate_range'),
+    );
   });
 
   it('知らない決済状態を拒否する', async () => {
     const seeded = await seed();
-    await expect(
-      createOrderRow(seeded, { paymentStatus: 'looks_ok' }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'orders_payment_status_known'));
+    await expect(createOrderRow(seeded, { paymentStatus: 'looks_ok' })).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'orders_payment_status_known'),
+    );
   });
 
   it('決済成功なのに支払時刻の無い行を作れない', async () => {
     const seeded = await seed();
-    await expect(
-      createOrderRow(seeded, { paymentStatus: 'succeeded' }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'orders_paid_has_time'));
+    await expect(createOrderRow(seeded, { paymentStatus: 'succeeded' })).rejects.toSatisfy(
+      (error) => violatesConstraint(error, 'orders_paid_has_time'),
+    );
   });
 
   it('paid なのに支払時刻の無い行を作れない', async () => {
     // 管理画面が読むのは `paid_at`。注文側の状態だけ進めても空にさせない。
     const seeded = await seed();
-    await expect(
-      createOrderRow(seeded, { status: 'paid' }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'orders_paid_has_time'));
+    await expect(createOrderRow(seeded, { status: 'paid' })).rejects.toSatisfy((error) =>
+      violatesConstraint(error, 'orders_paid_has_time'),
+    );
   });
 
   it('注文番号は重複できない', async () => {
@@ -205,9 +205,9 @@ suite('注文明細の CHECK / UNIQUE 制約', () => {
   it('単価 × 数量 と合計が食い違う明細を作れない', async () => {
     const seeded = await seed();
     const orderId = await createOrderRow(seeded);
-    await expect(
-      createLine(seeded, orderId, { quantity: 2, totalAmount: 3000 }),
-    ).rejects.toSatisfy((error) => violatesConstraint(error, 'order_lines_total_matches_unit_price'));
+    await expect(createLine(seeded, orderId, { quantity: 2, totalAmount: 3000 })).rejects.toSatisfy(
+      (error) => violatesConstraint(error, 'order_lines_total_matches_unit_price'),
+    );
   });
 });
 
@@ -258,29 +258,23 @@ suite('在庫の仮引当の制約', () => {
   it('知らない状態を拒否する', async () => {
     const seeded = await seed();
     const orderId = await createOrderRow(seeded);
-    await expect(
-      createReservation(seeded, orderId, { status: 'maybe' }),
-    ).rejects.toSatisfy((error) =>
-      violatesConstraint(error, 'inventory_reservations_status_known'),
+    await expect(createReservation(seeded, orderId, { status: 'maybe' })).rejects.toSatisfy(
+      (error) => violatesConstraint(error, 'inventory_reservations_status_known'),
     );
   });
 
   it('released なのに解放時刻の無い行を作れない', async () => {
     const seeded = await seed();
     const orderId = await createOrderRow(seeded);
-    await expect(
-      createReservation(seeded, orderId, { status: 'released' }),
-    ).rejects.toSatisfy((error) =>
-      violatesConstraint(error, 'inventory_reservations_released_has_time'),
+    await expect(createReservation(seeded, orderId, { status: 'released' })).rejects.toSatisfy(
+      (error) => violatesConstraint(error, 'inventory_reservations_released_has_time'),
     );
   });
 
   it('数量 0 の予約を拒否する', async () => {
     const seeded = await seed();
     const orderId = await createOrderRow(seeded);
-    await expect(
-      createReservation(seeded, orderId, { quantity: 0 }),
-    ).rejects.toSatisfy((error) =>
+    await expect(createReservation(seeded, orderId, { quantity: 0 })).rejects.toSatisfy((error) =>
       violatesConstraint(error, 'inventory_reservations_quantity_positive'),
     );
   });
