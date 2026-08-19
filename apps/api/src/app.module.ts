@@ -167,7 +167,8 @@ export interface AppDependencies {
     readonly repository: OrderRepository;
     readonly commonUserLinks: CommonUserLinkRepository;
     readonly random: RandomPort;
-    readonly platformFeeRateBps: number;
+    /** ⚠️ 呼び出しのたびに引く。管理画面で変えたら次の注文から効く。 */
+    readonly resolvePlatformFeeRateBps: () => Promise<number>;
     readonly reservationMinutes: number;
     readonly internalJobToken?: string | undefined;
   };
@@ -349,7 +350,7 @@ export class AppModule implements NestModule {
               deps.orders.random,
               deps.audit,
               {
-                platformFeeRateBps: deps.orders.platformFeeRateBps,
+                resolvePlatformFeeRateBps: deps.orders.resolvePlatformFeeRateBps,
                 reservationMinutes: deps.orders.reservationMinutes,
               },
             ),

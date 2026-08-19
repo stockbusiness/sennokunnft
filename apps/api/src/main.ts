@@ -49,6 +49,8 @@ import {
   CryptoRandom,
   FakePaymentGateway,
   StripePaymentGateway,
+  ResolvingPaymentGateway,
+  createPaymentConfigResolver,
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
@@ -271,16 +273,47 @@ async function bootstrap(): Promise<void> {
        `stripe` のときは既に止めているので、ここへ来るのは
        `PAYMENT_WEBHOOK_SECRET` を入れていない `fake` の場合だけ。
   */
+  /*
+    ⚠️ **設定は呼び出しのたびに引く。** 管理画面で鍵・戻り先・手数料率を
+       変えたら、次の呼び出しから効いてほしい。起動時に読んだ値を
+       持ち回ると「保存できたのに効かない」になり、しかも効いていない
+       ことに気づく手掛かりが無い。
+
+    ⚠️ **環境変数は引き継ぎ元。** DB に鍵が入るまではこちらが正で、
+       入ったあとは DB が正。DB 側で止めてあるときは環境変数へ
+       落ちない（落ちると管理画面の「停止」が効かない）。
+  */
+  const paymentConfigResolver = createPaymentConfigResolver({
+    integrations: integrations?.repository ?? null,
+    appEnvironment: integrations?.appEnvironment ?? 'staging',
+    fallback:
+      env.PAYMENT_PROVIDER === 'stripe'
+        ? {
+            // 起動時のガード（`assertStripeConfig`）で存在を確認済み。
+            secretKey: env.STRIPE_SECRET_KEY ?? '',
+            webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+            apiVersion: env.STRIPE_API_VERSION,
+            successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
+            cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
+            platformFeeRateBps: env.PLATFORM_FEE_RATE_BPS,
+          }
+        : null,
+  });
+
   const paymentGateway = ((): PaymentGatewayPort | null => {
     if (env.PAYMENT_PROVIDER === 'stripe') {
-      return new StripePaymentGateway({
-        // 上のガードで存在を確認済み。
-        secretKey: env.STRIPE_SECRET_KEY ?? '',
-        webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-        apiVersion: env.STRIPE_API_VERSION,
-        successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
-        cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
-      });
+      return new ResolvingPaymentGateway(
+        paymentConfigResolver,
+        (config) =>
+          new StripePaymentGateway({
+            secretKey: config.secretKey,
+            webhookSecret: config.webhookSecret,
+            apiVersion: config.apiVersion === '' ? env.STRIPE_API_VERSION : config.apiVersion,
+            successUrlTemplate: config.successUrlTemplate,
+            cancelUrlTemplate: config.cancelUrlTemplate,
+          }),
+        'stripe',
+      );
     }
     if (env.PAYMENT_WEBHOOK_SECRET === undefined) {
       logger.warn({}, '決済の機能は無効です（PAYMENT_WEBHOOK_SECRET が未設定）。');
@@ -288,6 +321,19 @@ async function bootstrap(): Promise<void> {
     }
     return new FakePaymentGateway(env.PAYMENT_WEBHOOK_SECRET);
   })();
+
+  /*
+    手数料率。
+    ⚠️ **注文のたびに引く。** 引いた値は注文へスナップショットされるので、
+       あとから率を変えても**過去の注文は動かない**。
+    ⚠️ **解決できないときは 0 を返す。** 0 は「無料」ではなく
+       「販売設定が未完了」の意味で、支払い口を作らせない側へ倒れる。
+       ここで環境変数の値へ勝手に戻すと、管理画面で止めた意図を裏切る。
+  */
+  const resolvePlatformFeeRateBps = async (): Promise<number> => {
+    const resolved = await paymentConfigResolver();
+    return resolved.ok ? resolved.config.platformFeeRateBps : 0;
+  };
 
   const app = await NestFactory.create(
     AppModule.register({
@@ -344,7 +390,7 @@ async function bootstrap(): Promise<void> {
         repository: new PrismaOrderRepository(prisma),
         commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
         random: new CryptoRandom(),
-        platformFeeRateBps: env.PLATFORM_FEE_RATE_BPS,
+        resolvePlatformFeeRateBps,
         reservationMinutes: env.ORDER_RESERVATION_MINUTES,
         internalJobToken: env.INTERNAL_JOB_TOKEN,
       },

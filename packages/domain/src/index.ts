@@ -130,12 +130,28 @@ export {
   disableIntegration,
   enableIntegration,
   isCheckFresh,
+  requiredSecretPurposes,
   updateSettings,
   type EnableInput,
   type IntegrationSettings,
   type UpdateSettingsInput,
   type UpdatedSettings,
 } from './integration/settings';
+
+export {
+  isSalesSetupComplete,
+  updatePaymentSettings,
+  validateSecretKeyForEnvironment,
+  validateWebhookSecret,
+  ORDER_ID_PLACEHOLDER,
+  PAYMENT_API_ENDPOINT,
+  PAYMENT_LIVE_KEY_PREFIX,
+  PAYMENT_TEST_KEY_PREFIX,
+  PAYMENT_WEBHOOK_SECRET_PREFIX,
+  PLATFORM_FEE_RATE_BPS_MAX,
+  type PaymentSettingsFields,
+  type UpdatePaymentSettingsInput,
+} from './integration/payment-settings';
 
 export {
   createListing,

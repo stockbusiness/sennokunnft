@@ -9,7 +9,14 @@ import {
   secretPurposeLabel,
   secretStatusLabel,
 } from '../../../../src/integration-copy';
-import { CheckButton, EnableButton, SecretActionButton, SecretForm, SettingsForm } from '../forms';
+import {
+  CheckButton,
+  EnableButton,
+  PaymentSettingsForm,
+  SecretActionButton,
+  SecretForm,
+  SettingsForm,
+} from '../forms';
 
 /**
  * 提携先ごとの設定（管理画面・外部連携 指示書 §4・§6・§9・§11）。
@@ -236,11 +243,46 @@ export default async function AdminIntegrationPage({
       */}
       {status.manageable ? (
         <>
-          <h2>{INTEGRATION_COPY.settingsHeading}</h2>
-          <SettingsForm status={status} />
+          {/*
+            ⚠️ **決済には決済の欄だけを出す。** 接続先と鍵の名前は
+               決済に無い概念で、並べると埋めるための嘘の値が入る。
+          */}
+          {status.payment === null ? (
+            <>
+              <h2>{INTEGRATION_COPY.settingsHeading}</h2>
+              <SettingsForm status={status} />
+            </>
+          ) : (
+            <>
+              <h2>{INTEGRATION_COPY.paymentHeading}</h2>
+              <p>{INTEGRATION_COPY.paymentIntro}</p>
+              {/*
+                ⚠️ **0 のときは「無料」ではなく「未設定」と伝える。**
+                   ここを取り違えると、設定した人も取り違える。
+              */}
+              {status.payment.salesSetupComplete ? (
+                <Notice
+                  tone="info"
+                  title={INTEGRATION_COPY.feeRateSet(
+                    String(status.payment.platformFeeRateBps / 100),
+                    String((10_000 - status.payment.platformFeeRateBps) / 100),
+                  )}
+                />
+              ) : (
+                <Notice tone="alert" title={INTEGRATION_COPY.feeRateNotSet} />
+              )}
+              <PaymentSettingsForm status={status} />
+            </>
+          )}
 
           <h2>{INTEGRATION_COPY.secretHeading}</h2>
           <p>{INTEGRATION_COPY.secretIntro}</p>
+          {status.payment === null ? null : (
+            <>
+              <p>{INTEGRATION_COPY.paymentSecretHint}</p>
+              <Notice tone="alert" title={INTEGRATION_COPY.paymentKeyEnvironmentHint} />
+            </>
+          )}
           <SecretForm service={status.service} />
 
           <h3>{INTEGRATION_COPY.secretsHeading}</h3>
@@ -262,7 +304,7 @@ export default async function AdminIntegrationPage({
                   {status.secrets.map((secret) => (
                     <tr key={secret.id}>
                       <td className="sengoku-table__nowrap">
-                        {secretPurposeLabel(secret.purpose)}
+                        {secretPurposeLabel(secret.purpose, status.service)}
                       </td>
                       {/* ⚠️ 出せるのはここまで。全文を返す経路は API に無い。 */}
                       <td className="sengoku-table__nowrap">

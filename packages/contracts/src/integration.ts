@@ -1,3 +1,4 @@
+import { INTEGRATION_SERVICES } from '@sengoku/domain';
 import { z } from '@sengoku/validation';
 
 /**
@@ -11,7 +12,12 @@ import { z } from '@sengoku/validation';
  * 「設定されているか」「末尾 4 文字」「いつ更新したか」まで。
  */
 
-export const INTEGRATION_SERVICE_VALUES = ['ovew_wallet', 'storage', 'auth'] as const;
+/*
+  ⚠️ **ドメインから引く。書き写さない。** 以前ここに同じ配列を書いていて、
+     決済を足したときに片方だけ増えた。契約の側が古いと、正しい値を
+     送っても「そんなサービスは無い」と断られる。
+*/
+export const INTEGRATION_SERVICE_VALUES = INTEGRATION_SERVICES;
 export const INTEGRATION_ENVIRONMENT_VALUES = ['staging', 'production'] as const;
 export const SECRET_PURPOSE_VALUES = ['api_key', 'hmac_secret'] as const;
 
@@ -62,6 +68,28 @@ export const environmentSummarySchema = z.object({
 });
 export type EnvironmentSummaryView = z.infer<typeof environmentSummarySchema>;
 
+/**
+ * 決済の設定（管理画面から変える分）。
+ *
+ * ⚠️ **秘密を含めない。** 秘密鍵も署名鍵もここには入らない。
+ */
+export const paymentSettingsSchema = z.object({
+  apiVersion: z.string().nullable(),
+  /** ⚠️ `{ORDER_ID}` を含む。含まないものは保存の口が断る。 */
+  checkoutSuccessUrl: z.string().nullable(),
+  checkoutCancelUrl: z.string().nullable(),
+  /**
+   * プラットフォーム手数料（ベーシスポイント）。
+   *
+   * ⚠️ **0 は「無料」ではなく「販売設定が未完了」。** 画面はこの値を
+   * そのまま「手数料 0%」と書かないこと。
+   */
+  platformFeeRateBps: z.number().int(),
+  /** 率が入っているか。⚠️ 画面が 0 を「無料」と読まないための印。 */
+  salesSetupComplete: z.boolean(),
+});
+export type PaymentSettingsView = z.infer<typeof paymentSettingsSchema>;
+
 export const integrationStatusSchema = z.object({
   service: z.enum(INTEGRATION_SERVICE_VALUES),
   environment: z.enum(INTEGRATION_ENVIRONMENT_VALUES),
@@ -111,6 +139,13 @@ export const integrationStatusSchema = z.object({
    * 「何度も失敗したあとの 1 回の成功」が見えなくなる。
    */
   recentChecks: z.array(connectionCheckSchema),
+  /**
+   * 決済にだけある欄。ほかの連携では `null`。
+   *
+   * ⚠️ **鍵はここに入らない。** 入るのは戻り先と手数料率まで。
+   * 秘密は `secrets` に、末尾 4 文字と状態だけが出る。
+   */
+  payment: paymentSettingsSchema.nullable(),
 });
 export type IntegrationStatusView = z.infer<typeof integrationStatusSchema>;
 
@@ -134,6 +169,15 @@ export const updateIntegrationRequestSchema = z
     apiVersion: z.string().trim().max(64).nullable().optional(),
     timeoutMs: z.number().int().optional(),
     maxAttempts: z.number().int().optional(),
+    /**
+     * 決済にだけ意味のある欄。ほかの連携へ送っても無視される。
+     *
+     * ⚠️ **秘密はここに入らない。** 鍵は `/secrets` の経路で扱う。
+     */
+    checkoutSuccessUrl: z.string().trim().max(2048).nullable().optional(),
+    checkoutCancelUrl: z.string().trim().max(2048).nullable().optional(),
+    /** ⚠️ 0 は「無料」ではなく「販売設定が未完了」。 */
+    platformFeeRateBps: z.number().int().min(0).max(10_000).optional(),
     /** 読んだときの版。一致しなければ拒否する。 */
     rowVersion: z.number().int(),
   })

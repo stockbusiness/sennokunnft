@@ -6,7 +6,7 @@
  * 綴り違いの設定名が黙って保存され、どれが効いているのか分からなくなる。
  */
 
-export const INTEGRATION_SERVICES = ['ovew_wallet', 'storage', 'auth'] as const;
+export const INTEGRATION_SERVICES = ['ovew_wallet', 'payment', 'storage', 'auth'] as const;
 export type IntegrationService = (typeof INTEGRATION_SERVICES)[number];
 
 /**
@@ -27,6 +27,19 @@ export type IntegrationEnvironment = (typeof INTEGRATION_ENVIRONMENTS)[number];
  * 保存できても誰も読まない設定を受け付けるのは、嘘をつくのと同じ。
  * 「保存できたのに効かない」は、効かない理由を誰も説明できない状態を作る。
  *
+ * `payment`（現在の実装は Stripe）を入れている理由:
+ *  - **鍵を送信ごとに解決する作りにした**ので、DB を変えれば次の呼び出しから
+ *    効く。「保存できたのに効かない」にならない。
+ *  - 取り違えの危険は、起動時と**同じ検査を保存時にも**かけて塞いだ。
+ *    production へ `sk_test_`、staging へ `sk_live_` は保存の時点で断る。
+ *  - 鍵は環境変数よりむしろ**こちらのほうが安全**。環境変数は配備先の
+ *    画面を開ける人全員に見え、誰がいつ替えたかも残らない。ここは
+ *    暗号化して保存し、再表示せず、監査ログに残る。
+ *
+ * ⚠️ **サービス名を `stripe` にしていない。** `storage`（R2）・`auth`（Supabase）と
+ * 同じく、**何をする連携か**で名前を付けている。決済事業者を替えたときに
+ * 名前だけ残って中身が違う、という状態を作らないため。
+ *
  * `storage`（Cloudflare R2）を入れていない理由:
  *  - 保存先のアダプタは api の起動時に 1 個作る。DB を変えても効かない。
  *    効かせるには送信ごとに解決する作りへ変える必要があり、それは
@@ -42,7 +55,7 @@ export type IntegrationEnvironment = (typeof INTEGRATION_ENVIRONMENTS)[number];
  * ⚠️ **どちらも「状態を見る」ことはできる。** 見えないと、
  * 設定が欠けていることに配備してから気づくことになる。
  */
-export const MANAGED_INTEGRATION_SERVICES = ['ovew_wallet'] as const;
+export const MANAGED_INTEGRATION_SERVICES = ['ovew_wallet', 'payment'] as const;
 
 /** その連携を管理画面から変えてよいか。 */
 export function isManagedFromAdmin(service: IntegrationService): boolean {

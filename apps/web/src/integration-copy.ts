@@ -139,6 +139,36 @@ export const INTEGRATION_COPY = {
   enableBlockedHint:
     '接続先・鍵の名前・お預かりした鍵・直近の接続確認（30 分以内の成功）が、すべてそろっている必要があります。',
   disableHint: '止めるのはいつでもできます。押すとすぐに新しいお届けが止まります。',
+
+  // --- お支払いの設定 ---
+  paymentHeading: 'お支払いの設定',
+  paymentIntro:
+    'ここで保存した内容は、次のお支払いから使われます。再起動は要りません。まだ何も保存していない間は、配備時の設定がそのまま使われます。',
+  fieldSuccessUrl: 'お支払い後に戻る画面の URL',
+  fieldSuccessUrlHint:
+    'https で始まり、{ORDER_ID} を含めてください。この目印が、どのご注文の結果を表示するかの手がかりになります。',
+  fieldCancelUrl: 'お支払いをやめたときに戻る画面の URL',
+  fieldCancelUrlHint: 'https で始まる URL をお使いください。',
+  fieldFeeRate: '当社の手数料（％）',
+  /*
+    ⚠️ **0 を「手数料無料」と書かない。** 0 のまま売れると、こちらの
+       取り分が無い注文が成立し、あとから請求し直すことはできない。
+  */
+  fieldFeeRateHint:
+    '0 のままでは販売を開始できません（未設定として扱います）。作家さまへのお渡し分は、100％からこの割合を引いた残りです。',
+  feeRateNotSet: '手数料が未設定のため、購入手続きに進めません',
+  feeRateSet: (percent: string, creator: string): string =>
+    `手数料 ${percent}％／作家さま ${creator}％`,
+  paymentSecretHint:
+    'シークレットキーと Webhook 署名シークレットの 2 つが必要です。どちらも決済会社の管理画面から取得できます。',
+  /*
+    ⚠️ **取り違えの結果を具体的に書く。** 「正しい鍵を入れてください」では、
+       何が起きるか伝わらず、確認の手が省かれる。
+  */
+  paymentKeyEnvironmentHint:
+    '本番用（sk_live_）とテスト用（sk_test_）を取り違えると、本番では入金されない、試験では本物のお金が動く、のどちらかが起きます。保存の時点で確認します。',
+  paymentSourceDatabase: 'この画面の設定が使われています',
+  paymentSourceEnvironment: '配備時の設定が使われています（この画面ではまだ保存していません）',
 } as const;
 
 /** どの提携先か。⚠️ 内部の名前をそのまま出さない。 */
@@ -146,6 +176,8 @@ export function integrationServiceLabel(service: IntegrationStatusView['service'
   switch (service) {
     case 'ovew_wallet':
       return 'お受け取り先（OVEW Wallet）';
+    case 'payment':
+      return 'お支払い（クレジットカード決済）';
     case 'storage':
       return '画像の保管先';
     case 'auth':
@@ -153,7 +185,14 @@ export function integrationServiceLabel(service: IntegrationStatusView['service'
   }
 }
 
-export function secretPurposeLabel(purpose: 'api_key' | 'hmac_secret'): string {
+export function secretPurposeLabel(
+  purpose: 'api_key' | 'hmac_secret',
+  service?: IntegrationStatusView['service'],
+): string {
+  if (service === 'payment') {
+    // ⚠️ 決済では呼び名が違う。画面の言葉を提携先の画面に合わせる。
+    return purpose === 'api_key' ? 'シークレットキー' : 'Webhook 署名シークレット';
+  }
   return purpose === 'api_key' ? 'API キー' : '署名の鍵';
 }
 

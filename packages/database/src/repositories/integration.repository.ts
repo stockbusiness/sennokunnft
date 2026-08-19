@@ -8,6 +8,7 @@ import type {
   SecretCipherPort,
   SecretPurpose,
 } from '@sengoku/domain';
+import { PAYMENT_API_ENDPOINT } from '@sengoku/domain';
 import type { PrismaClient } from '../../generated/client';
 import type {
   IntegrationConnectionCheck as CheckRow,
@@ -34,6 +35,12 @@ function toSettings(row: SettingRow): IntegrationSettings {
     timeoutMs: row.timeoutMs,
     maxAttempts: row.maxAttempts,
     enabled: row.enabled,
+    payment: {
+      apiVersion: row.apiVersion,
+      checkoutSuccessUrl: row.checkoutSuccessUrl,
+      checkoutCancelUrl: row.checkoutCancelUrl,
+      platformFeeRateBps: row.platformFeeRateBps,
+    },
     rowVersion: row.rowVersion,
   };
 }
@@ -121,7 +128,16 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
       data: {
         endpointUrl: settings.endpointUrl,
         keyId: settings.keyId,
-        apiVersion: settings.apiVersion,
+        /*
+          ⚠️ 決済は `payment.apiVersion` 側を正とする。決済の画面が
+             書き換えるのはそちらで、共通の `apiVersion` 欄を別々に
+             持つと、どちらが効いているのか分からなくなる。
+        */
+        apiVersion:
+          settings.service === 'payment' ? settings.payment.apiVersion : settings.apiVersion,
+        checkoutSuccessUrl: settings.payment.checkoutSuccessUrl,
+        checkoutCancelUrl: settings.payment.checkoutCancelUrl,
+        platformFeeRateBps: settings.payment.platformFeeRateBps,
         timeoutMs: settings.timeoutMs,
         maxAttempts: settings.maxAttempts,
         enabled: settings.enabled,
@@ -146,7 +162,16 @@ export class PrismaIntegrationRepository implements IntegrationRepository {
   ): Promise<IntegrationSettings> {
     const row = await this.prisma.integrationSetting.upsert({
       where: { service_environment: { service, environment } },
-      create: { id, service, environment },
+      /*
+        ⚠️ **決済の接続先だけ既定を入れる。** 決済事業者の宛先は決まって
+           いて画面からは変えさせないが、空のままだと到達性の確認が
+           行えず、確認が無いと有効化もできない。作った行が最初から
+           詰んでいる、という状態を作らない。
+      */
+      create:
+        service === 'payment'
+          ? { id, service, environment, endpointUrl: PAYMENT_API_ENDPOINT }
+          : { id, service, environment },
       // ⚠️ 既にあるなら何も変えない。ここで既定値を書き戻すと設定が消える。
       update: {},
     });

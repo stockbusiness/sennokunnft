@@ -1,6 +1,8 @@
 import { err, ok, type Result } from '../shared/result';
 import { domainError, type DomainError } from '../shared/errors';
 import type { IntegrationEnvironment, IntegrationService } from './service';
+import type { SecretPurpose } from './secret';
+import { isSalesSetupComplete, type PaymentSettingsFields } from './payment-settings';
 
 /**
  * 外部連携の設定（指示書 §4・§9）。
@@ -27,6 +29,14 @@ export interface IntegrationSettings {
   readonly timeoutMs: number;
   readonly maxAttempts: number;
   readonly enabled: boolean;
+  /**
+   * 決済にだけ意味のある欄。ほかの連携では既定値のまま使わない。
+   *
+   * ⚠️ **1 つの表に全サービスの欄を並べている。** 連携ごとに表を分けると、
+   * 有効化・接続テスト・監査ログの仕組みも同じ数だけ増える。増えた分は
+   * いつか片方だけ直される。欄が余ることのほうを受け入れている。
+   */
+  readonly payment: PaymentSettingsFields;
   /** 楽観ロック用。読んだときの値を書き戻しで送る。 */
   readonly rowVersion: number;
 }
@@ -94,9 +104,28 @@ function normalizeKeyId(value: string | null): string | null {
   return value === null || value.trim() === '' ? null : value.trim();
 }
 
+/**
+ * その連携を動かすのに要る資格情報。
+ *
+ * ⚠️ **決済は 2 本要る。** 支払い口を作るための秘密鍵と、通知の署名を
+ * 検証するための鍵。片方だけでは「支払い口は作れるが入金を確定できない」
+ * という、いちばん質の悪い半端な状態になる。
+ */
+export function requiredSecretPurposes(service: IntegrationService): readonly SecretPurpose[] {
+  switch (service) {
+    case 'payment':
+      return ['api_key', 'hmac_secret'];
+    case 'ovew_wallet':
+      return ['hmac_secret'];
+    default:
+      return [];
+  }
+}
+
 export interface EnableInput {
   readonly settings: IntegrationSettings;
-  readonly hasActiveSecret: boolean;
+  /** いま有効になっている資格情報の用途。 */
+  readonly activeSecretPurposes: readonly SecretPurpose[];
   readonly lastCheck: { readonly succeeded: boolean; readonly executedAt: Date } | null;
   readonly freshnessMs: number;
   readonly now: Date;
@@ -123,13 +152,41 @@ export function enableIntegration(input: EnableInput): Result<IntegrationSetting
     ⚠️ **鍵の識別子も揃っていることを条件にする。** 署名ヘッダに載る値で、
        欠けていると相手は誰の署名か分からず、必ず断られる。
        有効化してから毎回断られるより、有効化の前に止める。
+
+       決済には鍵の識別子が無い（署名ヘッダに載せる仕組みではない）ので
+       課さない。無い概念を必須にすると、埋めるための嘘の値が入る。
   */
-  if (settings.keyId === null) {
+  if (settings.service !== 'payment' && settings.keyId === null) {
     return err(domainError('INTEGRATION_SETTINGS_INVALID', 'key id is not configured'));
   }
-  if (!input.hasActiveSecret) {
-    return err(domainError('INTEGRATION_SECRET_MISSING', 'no active secret'));
+
+  for (const purpose of requiredSecretPurposes(settings.service)) {
+    if (!input.activeSecretPurposes.includes(purpose)) {
+      return err(domainError('INTEGRATION_SECRET_MISSING', `no active secret: ${purpose}`));
+    }
   }
+
+  if (settings.service === 'payment') {
+    /*
+      ⚠️ **戻り先が無いまま有効にしない。** 支払いを終えた購入者の行き先が
+         決まっていない状態で決済を開けると、お金だけ動いて画面が迷子になる。
+    */
+    if (settings.payment.checkoutSuccessUrl === null) {
+      return err(domainError('PAYMENT_SETTINGS_INVALID', 'success url is not configured'));
+    }
+    if (settings.payment.checkoutCancelUrl === null) {
+      return err(domainError('PAYMENT_SETTINGS_INVALID', 'cancel url is not configured'));
+    }
+    /*
+      ⚠️ **手数料率 0 のまま有効にしない。** 0 は「無料」ではなく
+         「まだ決めていない」。決めないまま売れると、こちらの取り分が
+         無い注文が成立し、あとから請求し直すことはできない。
+    */
+    if (!isSalesSetupComplete(settings.payment)) {
+      return err(domainError('PAYMENT_SETTINGS_INVALID', 'fee rate is not configured'));
+    }
+  }
+
   if (lastCheck === null || !lastCheck.succeeded) {
     return err(domainError('INTEGRATION_CHECK_REQUIRED', 'no successful connection check'));
   }

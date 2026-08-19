@@ -59,7 +59,7 @@ import type {
   ReleasedReservation,
   Result,
 } from '@sengoku/domain';
-import { canManuallyResend, err, ok, reserveSupply } from '@sengoku/domain';
+import { canManuallyResend, err, ok, reserveSupply, PAYMENT_API_ENDPOINT } from '@sengoku/domain';
 import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
 
@@ -486,12 +486,19 @@ export class InMemoryIntegrationRepository implements IntegrationRepository {
       id,
       service,
       environment,
-      endpointUrl: null,
+      // ⚠️ 本物と同じく、決済だけ既定の接続先を入れる。
+      endpointUrl: service === 'payment' ? PAYMENT_API_ENDPOINT : null,
       keyId: null,
       apiVersion: null,
       timeoutMs: 10_000,
       maxAttempts: 5,
       enabled: false,
+      payment: {
+        apiVersion: null,
+        checkoutSuccessUrl: null,
+        checkoutCancelUrl: null,
+        platformFeeRateBps: 0,
+      },
       rowVersion: 1,
     };
     this.settings.set(key, created);
@@ -1407,6 +1414,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   */
   const environmentSummaries: Record<IntegrationService, EnvIntegrationSummary> = {
     ovew_wallet: { provider: 'database', complete: false, missing: [], publicUrl: null },
+    payment: { provider: 'database', complete: false, missing: [], publicUrl: null },
     storage: {
       provider: 'r2',
       complete: true,
@@ -1483,7 +1491,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // ✅ 承認済み 2026-08-19（UD-109）: 20% = 2000。
       // ⚠️ 0 は「無料」ではなく「販売設定未完了」。0 の挙動を見る試験は
       //    `buildHarness` の戻りを書き換えて確かめる。
-      platformFeeRateBps: APPROVED_FEE_RATE_BPS,
+      resolvePlatformFeeRateBps: async () => APPROVED_FEE_RATE_BPS,
       reservationMinutes: 30,
       internalJobToken: TEST_INTERNAL_JOB_TOKEN,
     },

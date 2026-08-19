@@ -76,6 +76,49 @@ export async function updateIntegrationAction(
 }
 
 /**
+ * お支払いの設定を保存する。
+ *
+ * ⚠️ **画面は％で受け、API へは bps（1/100％）で送る。** ％のまま扱うと
+ * 小数になり、金額の計算に浮動小数が混ざる。変換はここ 1 か所で行う。
+ *
+ * ⚠️ **端数を黙って丸めない。** 「20.005％」のような入力は断る。
+ * 丸めてしまうと、入れた値と効いている値が食い違い、しかもそれが
+ * 分かるのは請求のときになる。
+ */
+export async function updatePaymentSettingsAction(
+  _previous: AdminActionState,
+  form: FormData,
+): Promise<AdminActionState> {
+  const service = text(form, 'service');
+  const rowVersion = Number.parseInt(text(form, 'rowVersion'), 10);
+  if (!Number.isSafeInteger(rowVersion)) {
+    return { error: '画面を読み込み直してから、もう一度お試しください。' };
+  }
+
+  const percent = Number.parseFloat(text(form, 'feeRatePercent'));
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+    return { error: '手数料は 0 から 100 の範囲で入力してください。' };
+  }
+  const platformFeeRateBps = Math.round(percent * 100);
+  if (Math.abs(percent * 100 - platformFeeRateBps) > Number.EPSILON * 100) {
+    return { error: '手数料は小数第 2 位までで入力してください。' };
+  }
+
+  const result = await updateIntegration(service, {
+    checkoutSuccessUrl: text(form, 'checkoutSuccessUrl'),
+    checkoutCancelUrl: text(form, 'checkoutCancelUrl'),
+    apiVersion: text(form, 'apiVersion'),
+    platformFeeRateBps,
+    rowVersion,
+  });
+  if (!result.ok) {
+    return fail(result);
+  }
+  refresh(service);
+  return { notice: INTEGRATION_COPY.settingsSavedNotice };
+}
+
+/**
  * 鍵をお預かりする。
  *
  * ⚠️ **値を通知に載せない。** 「◯◯を登録しました」と書きたくなるが、

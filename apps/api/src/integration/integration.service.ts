@@ -18,7 +18,11 @@ import {
   discardPendingSecret,
   enableIntegration,
   isCheckFresh,
+  updatePaymentSettings,
   updateSettings,
+  validateSecretKeyForEnvironment,
+  validateWebhookSecret,
+  isSalesSetupComplete,
   type AuditLogPort,
   type ClockPort,
   type ConnectionCheckRecord,
@@ -127,7 +131,20 @@ export class IntegrationService_ {
 
     const now = this.clock.now();
     const fresh = isCheckFresh(lastCheck, CHECK_FRESHNESS_MS, now);
-    const hasActive = secrets.some((secret) => secret.status === 'active');
+    /*
+      ⚠️ **有効化できるかの判定は、ドメインの関数をそのまま使う。**
+         画面用に別式を書くと、「画面では押せるのに保存で断られる」
+         あるいはその逆が、いつか必ず生まれる。
+    */
+    const canEnable = enableIntegration({
+      settings,
+      activeSecretPurposes: secrets
+        .filter((secret) => secret.status === 'active')
+        .map((secret) => secret.purpose),
+      lastCheck,
+      freshnessMs: CHECK_FRESHNESS_MS,
+      now,
+    }).ok;
 
     return {
       service,
@@ -144,12 +161,20 @@ export class IntegrationService_ {
       lastCheck: lastCheck === null ? null : toCheckView(lastCheck),
       checkFresh: fresh,
       // 画面のボタンを出し分けるための値。⚠️ **これは保護ではない。**
-      canEnable: fresh && hasActive && settings.endpointUrl !== null && settings.keyId !== null,
+      canEnable,
       canCheck: canRunCheck(settings),
       manageable: true,
       // ⚠️ 管理できる連携では、正は DB。2 つの正を並べない。
       environmentSummary: null,
       recentChecks: recentChecks.map(toCheckView),
+      payment:
+        service === 'payment'
+          ? {
+              ...settings.payment,
+              // ⚠️ 0 を「手数料無料」と読ませないための印。
+              salesSetupComplete: isSalesSetupComplete(settings.payment),
+            }
+          : null,
     };
   }
 
@@ -193,6 +218,8 @@ export class IntegrationService_ {
       manageable: false,
       environmentSummary: { ...summary, missing: [...summary.missing] },
       recentChecks: recentChecks.map(toCheckView),
+      // 決済は管理できる連携なので、ここへは来ない。
+      payment: null,
     };
   }
 
@@ -293,13 +320,41 @@ export class IntegrationService_ {
       }),
     );
 
-    const saved = await this.repository.saveSettings(updated.settings, request.rowVersion, actorId);
+    /*
+      決済に固有の欄。
+      ⚠️ **ほかの連携へ送られても書き換えない。** 意味の無い欄が
+         黙って保存されると、あとから読んだ人が「効くのか」を
+         判断できなくなる。
+    */
+    const withPayment =
+      service === 'payment'
+        ? {
+            ...updated,
+            settings: {
+              ...updated.settings,
+              payment: unwrapDomain(
+                updatePaymentSettings(updated.settings.payment, {
+                  apiVersion: request.apiVersion,
+                  checkoutSuccessUrl: request.checkoutSuccessUrl,
+                  checkoutCancelUrl: request.checkoutCancelUrl,
+                  platformFeeRateBps: request.platformFeeRateBps,
+                }),
+              ),
+            },
+          }
+        : updated;
+
+    const saved = await this.repository.saveSettings(
+      withPayment.settings,
+      request.rowVersion,
+      actorId,
+    );
     if (saved === null) {
       // 読んでから書くまでに、ほかの人が変えていた。
       throw new DomainErrorException('INTEGRATION_SETTINGS_CONFLICT');
     }
 
-    if (updated.endpointChanged) {
+    if (withPayment.endpointChanged) {
       await this.repository.invalidateConnectionChecks(service, environment, this.clock.now());
     }
 
@@ -344,7 +399,9 @@ export class IntegrationService_ {
       next = unwrapDomain(
         enableIntegration({
           settings,
-          hasActiveSecret: secrets.some((secret) => secret.status === 'active'),
+          activeSecretPurposes: secrets
+            .filter((secret) => secret.status === 'active')
+            .map((secret) => secret.purpose),
           lastCheck,
           freshnessMs: CHECK_FRESHNESS_MS,
           now: this.clock.now(),
@@ -387,6 +444,21 @@ export class IntegrationService_ {
   ): Promise<IntegrationStatusView> {
     const actorId = requireActorId(actor);
     this.requireManaged(service);
+
+    /*
+      ⚠️ **決済の鍵は保存の時点で確かめる。** 起動時の検査だけに任せると、
+         取り違えた鍵が DB に入り、次の再起動まで気づけない。しかも
+         気づく形が「入金が無い」か「本物のお金が動いた」のどちらか。
+    */
+    if (service === 'payment') {
+      const verdict =
+        request.purpose === 'api_key'
+          ? validateSecretKeyForEnvironment(request.value, environment)
+          : validateWebhookSecret(request.value);
+      if (!verdict.ok) {
+        throw new DomainErrorException(verdict.error.code);
+      }
+    }
 
     const created = await this.repository.createSecret({
       id: this.ids.generate(),
