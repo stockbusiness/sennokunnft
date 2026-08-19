@@ -109,6 +109,9 @@ export function DraftForm({
  */
 export function PublishForm({ kind }: { readonly kind: LegalDocumentKind }) {
   const [state, action, pending] = useActionState(publishLegalAction, INITIAL);
+  // ⚠️ 同意を求めるのは利用規約だけ。ほかの種類で印を立てても効かないので、
+  //    そもそも見せない。押せるのに効かない操作を置かない。
+  const canAskReconsent = kind === 'terms';
 
   return (
     <form
@@ -137,6 +140,21 @@ export function PublishForm({ kind }: { readonly kind: LegalDocumentKind }) {
           required
         />
       </div>
+
+      {/*
+        ⚠️ **既定は「求めない」。** 誤字の修正で全員に再同意を求めると、
+           同意の画面が「とりあえず押すもの」になり、同意という記録の
+           意味が薄れる。実質的な変更かどうかは、公開する人が決める。
+      */}
+      {!canAskReconsent ? null : (
+        <div className="sengoku-form__field">
+          <label className="sengoku-checkbox">
+            <input type="checkbox" name="requiresReconsent" />
+            <span>{LEGAL_COPY.publishRequiresReconsent}</span>
+          </label>
+          <p className="sengoku-form__hint">{LEGAL_COPY.publishRequiresReconsentHint}</p>
+        </div>
+      )}
 
       <button className="sengoku-button" type="submit" disabled={pending}>
         {pending ? '公開しています…' : LEGAL_COPY.publishButton}

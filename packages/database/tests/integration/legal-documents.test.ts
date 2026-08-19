@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '../../generated/client';
-import { PrismaLegalDocumentRepository } from '../../src/repositories/legal.repository';
+import {
+  PrismaLegalConsentRepository,
+  PrismaLegalDocumentRepository,
+} from '../../src/repositories/legal.repository';
 import {
   createTestClient,
   integrationTestsAvailable,
@@ -75,6 +78,7 @@ suite('法務文書の版', () => {
       effectiveFrom: LATER,
       publishedByAccountId: accountId,
       publishedAt: NOW,
+      requiresReconsent: false,
     });
 
     const privacy = await repo.create({
@@ -130,6 +134,7 @@ suite('法務文書の版', () => {
       effectiveFrom: LATER,
       publishedByAccountId: accountId,
       publishedAt: NOW,
+      requiresReconsent: false,
     });
 
     /*
@@ -161,6 +166,7 @@ suite('法務文書の版', () => {
       effectiveFrom: LATER,
       publishedByAccountId: accountId,
       publishedAt: NOW,
+      requiresReconsent: false,
     });
 
     const second = await repo.publish({
@@ -168,6 +174,7 @@ suite('法務文書の版', () => {
       effectiveFrom: new Date('2026-10-01T00:00:00.000Z'),
       publishedByAccountId: accountId,
       publishedAt: NOW,
+      requiresReconsent: false,
     });
     expect(second).toBeNull();
   });
@@ -185,6 +192,7 @@ suite('法務文書の版', () => {
       effectiveFrom: LATER,
       publishedByAccountId: accountId,
       publishedAt: NOW,
+      requiresReconsent: false,
     });
 
     const second = await repo.create({
@@ -200,6 +208,7 @@ suite('法務文書の版', () => {
         effectiveFrom: LATER,
         publishedByAccountId: accountId,
         publishedAt: NOW,
+        requiresReconsent: false,
       }),
     ).rejects.toThrow();
   });
@@ -269,5 +278,147 @@ suite('DB の縛り', () => {
         accountId,
       ),
     ).rejects.toSatisfy((error: unknown) => violatesConstraint(error, '(kind, version)'));
+  });
+});
+
+suite('規約への同意（`UD-126`）', () => {
+  async function publishTerms(
+    version: number,
+    options: { readonly requiresReconsent?: boolean } = {},
+  ): Promise<string> {
+    const draft = await repo.create({
+      kind: 'terms',
+      title: '利用規約',
+      bodyText: `第${String(version)}版`,
+      tokushoho: null,
+      createdByAccountId: accountId,
+    });
+    const published = await repo.publish({
+      id: draft.id,
+      // 版ごとに施行日をずらす（同じ瞬間に 2 つ施行させない）。
+      effectiveFrom: new Date(NOW.getTime() + version * 1000),
+      publishedByAccountId: accountId,
+      publishedAt: NOW,
+      requiresReconsent: options.requiresReconsent ?? false,
+    });
+    if (published === null) {
+      throw new Error('publish failed');
+    }
+    return published.id;
+  }
+
+  it('二度押しても行が増えない', async () => {
+    const consents = new PrismaLegalConsentRepository(prisma);
+    const versionId = await publishTerms(1);
+
+    for (const _ of [1, 2, 3]) {
+      await consents.recordConsent({
+        accountId,
+        kind: 'terms',
+        versionId,
+        version: 1,
+        consentedAt: NOW,
+      });
+    }
+
+    const count = await prisma.legalConsent.count({ where: { accountId } });
+    expect(count).toBe(1);
+  });
+
+  it('最初に同意した日時を上書きしない', async () => {
+    const consents = new PrismaLegalConsentRepository(prisma);
+    const versionId = await publishTerms(1);
+    await consents.recordConsent({
+      accountId,
+      kind: 'terms',
+      versionId,
+      version: 1,
+      consentedAt: NOW,
+    });
+    const later = new Date(NOW.getTime() + 3_600_000);
+    const second = await consents.recordConsent({
+      accountId,
+      kind: 'terms',
+      versionId,
+      version: 1,
+      consentedAt: later,
+    });
+    // ⚠️ 上書きすると「いつ同意したのか」が動く。
+    expect(second.consentedAt.getTime()).toBe(NOW.getTime());
+  });
+
+  /*
+    ⚠️ **利用規約以外の同意を作らせない。** 作れると、「プライバシー
+       ポリシーにも同意を取ってある」と読める記録が残り、実際には
+       取っていない同意を取ったことにできる。
+  */
+  it('利用規約以外の種類では同意を記録できない', async () => {
+    const draft = await repo.create({
+      kind: 'privacy',
+      title: 'プライバシーポリシー',
+      bodyText: '本文',
+      tokushoho: null,
+      createdByAccountId: accountId,
+    });
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "legal_consents" ("account_id", "kind", "version_id", "version")
+         VALUES ($1::uuid, 'privacy', $2::uuid, 1)`,
+        accountId,
+        draft.id,
+      ),
+    ).rejects.toSatisfy((error: unknown) => violatesConstraint(error, 'legal_consents_kind_valid'));
+  });
+
+  it('再同意の印は、印が立った版より前に同意した人にだけ効く', async () => {
+    const consents = new PrismaLegalConsentRepository(prisma);
+    const first = await publishTerms(1);
+    await consents.recordConsent({
+      accountId,
+      kind: 'terms',
+      versionId: first,
+      version: 1,
+      consentedAt: NOW,
+    });
+
+    // 誤字の修正（印を立てない）。
+    await publishTerms(2);
+    const afterMinor = new Date(NOW.getTime() + 10_000);
+    expect(await consents.hasPendingReconsent('terms', 1, afterMinor)).toBe(false);
+
+    // 実質的な変更（印を立てる）。
+    await publishTerms(3, { requiresReconsent: true });
+    const afterMajor = new Date(NOW.getTime() + 10_000);
+    expect(await consents.hasPendingReconsent('terms', 1, afterMajor)).toBe(true);
+    // すでに第3版へ同意している人には効かない。
+    expect(await consents.hasPendingReconsent('terms', 3, afterMajor)).toBe(false);
+  });
+
+  /*
+    ⚠️ **施行日が来ていない版で先に止めない。** 予約公開した改定の
+       同意を、施行前から求めてしまうと、まだ効いていない条件に
+       同意させることになる。
+  */
+  it('施行日が来ていない版の印では止めない', async () => {
+    const consents = new PrismaLegalConsentRepository(prisma);
+    await publishTerms(1);
+    await publishTerms(2, { requiresReconsent: true });
+    // 第2版の施行日（NOW + 2 秒）より前の時刻で確かめる。
+    const beforeEffective = new Date(NOW.getTime() + 1_500);
+    expect(await consents.hasPendingReconsent('terms', 1, beforeEffective)).toBe(false);
+  });
+
+  it('下書きに再同意の印は立たない', async () => {
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "legal_document_versions"
+           ("kind", "version", "status", "title", "body_text", "requires_reconsent",
+            "created_by_account_id", "updated_at")
+         VALUES ('terms', 99, 'draft', '表題', '本文', true, $1::uuid, CURRENT_TIMESTAMP)`,
+        accountId,
+      ),
+    ).rejects.toSatisfy((error: unknown) =>
+      violatesConstraint(error, 'legal_document_versions_reconsent_published_only'),
+    );
   });
 });

@@ -43,6 +43,7 @@ function draft(
     bodyText: kind === 'tokushoho' ? null : '本文です。',
     tokushoho: kind === 'tokushoho' ? filledTokushoho() : null,
     effectiveFrom: null,
+    requiresReconsent: false,
     publishedAt: null,
     createdByAccountId: 'account-1',
     publishedByAccountId: null,
@@ -67,6 +68,7 @@ describe('公開済みの版は書き換えられない', () => {
       version: published,
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });
@@ -132,6 +134,7 @@ describe('特商法の表記', () => {
       version,
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });
@@ -156,6 +159,7 @@ describe('特商法の表記', () => {
       version: draft('tokushoho'),
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });
@@ -169,6 +173,7 @@ describe('施行日', () => {
       version: draft('terms'),
       effectiveFrom: new Date('2026-08-18T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });
@@ -183,6 +188,7 @@ describe('施行日', () => {
       version: draft('terms'),
       effectiveFrom: new Date('2026-08-20T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: new Date('2026-08-25T00:00:00.000Z'),
     });
@@ -195,6 +201,7 @@ describe('施行日', () => {
       version: draft('terms'),
       effectiveFrom,
       publishedByAccountId: 'account-9',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });
@@ -210,6 +217,7 @@ describe('施行日', () => {
       version: draft('terms', { bodyText: '   ' }),
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'),
       publishedByAccountId: 'account-1',
+      requiresReconsent: false,
       now: NOW,
       currentEffectiveFrom: null,
     });

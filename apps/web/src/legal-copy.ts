@@ -83,6 +83,32 @@ export const LEGAL_COPY = {
   publicUnavailable: 'ただいま表示できません。しばらくしてからお試しください。',
   publicEffectiveFrom: '適用開始日',
 
+  // --- 再同意（`UD-126`）---
+  publishRequiresReconsent: 'この改定について、お客さまに再度ご同意いただく',
+  /**
+   * ⚠️ **既定を「求めない」にしてある理由を書く。** 書かないと、
+   * 「念のため」で毎回チェックされ、同意の画面が「とりあえず押すもの」に
+   * なる。そうなると同意という記録の意味が薄れる。
+   */
+  publishRequiresReconsentHint:
+    '内容が実質的に変わる場合にお使いください。誤字の修正など、内容が変わらない改定ではチェックしないでください。毎回お願いすると、読まずに押されるようになります。',
+
+  // --- 同意画面 ---
+  consentTitle: 'ご利用にあたって',
+  consentIntroFirst: 'ご利用の前に、利用規約をご確認ください。',
+  consentIntroAgain: '利用規約を改定しました。お手数ですが、あらためてご確認をお願いいたします。',
+  consentCheckbox: '利用規約に同意します',
+  consentSubmit: '同意してはじめる',
+  consentPrivacyNote: 'あわせて、プライバシーポリシーもご確認ください。',
+  /**
+   * ⚠️ **プライバシーポリシーを同意のチェックへ束ねない。** 個人情報
+   * 保護法では利用目的は原則「公表」で足り、「同意」が要るのは第三者提供
+   * などの場面。束ねると、必要な同意が取れていないのに取れたつもりになる。
+   */
+  consentPrivacyLink: 'プライバシーポリシーを読む',
+  consentRequired: '利用規約への同意にチェックを入れてください。',
+  consentMismatch: '規約が更新されました。お手数ですが、画面を読み込み直してください。',
+
   errorNotDraft: 'すでに公開されている版は書き換えられません。画面を読み込み直してください。',
   errorIncomplete: '公開に必要な項目が入力されていません。',
   errorInvalid: '入力内容をご確認ください。HTMLタグは使えません。',
@@ -120,6 +146,8 @@ export function legalErrorMessage(code: string | undefined, reason: string): str
       return LEGAL_COPY.errorInvalid;
     case 'LEGAL_EFFECTIVE_DATE_INVALID':
       return LEGAL_COPY.errorEffectiveDate;
+    case 'LEGAL_CONSENT_VERSION_MISMATCH':
+      return LEGAL_COPY.consentMismatch;
     default:
       return reason === 'unauthorized' ? LEGAL_COPY.errorForbidden : LEGAL_COPY.errorUnavailable;
   }

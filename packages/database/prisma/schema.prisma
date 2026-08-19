@@ -91,6 +91,7 @@ model Account {
   integrationChecks    IntegrationConnectionCheck[] @relation("IntegrationCheckExecutor")
   createdLegalVersions   LegalDocumentVersion[] @relation("LegalVersionAuthor")
   publishedLegalVersions LegalDocumentVersion[] @relation("LegalVersionPublisher")
+  legalConsents          LegalConsent[]
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -260,6 +261,11 @@ model LegalDocumentVersion {
   tokushoho            Json?
   /// 施行日。⚠️ 未来の日付を入れられる（公開の予約）。
   effectiveFrom        DateTime? @map("effective_from") @db.Timestamptz(6)
+  /// この版から、利用者へもう一度同意を求めるか（`UD-126`）。
+  /// ⚠️ **システムに判定させない。** 誤字の修正で全員を止めると、
+  /// 同意の画面が「とりあえず押すもの」になる。公開する人が決める。
+  /// ⚠️ 下書きには立たない（CHECK で縛る）。
+  requiresReconsent    Boolean   @default(false) @map("requires_reconsent")
   publishedAt          DateTime? @map("published_at") @db.Timestamptz(6)
   createdByAccountId   String    @map("created_by_account_id") @db.Uuid
   publishedByAccountId String?   @map("published_by_account_id") @db.Uuid
@@ -268,10 +274,42 @@ model LegalDocumentVersion {
 
   createdBy   Account  @relation("LegalVersionAuthor", fields: [createdByAccountId], references: [id], onDelete: Restrict)
   publishedBy Account? @relation("LegalVersionPublisher", fields: [publishedByAccountId], references: [id], onDelete: Restrict)
+  consents    LegalConsent[]
+  orders      Order[]        @relation("OrderTermsVersion")
 
   @@unique([kind, version])
   @@index([kind, createdAt(sort: Desc)])
   @@map("legal_document_versions")
+}
+
+/// 規約への同意（`UD-126` 決定 2026-08-19）。
+///
+/// ⚠️ **同意を求めるのは利用規約だけ**（CHECK で縛る）。プライバシー
+/// ポリシーを同じチェックへ束ねない。個人情報保護法では利用目的は原則
+/// 「公表」で足り、「同意」が要るのは第三者提供などの場面。束ねると、
+/// 必要な同意が取れていないのに取れたつもりになる。
+///
+/// ⚠️ **書き換えも削除もしない。** 同意は起きた出来事で、あとから
+/// 無かったことにはできない。
+model LegalConsent {
+  id          String   @id @default(uuid()) @db.Uuid
+  accountId   String   @map("account_id") @db.Uuid
+  /// いまは `terms` のみ。
+  kind        String
+  /// どの版に同意したか。⚠️ 真偽値にしない。
+  versionId   String   @map("version_id") @db.Uuid
+  /// 比較に使う番号。⚠️ ID は順序を持たないので別に持つ。
+  version     Int
+  consentedAt DateTime @default(now()) @map("consented_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  account        Account              @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  documentVersion LegalDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  /// 同じ版へ二重に押しても増やさない。
+  @@unique([accountId, versionId])
+  @@index([accountId, kind, version(sort: Desc)])
+  @@map("legal_consents")
 }
 
 // ============================================================================
@@ -431,6 +469,13 @@ model Order {
   refundStatus      String   @default("none") @map("refund_status")
   /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
   idempotencyKey String      @map("idempotency_key")
+  /// 注文時点で施行されていた利用規約の版（`UD-126`）。
+  /// ⚠️ **同意の記録ではない。** 「何が表示されていたか」の記録で、
+  /// 価格・手数料率と同じスナップショット原則。改定しても過去の注文は動かない。
+  /// ⚠️ 規約を公開していない時期の注文があるため NULL を許す。
+  /// 無いことを、無いまま残す。
+  termsVersionId String?     @map("terms_version_id") @db.Uuid
+  termsVersion   Int?        @map("terms_version")
   /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
   reservedUntil  DateTime?   @map("reserved_until") @db.Timestamptz(6)
   paidAt         DateTime?   @map("paid_at") @db.Timestamptz(6)
@@ -439,6 +484,7 @@ model Order {
 
   account       Account                @relation(fields: [accountId], references: [id])
   creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  termsDocument LegalDocumentVersion?  @relation("OrderTermsVersion", fields: [termsVersionId], references: [id], onDelete: Restrict)
   lines         OrderLine[]
   payments      Payment[]
   entitlements  Entitlement[]

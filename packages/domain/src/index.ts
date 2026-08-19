@@ -183,11 +183,25 @@ export {
   type LegalVersionLabel,
 } from './legal/render';
 
+export {
+  CONSENT_REQUIRED_KINDS,
+  evaluateConsentRequirement,
+  requiresConsent,
+  snapshotForOrder,
+  type ConsentRequiredKind,
+  type ConsentRequirement,
+  type ConsentRequirementInput,
+  type LegalConsentRecord,
+  type OrderLegalSnapshot,
+} from './legal/consent';
+
 export type {
   LegalDocumentRepository,
+  LegalConsentRepository,
   CreateLegalDraftCommand,
   SaveLegalDraftCommand,
   PublishLegalVersionCommand,
+  RecordConsentCommand,
 } from './ports/legal';
 
 export {

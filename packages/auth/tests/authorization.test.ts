@@ -67,6 +67,8 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'legal.edit': { anonymous: false, buyer: false, operator: true, auditor: false },
   // ⚠️ 印が無い operator は通らない。公開は取り消せない。
   'legal.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
+  // 同意は本人が行う。会員なら誰でも持つ。
+  'legal.consent': { anonymous: false, buyer: true, operator: true, auditor: true },
 };
 
 describe('権限マトリクスの全セル検証（Z-1）', () => {

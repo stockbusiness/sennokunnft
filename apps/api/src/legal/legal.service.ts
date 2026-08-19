@@ -1,19 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  LegalConsentStatus,
   LegalVersionListResponse,
   LegalVersionView,
   PublicLegalDocument,
   PublishLegalVersionRequest,
+  RecordConsentRequest,
   SaveLegalDraftRequest,
 } from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
 import {
+  evaluateConsentRequirement,
   isErr,
   missingTokushohoFields,
   publishLegalVersion,
   saveLegalDraft,
   type AuditLogPort,
   type ClockPort,
+  type LegalConsentRepository,
   type LegalDocumentKind,
   type LegalDocumentRepository,
   type LegalDocumentVersion,
@@ -39,6 +43,7 @@ export class LegalService {
     private readonly legal: LegalDocumentRepository,
     private readonly clock: ClockPort,
     private readonly audit: AuditLogPort,
+    private readonly consents: LegalConsentRepository,
   ) {}
 
   /** 公開ページ向け。⚠️ 下書きは決して出さない。 */
@@ -87,6 +92,7 @@ export class LegalService {
         bodyText: kind === 'tokushoho' ? null : '',
         tokushoho: kind === 'tokushoho' ? emptyTokushoho() : null,
         effectiveFrom: null,
+        requiresReconsent: false,
         publishedAt: null,
         createdByAccountId: accountId,
         publishedByAccountId: null,
@@ -165,6 +171,7 @@ export class LegalService {
       version: draft,
       effectiveFrom: new Date(request.effectiveFrom),
       publishedByAccountId: accountId,
+      requiresReconsent: request.requiresReconsent,
       now,
       currentEffectiveFrom: current?.effectiveFrom ?? null,
     });
@@ -177,6 +184,7 @@ export class LegalService {
       effectiveFrom: decided.value.effectiveFrom ?? now,
       publishedByAccountId: accountId,
       publishedAt: now,
+      requiresReconsent: request.requiresReconsent,
     });
     if (published === null) {
       throw new DomainErrorException('LEGAL_VERSION_NOT_DRAFT');
@@ -191,10 +199,84 @@ export class LegalService {
         kind,
         version: published.version,
         effectiveFrom: published.effectiveFrom?.toISOString() ?? null,
+        // ⚠️ 誰に再同意を求め始めたかは、あとから追えるようにする。
+        requiresReconsent: published.requiresReconsent,
       },
     });
 
     return toView(published, now);
+  }
+
+  /**
+   * その人に同意を求めるべきか（`UD-126`）。
+   *
+   * ⚠️ **規約をまだ公開していなければ、求めない。** 求める作りにすると、
+   * 立ち上げ時に誰もログインできなくなる。規約を公開できるのは管理画面へ
+   * 入れる人で、その人がログインできなければ永久に公開できない。
+   * 締め出しは復旧の手立てが無いので、通す側へ倒す。
+   */
+  async consentStatus(actor: Actor): Promise<LegalConsentStatus> {
+    const accountId = actor.accountId;
+    if (accountId === null) {
+      throw new NotFoundException();
+    }
+    const now = this.clock.now();
+    const effective = await this.legal.findEffective('terms', now);
+    const latestConsent = await this.consents.findLatestConsent(accountId, 'terms');
+    const hasPendingReconsent =
+      latestConsent === null
+        ? false
+        : await this.consents.hasPendingReconsent('terms', latestConsent.version, now);
+
+    const requirement = evaluateConsentRequirement({
+      effective,
+      latestConsent,
+      hasPendingReconsent,
+    });
+
+    return {
+      required: requirement.required,
+      reason: requirement.reason,
+      version: requirement.required ? toView(requirement.version, now) : null,
+      consentedVersion: latestConsent?.version ?? null,
+    };
+  }
+
+  /**
+   * 同意を記録する。
+   *
+   * ⚠️ **画面が見ていた版と、いま施行中の版が違えば断る。** 黙って
+   * 差し替えると、利用者が読んだものと記録が食い違う。「読んでいない
+   * 条件に同意したことになっている」がいちばん困る。
+   */
+  async recordConsent(actor: Actor, request: RecordConsentRequest): Promise<LegalConsentStatus> {
+    const accountId = actor.accountId;
+    if (accountId === null) {
+      throw new NotFoundException();
+    }
+    const now = this.clock.now();
+    const effective = await this.legal.findEffective('terms', now);
+    if (effective === null || effective.id !== request.versionId) {
+      throw new DomainErrorException('LEGAL_CONSENT_VERSION_MISMATCH');
+    }
+
+    await this.consents.recordConsent({
+      accountId,
+      kind: 'terms',
+      versionId: effective.id,
+      version: effective.version,
+      consentedAt: now,
+    });
+
+    await this.audit.record({
+      actorAccountId: accountId,
+      action: 'legal.consented',
+      targetType: 'legal_document_version',
+      targetId: effective.id,
+      summary: { kind: 'terms', version: effective.version },
+    });
+
+    return this.consentStatus(actor);
   }
 }
 
@@ -225,6 +307,7 @@ function toView(version: LegalDocumentVersion, now: Date): LegalVersionView {
     bodyText: version.bodyText,
     tokushoho: version.tokushoho,
     effectiveFrom: version.effectiveFrom?.toISOString() ?? null,
+    requiresReconsent: version.requiresReconsent,
     publishedAt: version.publishedAt?.toISOString() ?? null,
     createdAt: version.createdAt.toISOString(),
     /*

@@ -395,3 +395,56 @@ describe('期限切れ予約の解放 POST /api/v1/internal/jobs/release-expired
     expect(artwork?.reservedCount).toBe(0);
   });
 });
+
+/**
+ * 注文へ残す規約の版（`UD-126` 決定 2026-08-19）。
+ *
+ * ⚠️ **同意の記録ではない。** 「そのご注文の時点で、どう書いてあったか」の
+ * 記録で、価格・手数料率と同じスナップショット原則。
+ */
+describe('注文時点の規約の版', () => {
+  it('規約が未公開でも注文できる（null のまま残す）', async () => {
+    // ⚠️ ここで止めると、規約を公開する前に手元で試せなくなる。
+    seedPurchasable();
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${actorToken('buyer')}`)
+      .send({ listingId: LISTING_ID, idempotencyKey: randomUUID() })
+      .expect(201);
+
+    expect(harness.orderRepository.termsSnapshots.get(response.body.order.id)).toEqual({
+      termsVersionId: null,
+      termsVersion: null,
+    });
+  });
+
+  it('施行中の版があれば、その版を注文へ写す', async () => {
+    seedPurchasable();
+    harness.legalRepository.seed({
+      id: 'terms-v3',
+      kind: 'terms',
+      version: 3,
+      status: 'published',
+      title: '利用規約',
+      bodyText: '本文',
+      tokushoho: null,
+      effectiveFrom: new Date(TEST_NOW.getTime() - 1000),
+      requiresReconsent: false,
+      publishedAt: new Date(TEST_NOW.getTime() - 1000),
+      createdByAccountId: 'account-owner',
+      publishedByAccountId: 'account-owner',
+      createdAt: TEST_NOW,
+    });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${actorToken('buyer')}`)
+      .send({ listingId: LISTING_ID, idempotencyKey: randomUUID() })
+      .expect(201);
+
+    expect(harness.orderRepository.termsSnapshots.get(response.body.order.id)).toEqual({
+      termsVersionId: 'terms-v3',
+      termsVersion: 3,
+    });
+  });
+});

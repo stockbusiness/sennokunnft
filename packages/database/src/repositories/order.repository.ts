@@ -110,6 +110,10 @@ export class PrismaOrderRepository implements OrderRepository {
           platformFeeAmount: command.amounts.platformFeeAmount,
           creatorAmount: command.amounts.creatorAmount,
           idempotencyKey: command.idempotencyKey,
+          // ⚠️ 注文時点の規約の版（`UD-126`）。同意の記録ではなく
+          //    「何が表示されていたか」の記録。
+          termsVersionId: command.termsVersionId,
+          termsVersion: command.termsVersion,
           reservedUntil: command.reservationExpiresAt,
           createdAt: command.now,
           updatedAt: command.now,

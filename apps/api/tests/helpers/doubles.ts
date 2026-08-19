@@ -64,6 +64,10 @@ import type {
   CreateLegalDraftCommand,
   SaveLegalDraftCommand,
   PublishLegalVersionCommand,
+  LegalConsentRepository,
+  LegalConsentRecord,
+  RecordConsentCommand,
+  ConsentRequiredKind,
 } from '@sengoku/domain';
 import { canManuallyResend, err, ok, reserveSupply, PAYMENT_API_ENDPOINT } from '@sengoku/domain';
 import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
@@ -884,6 +888,7 @@ export class InMemoryLegalDocuments implements LegalDocumentRepository {
       bodyText: command.bodyText,
       tokushoho: command.tokushoho,
       effectiveFrom: null,
+      requiresReconsent: false,
       publishedAt: null,
       createdByAccountId: command.createdByAccountId,
       publishedByAccountId: null,
@@ -921,9 +926,68 @@ export class InMemoryLegalDocuments implements LegalDocumentRepository {
       effectiveFrom: command.effectiveFrom,
       publishedAt: command.publishedAt,
       publishedByAccountId: command.publishedByAccountId,
+      requiresReconsent: command.requiresReconsent,
     };
     this.rows[index] = next;
     return Promise.resolve(next);
+  }
+}
+
+/**
+ * 規約への同意（試験用）。
+ *
+ * ⚠️ **本物と同じく、二度押しで増やさない。** `(accountId, versionId)` の
+ * 一意制約に相当する振る舞いをここでも守る。緩めると、本物の upsert を
+ * 素の create に変えても試験が通ってしまう。
+ */
+export class InMemoryLegalConsents implements LegalConsentRepository {
+  private readonly rows: LegalConsentRecord[] = [];
+
+  constructor(private readonly documents: InMemoryLegalDocuments) {}
+
+  findLatestConsent(
+    accountId: string,
+    kind: ConsentRequiredKind,
+  ): Promise<LegalConsentRecord | null> {
+    const mine = this.rows
+      .filter((row) => row.accountId === accountId && row.kind === kind)
+      .sort((a, b) => b.version - a.version);
+    return Promise.resolve(mine[0] ?? null);
+  }
+
+  async hasPendingReconsent(
+    kind: ConsentRequiredKind,
+    consentedVersion: number,
+    now: Date,
+  ): Promise<boolean> {
+    const versions = await this.documents.listVersions(kind);
+    return versions.some(
+      (version) =>
+        version.status === 'published' &&
+        version.requiresReconsent &&
+        version.version > consentedVersion &&
+        version.effectiveFrom !== null &&
+        version.effectiveFrom.getTime() <= now.getTime(),
+    );
+  }
+
+  recordConsent(command: RecordConsentCommand): Promise<LegalConsentRecord> {
+    const existing = this.rows.find(
+      (row) => row.accountId === command.accountId && row.versionId === command.versionId,
+    );
+    if (existing !== undefined) {
+      // ⚠️ 日時は最初の 1 回を残す。上書きすると「いつ同意したか」が動く。
+      return Promise.resolve(existing);
+    }
+    const row: LegalConsentRecord = {
+      accountId: command.accountId,
+      kind: command.kind,
+      versionId: command.versionId,
+      version: command.version,
+      consentedAt: command.consentedAt,
+    };
+    this.rows.push(row);
+    return Promise.resolve(row);
   }
 }
 
@@ -995,6 +1059,16 @@ function byLatestThenFailureFirst(a: ConnectionCheckRecord, b: ConnectionCheckRe
  */
 export class InMemoryOrderRepository implements OrderRepository {
   private readonly orders = new Map<string, OrderView>();
+  /**
+   * 注文へ渡された規約の版（`UD-126`）。
+   *
+   * ⚠️ `OrderView` には載せていない。画面が使う値ではなく、
+   * 問い合わせのときに調べる記録なので、試験からだけ覗ける形にしてある。
+   */
+  readonly termsSnapshots = new Map<
+    string,
+    { readonly termsVersionId: string | null; readonly termsVersion: number | null }
+  >();
   /** 冪等キーの索引。`accountId + key`。実装は DB の UNIQUE 制約。 */
   private readonly byIdempotency = new Map<string, string>();
   private readonly sequence: string[] = [];
@@ -1022,6 +1096,11 @@ export class InMemoryOrderRepository implements OrderRepository {
       return reserved;
     }
     await this.artworks.update({ ...artwork, reservedCount: reserved.value.reservedCount });
+
+    this.termsSnapshots.set(command.orderId, {
+      termsVersionId: command.termsVersionId,
+      termsVersion: command.termsVersion,
+    });
 
     const view: OrderView = {
       id: command.orderId,
@@ -1413,6 +1492,7 @@ export interface TestHarness extends AppDependencies {
   readonly commonUserLinks: InMemoryCommonUserLinks;
   readonly paymentRepository: InMemoryPaymentRepository;
   readonly legalRepository: InMemoryLegalDocuments;
+  readonly legalConsents: InMemoryLegalConsents;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -1570,6 +1650,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   );
   const clock = new FixedClock(TEST_NOW);
   const legalRepository = new InMemoryLegalDocuments();
+  const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
     version: '0.1.0',
     probes: [],
@@ -1607,8 +1688,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     deliveries,
     auditLogs: auditLogReader,
     auditLogReader,
-    legalDocuments: legalRepository,
+    legalDocuments: { documents: legalRepository, consents: legalConsents },
     legalRepository,
+    legalConsents,
     orderRepository,
     commonUserLinks,
     paymentRepository,
@@ -1629,6 +1711,15 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // ⚠️ 0 は「無料」ではなく「販売設定未完了」。0 の挙動を見る試験は
       //    `buildHarness` の戻りを書き換えて確かめる。
       resolvePlatformFeeRateBps: async () => APPROVED_FEE_RATE_BPS,
+      /*
+        注文へ残す規約の版（`UD-126`）。
+        ⚠️ 既定は「規約が未公開」。公開してから注文する試験は、
+           先に管理 API で公開してから注文する。
+      */
+      resolveEffectiveTerms: async () => {
+        const effective = await legalRepository.findEffective('terms', clock.now());
+        return effective === null ? null : { id: effective.id, version: effective.version };
+      },
       reservationMinutes: 30,
       internalJobToken: TEST_INTERNAL_JOB_TOKEN,
     },

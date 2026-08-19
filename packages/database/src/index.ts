@@ -51,4 +51,7 @@ export { PrismaIntegrationRepository } from './repositories/integration.reposito
 
 export { PrismaPlatformFeeRateReader } from './repositories/platform-fee-rate.repository';
 
-export { PrismaLegalDocumentRepository } from './repositories/legal.repository';
+export {
+  PrismaLegalDocumentRepository,
+  PrismaLegalConsentRepository,
+} from './repositories/legal.repository';

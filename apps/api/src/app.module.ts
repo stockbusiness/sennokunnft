@@ -21,6 +21,7 @@ import type {
   StaffMemberRepository,
   IntegrationRepository,
   LegalDocumentRepository,
+  LegalConsentRepository,
   AuditLogReadPort,
   OrderRepository,
   PaymentRepository,
@@ -82,7 +83,11 @@ import {
   InternalJobsController,
   type InternalJobConfig,
 } from './order/internal-jobs.controller';
-import { AdminLegalController, PublicLegalController } from './legal/legal.controller';
+import {
+  AdminLegalController,
+  LegalConsentController,
+  PublicLegalController,
+} from './legal/legal.controller';
 import { LegalService } from './legal/legal.service';
 import { AuditLogController } from './audit/audit.controller';
 import { AuditLogQueryService } from './audit/audit.service';
@@ -171,7 +176,11 @@ export interface AppDependencies {
    * ⚠️ **無い環境では経路ごと生やさない。** 公開ページの口だけが開いて
    * 500 を返すより、404 のほうが原因が分かる。
    */
-  readonly legalDocuments?: LegalDocumentRepository;
+  readonly legalDocuments?: {
+    readonly documents: LegalDocumentRepository;
+    /** 規約への同意（`UD-126`）。 */
+    readonly consents: LegalConsentRepository;
+  };
   readonly idempotency: IdempotencyStore;
   /**
    * 注文と在庫の仮引当（決済 Phase P0・P1）。
@@ -189,6 +198,16 @@ export interface AppDependencies {
     readonly random: RandomPort;
     /** ⚠️ 呼び出しのたびに引く。管理画面で変えたら次の注文から効く。 */
     readonly resolvePlatformFeeRateBps: () => Promise<number>;
+    /**
+     * 注文時点で施行されていた規約の版（`UD-126`）。
+     *
+     * ⚠️ **同意を確かめる口ではない。** 注文へ「何が表示されていたか」を
+     * 残すためだけに引く。未公開なら `null` を返し、**注文を止めない**。
+     */
+    readonly resolveEffectiveTerms: () => Promise<{
+      readonly id: string;
+      readonly version: number;
+    } | null>;
     readonly reservationMinutes: number;
     readonly internalJobToken?: string | undefined;
   };
@@ -310,7 +329,9 @@ export class AppModule implements NestModule {
         ...(integrations === undefined ? [] : [IntegrationController]),
         ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
         ...(auditLogs === undefined ? [] : [AuditLogController]),
-        ...(legalDocuments === undefined ? [] : [PublicLegalController, AdminLegalController]),
+        ...(legalDocuments === undefined
+          ? []
+          : [PublicLegalController, AdminLegalController, LegalConsentController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -373,6 +394,7 @@ export class AppModule implements NestModule {
               deps.audit,
               {
                 resolvePlatformFeeRateBps: deps.orders.resolvePlatformFeeRateBps,
+                resolveEffectiveTerms: deps.orders.resolveEffectiveTerms,
                 reservationMinutes: deps.orders.reservationMinutes,
               },
             ),
@@ -461,7 +483,13 @@ export class AppModule implements NestModule {
           : [
               {
                 provide: LegalService,
-                useFactory: () => new LegalService(legalDocuments, deps.clock, deps.audit),
+                useFactory: () =>
+                  new LegalService(
+                    legalDocuments.documents,
+                    deps.clock,
+                    deps.audit,
+                    legalDocuments.consents,
+                  ),
               },
             ]),
         {
