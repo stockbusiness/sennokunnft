@@ -185,3 +185,23 @@ export {
   type AdminOrderPayments,
   type AdminOrderDetail,
 } from './order';
+
+export {
+  LEGAL_DOCUMENT_KIND_VALUES,
+  LEGAL_VERSION_STATUS_VALUES,
+  legalVersionSchema,
+  legalVersionListResponseSchema,
+  publicLegalDocumentSchema,
+  publishLegalVersionRequestSchema,
+  saveLegalDraftRequestSchema,
+  tokushohoFieldsSchema,
+  type LegalVersionView,
+  type LegalVersionListResponse,
+  type PublicLegalDocument,
+  type PublishLegalVersionRequest,
+  type SaveLegalDraftRequest,
+  type TokushohoFieldsInput,
+  renderLegalBody,
+  type LegalBlock,
+  type LegalDocumentKind,
+} from './legal';

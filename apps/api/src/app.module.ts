@@ -20,6 +20,7 @@ import type {
   StaffInvitationRepository,
   StaffMemberRepository,
   IntegrationRepository,
+  LegalDocumentRepository,
   AuditLogReadPort,
   OrderRepository,
   PaymentRepository,
@@ -81,6 +82,8 @@ import {
   InternalJobsController,
   type InternalJobConfig,
 } from './order/internal-jobs.controller';
+import { AdminLegalController, PublicLegalController } from './legal/legal.controller';
+import { LegalService } from './legal/legal.service';
 import { AuditLogController } from './audit/audit.controller';
 import { AuditLogQueryService } from './audit/audit.service';
 import { HealthController } from './health/health.controller';
@@ -162,6 +165,13 @@ export interface AppDependencies {
   };
   /** 監査ログの閲覧（指示書 §5）。 */
   readonly auditLogs?: AuditLogReadPort;
+  /**
+   * 法務文書（利用規約・プライバシーポリシー・特商法表記）。
+   *
+   * ⚠️ **無い環境では経路ごと生やさない。** 公開ページの口だけが開いて
+   * 500 を返すより、404 のほうが原因が分かる。
+   */
+  readonly legalDocuments?: LegalDocumentRepository;
   readonly idempotency: IdempotencyStore;
   /**
    * 注文と在庫の仮引当（決済 Phase P0・P1）。
@@ -278,6 +288,7 @@ export class AppModule implements NestModule {
     const integrations = deps.integrations;
     const walletDeliveries = deps.walletDeliveries;
     const auditLogs = deps.auditLogs;
+    const legalDocuments = deps.legalDocuments;
     const internalJobToken = deps.orders.internalJobToken;
     const payments = deps.payments;
     return {
@@ -299,6 +310,7 @@ export class AppModule implements NestModule {
         ...(integrations === undefined ? [] : [IntegrationController]),
         ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
         ...(auditLogs === undefined ? [] : [AuditLogController]),
+        ...(legalDocuments === undefined ? [] : [PublicLegalController, AdminLegalController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -442,6 +454,14 @@ export class AppModule implements NestModule {
               {
                 provide: AuditLogQueryService,
                 useFactory: () => new AuditLogQueryService(auditLogs),
+              },
+            ]),
+        ...(legalDocuments === undefined
+          ? []
+          : [
+              {
+                provide: LegalService,
+                useFactory: () => new LegalService(legalDocuments, deps.clock, deps.audit),
               },
             ]),
         {

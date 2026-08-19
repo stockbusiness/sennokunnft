@@ -154,6 +154,42 @@ export {
   type UpdatePaymentSettingsInput,
 } from './integration/payment-settings';
 
+// --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------
+
+export {
+  LEGAL_BODY_MAX,
+  LEGAL_DOCUMENT_KINDS,
+  LEGAL_TITLE_MAX,
+  LEGAL_VERSION_STATUSES,
+  TOKUSHOHO_FIELD_KEYS,
+  TOKUSHOHO_FIELD_MAX,
+  effectiveVersion,
+  isLegalDocumentKind,
+  missingTokushohoFields,
+  publish as publishLegalVersion,
+  saveDraft as saveLegalDraft,
+  type LegalDocumentKind,
+  type LegalDocumentVersion,
+  type LegalVersionStatus,
+  type PublishInput as PublishLegalVersionInput,
+  type SaveDraftInput as SaveLegalDraftInput,
+  type TokushohoFields,
+} from './legal/document';
+
+export {
+  renderLegalBody,
+  versionLabel,
+  type LegalBlock,
+  type LegalVersionLabel,
+} from './legal/render';
+
+export type {
+  LegalDocumentRepository,
+  CreateLegalDraftCommand,
+  SaveLegalDraftCommand,
+  PublishLegalVersionCommand,
+} from './ports/legal';
+
 export {
   createListing,
   updateListing,

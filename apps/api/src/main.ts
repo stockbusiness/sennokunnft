@@ -26,6 +26,7 @@ import {
   PrismaArtworkRepository,
   PrismaAuditLogRepository,
   PrismaAuditLogReadRepository,
+  PrismaLegalDocumentRepository,
   PrismaWalletDeliveryAdminRepository,
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
@@ -407,6 +408,14 @@ async function bootstrap(): Promise<void> {
         outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
       },
       auditLogs: new PrismaAuditLogReadRepository(prisma),
+      /*
+        法務文書（利用規約・プライバシーポリシー・特商法表記）。
+
+        ⚠️ **暗号鍵を要らない。** 公開する文なので秘密ではない。
+           連携設定の保管庫と同じ経路に載せると、鍵を置いていない配備で
+           法務ページごと開かなくなる。
+      */
+      legalDocuments: new PrismaLegalDocumentRepository(prisma),
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       /*

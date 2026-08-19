@@ -52,7 +52,7 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
     TRUNCATE TABLE
       nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, payments, orders,
       wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
-      webhook_events, outbox_events, audit_logs
+      webhook_events, outbox_events, audit_logs, legal_document_versions
     RESTART IDENTITY CASCADE
   `);
 }

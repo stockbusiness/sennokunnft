@@ -94,6 +94,14 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   //    ときにだけ立ち、運用ログとアラートで扱う。万一 HTTP へ漏れたときに
   //    利用者の入力のせいに見せないよう 5xx 側へ置く。
   WALLET_EVENT_INVALID: HttpStatus.INTERNAL_SERVER_ERROR,
+  // --- 法務文書 ---
+  // ⚠️ 403 にしない。権限の話ではなく、公開済みの版は誰であっても
+  //    書き換えられない。
+  LEGAL_VERSION_NOT_DRAFT: HttpStatus.CONFLICT,
+  LEGAL_DOCUMENT_INVALID: HttpStatus.BAD_REQUEST,
+  // ⚠️ 400 にしない。送った内容の形は正しく、足りないだけ。
+  LEGAL_DOCUMENT_INCOMPLETE: HttpStatus.CONFLICT,
+  LEGAL_EFFECTIVE_DATE_INVALID: HttpStatus.BAD_REQUEST,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -185,6 +193,12 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   COMMON_USER_MISMATCH: 'この受取りは、ご購入されたご本人のアカウントでお受け取りください。',
   // 利用者に原因は無い。何が起きたかは伝えず、時間をおいて試せることだけ伝える。
   WALLET_EVENT_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
+  LEGAL_VERSION_NOT_DRAFT:
+    'すでに公開されている版は書き換えられません。新しい版を作成してください。',
+  LEGAL_DOCUMENT_INVALID: '入力内容を確認してください。HTMLタグは使用できません。',
+  LEGAL_DOCUMENT_INCOMPLETE: '公開に必要な項目が入力されていません。',
+  LEGAL_EFFECTIVE_DATE_INVALID:
+    '適用開始日は、現在より後で、いま適用中の版より後の日時にしてください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
