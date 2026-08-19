@@ -157,75 +157,100 @@ describe('FakeMintingAdapter（多重発行の防止）', () => {
 describe('FakePaymentGateway の署名検証（TEST_STRATEGY §3.7）', () => {
   const SECRET = 'webhook-secret';
   const NOW = new Date('2026-01-01T00:00:00.000Z');
-  const gateway = new FakePaymentGateway(SECRET);
+  const gateway = new FakePaymentGateway(SECRET, 'http://localhost:3000/fake-checkout', () => NOW);
 
-  function signedRequest(body: unknown, options: { secret?: string; skewMs?: number } = {}) {
+  function signed(body: unknown, options: { secret?: string; skewMs?: number } = {}) {
     const rawBody = Buffer.from(JSON.stringify(body), 'utf8');
     const timestampSec = Math.floor((NOW.getTime() + (options.skewMs ?? 0)) / 1000);
     const signature = signWebhookPayload(options.secret ?? SECRET, timestampSec, rawBody);
-    return {
-      rawBody,
-      signatureHeader: `t=${String(timestampSec)},v1=${signature}`,
-      receivedAt: NOW,
-    };
+    return { rawBody, header: `t=${String(timestampSec)},v1=${signature}` };
   }
 
-  const EVENT = { id: 'evt_1', type: 'payment.succeeded' };
+  const EVENT = {
+    id: 'evt_1',
+    type: 'payment.succeeded',
+    data: { order_id: 'order-1', amount: 12000, currency: 'jpy' },
+  };
 
-  it('正しい署名の通知を受理する', () => {
-    const verified = gateway.verifyWebhook(signedRequest(EVENT));
-    expect(verified?.eventId).toBe('evt_1');
-    expect(verified?.eventType).toBe('payment.succeeded');
-  });
-
-  it('署名がなければ拒否する（W-2）', () => {
-    const request = signedRequest(EVENT);
-    expect(gateway.verifyWebhook({ ...request, signatureHeader: undefined })).toBeNull();
+  it('正しい署名の通知を受理し、業務の事象へ畳む', () => {
+    const { rawBody, header } = signed(EVENT);
+    const result = gateway.verifyAndParseWebhook(rawBody, header);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.eventId).toBe('evt_1');
+      // ⚠️ イベント名ごとではなく、3 つの事象へ畳んだ結果を見る。
+      expect(result.value.kind).toBe('succeeded');
+      expect(result.value.orderId).toBe('order-1');
+      expect(result.value.amount).toBe(12000);
+    }
   });
 
   it('署名が不正なら拒否する（W-1）', () => {
-    const request = signedRequest(EVENT, { secret: 'wrong-secret' });
-    expect(gateway.verifyWebhook(request)).toBeNull();
+    const { rawBody, header } = signed(EVENT, { secret: 'wrong-secret' });
+    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
   });
 
   it('本文が改竄されていたら拒否する（W-4）', () => {
-    const request = signedRequest(EVENT);
-    const tampered = {
-      ...request,
-      rawBody: Buffer.from(JSON.stringify({ id: 'evt_2', type: 'x' })),
-    };
-    expect(gateway.verifyWebhook(tampered)).toBeNull();
+    const { header } = signed(EVENT);
+    const tampered = Buffer.from(JSON.stringify({ id: 'evt_2', type: 'x' }), 'utf8');
+    expect(gateway.verifyAndParseWebhook(tampered, header).ok).toBe(false);
   });
 
   it('タイムスタンプが古すぎる通知を拒否する（W-3 リプレイ）', () => {
-    const request = signedRequest(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS + 1000) });
-    expect(gateway.verifyWebhook(request)).toBeNull();
+    const { rawBody, header } = signed(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS + 1000) });
+    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
   });
 
   it('許容範囲内の時刻ずれは受理する', () => {
-    const request = signedRequest(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS - 60_000) });
-    expect(gateway.verifyWebhook(request)).not.toBeNull();
+    const { rawBody, header } = signed(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS - 60_000) });
+    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(true);
   });
 
   it('署名ヘッダの形式が不正なら拒否する', () => {
-    const request = signedRequest(EVENT);
-    expect(gateway.verifyWebhook({ ...request, signatureHeader: 'garbage' })).toBeNull();
+    const { rawBody } = signed(EVENT);
+    expect(gateway.verifyAndParseWebhook(rawBody, 'garbage').ok).toBe(false);
   });
 
   it('署名は正しいが本文が JSON でなければ拒否する', () => {
     const rawBody = Buffer.from('not-json', 'utf8');
     const timestampSec = Math.floor(NOW.getTime() / 1000);
-    expect(
-      gateway.verifyWebhook({
-        rawBody,
-        signatureHeader: `t=${String(timestampSec)},v1=${signWebhookPayload(SECRET, timestampSec, rawBody)}`,
-        receivedAt: NOW,
-      }),
-    ).toBeNull();
+    const header = `t=${String(timestampSec)},v1=${signWebhookPayload(SECRET, timestampSec, rawBody)}`;
+    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
   });
 
   it('イベントIDのない通知を拒否する（冪等排除ができないため）', () => {
-    expect(gateway.verifyWebhook(signedRequest({ type: 'payment.succeeded' }))).toBeNull();
+    const { rawBody, header } = signed({ type: 'payment.succeeded' });
+    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
+  });
+
+  it('知らないイベントは ignored へ畳む（拒否しない）', () => {
+    // ⚠️ 拒否すると相手が再送し続ける。受け取って無視する。
+    const { rawBody, header } = signed({ id: 'evt_9', type: 'charge.updated' });
+    const result = gateway.verifyAndParseWebhook(rawBody, header);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.kind).toBe('ignored');
+    }
+  });
+
+  it('同じ冪等キーなら同じ支払い口を返す', async () => {
+    const input = {
+      orderId: 'order-1',
+      orderNumber: 'SNK-20260819-AAAAAAAA',
+      itemName: '作品',
+      amount: 12000,
+      currency: 'JPY',
+      quantity: 1,
+      expiresAt: new Date('2026-01-01T00:30:00.000Z'),
+      idempotencyKey: 'order-1:1',
+      correlationId: null,
+    };
+    const first = await gateway.createCheckoutSession(input);
+    const second = await gateway.createCheckoutSession(input);
+    expect(first.ok && second.ok).toBe(true);
+    if (first.ok && second.ok) {
+      expect(second.value.sessionRef).toBe(first.value.sessionRef);
+    }
   });
 });
 

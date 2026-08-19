@@ -910,6 +910,44 @@ ON にする直前に、載せ直す手順を用意しておくこと。検出�
 | 画像が消えた                    | R2 未導入。`/tmp` は再起動で消える（§3-1）                         |
 | Supabase に繋がらなくなった     | Free プランの一時停止。Pro へ上げる（§3-3）                        |
 
+### 7-0. Stripe を繋ぐとき（決済 Phase P2）
+
+設定する変数（値はリポジトリに書かない）:
+
+```
+PAYMENT_PROVIDER=stripe
+STRIPE_SECRET_KEY=          # sk_test_… / sk_live_…
+STRIPE_WEBHOOK_SECRET=      # whsec_…
+STRIPE_API_VERSION=         # 既定 2026-07-29.dahlia
+STRIPE_CHECKOUT_SUCCESS_URL=   # {ORDER_ID} を含める
+STRIPE_CHECKOUT_CANCEL_URL=
+PLATFORM_FEE_RATE_BPS=2000  # 20%
+```
+
+⚠️ **鍵の取り違えは起動時に止まる**（`assertStripeConfig`）。
+
+| 環境            | 使う鍵     | 取り違えたとき                                         |
+| --------------- | ---------- | ------------------------------------------------------ |
+| production      | `sk_live_` | テスト鍵だと**起動しない**（決済は通るのに入金が無い） |
+| staging / local | `sk_test_` | 本番鍵だと**起動しない**（本物のお金が動く）           |
+
+⚠️ **`PLATFORM_FEE_RATE_BPS` を 0 のままにしない。** 0 は「手数料無料」では
+なく「販売設定未完了」として扱い、支払い口を作らせない。購入者には
+「購入準備中」と表示される。本番販売の開始前に 2000 を設定する。
+
+⚠️ **Webhook の宛先を間違えない。** 試験用の送信先を本番の URL へ向けると、
+試験の通知で本番の注文が確定しかける。`livemode` の食い違いは受信時に
+弾いて記録するが、宛先自体を正しく設定すること。
+
+**Webhook の登録先**: `https://<api のホスト>/api/v1/webhooks/stripe`
+**購読するイベント**: `checkout.session.completed` /
+`checkout.session.expired` / `checkout.session.async_payment_succeeded` /
+`checkout.session.async_payment_failed` / `payment_intent.succeeded` /
+`payment_intent.payment_failed`
+
+✅ **鍵を持たない手元では `PAYMENT_PROVIDER=fake`。** 署名の作り方と検証の
+手順は Stripe と同じなので、購入の流れを最後まで通せる。
+
 ### 7-1. 手元で api を走らせるとき
 
 **`pnpm dev:api` は `tsc` でビルドしてから `node` で走らせます。**

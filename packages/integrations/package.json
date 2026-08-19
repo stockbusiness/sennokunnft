@@ -27,7 +27,8 @@
     "@sengoku/domain": "workspace:*",
     "@sengoku/observability": "workspace:*",
     "aws4fetch": "1.0.20",
-    "jose": "6.2.9"
+    "jose": "6.2.9",
+    "stripe": "22.5.0"
   },
   "devDependencies": {
     "@types/node": "22.20.0",

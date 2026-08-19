@@ -7,6 +7,9 @@ import {
   loadEnv,
   formatEnvProblems,
   assertPhaseOneIntegrationLimits,
+  assertStripeConfig,
+  STRIPE_TEST_KEY_PREFIX,
+  STRIPE_LIVE_KEY_PREFIX,
   assertProductionSafety,
   assertCommonUserLinkingConfig,
   assertClaimApiConfig,
@@ -139,14 +142,125 @@ describe('assertPhaseOneIntegrationLimits', () => {
     ).not.toThrow();
   });
 
-  it('実サービスを指すプロバイダを拒否する', () => {
+  it('決済は stripe を通す（決済 Phase P2 で決定）', () => {
     expect(() =>
       assertPhaseOneIntegrationLimits({
         APP_ENV: 'local',
         LOG_LEVEL: 'info',
         PAYMENT_PROVIDER: 'stripe',
       }),
+    ).not.toThrow();
+  });
+
+  it('知らない決済事業者は拒否する', () => {
+    expect(() =>
+      assertPhaseOneIntegrationLimits({
+        APP_ENV: 'local',
+        LOG_LEVEL: 'info',
+        PAYMENT_PROVIDER: 'paypal',
+      }),
     ).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('発行のプロバイダは開けていない', () => {
+    // ⚠️ 決済と一緒に緩めない。チェーンは未決（UD-501）で、
+    //    ここが開くと「1 行足すだけで本番のチェーンへ繋がる」道ができる。
+    expect(() =>
+      assertPhaseOneIntegrationLimits({
+        APP_ENV: 'local',
+        LOG_LEVEL: 'info',
+        MINT_PROVIDER: 'polygon',
+      }),
+    ).toThrow(UnsafeEnvironmentError);
+  });
+});
+
+describe('assertStripeConfig', () => {
+  /*
+    ⚠️ **鍵らしき文字列を直接書かない。** 秘密の直書き検査
+       （`check-secrets.mjs`）が引っかかる。検査を緩めるのではなく、
+       引っかからない書き方をする。接頭辞は実装から借りる。
+  */
+  const TEST_KEY = `${STRIPE_TEST_KEY_PREFIX}dummyvalueforunittest`;
+  const LIVE_KEY = `${STRIPE_LIVE_KEY_PREFIX}dummyvalueforunittest`;
+
+  const COMPLETE = {
+    APP_ENV: 'staging',
+    PAYMENT_PROVIDER: 'stripe',
+    STRIPE_SECRET_KEY: TEST_KEY,
+    STRIPE_WEBHOOK_SECRET: 'whsec_dummyvalueforunittest',
+    STRIPE_CHECKOUT_SUCCESS_URL: 'https://example.test/orders/{ORDER_ID}',
+    STRIPE_CHECKOUT_CANCEL_URL: 'https://example.test/orders/{ORDER_ID}',
+  } as const;
+
+  it('fake のときは何も要求しない', () => {
+    // 鍵を持たない人の開発を止めない。
+    expect(() => {
+      assertStripeConfig({ APP_ENV: 'local', PAYMENT_PROVIDER: 'fake' });
+    }).not.toThrow();
+  });
+
+  it('揃っていれば通過する', () => {
+    expect(() => {
+      assertStripeConfig(COMPLETE);
+    }).not.toThrow();
+  });
+
+  it('鍵が欠けていれば拒否する', () => {
+    expect(() => {
+      assertStripeConfig({ ...COMPLETE, STRIPE_SECRET_KEY: undefined });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('Webhook の秘密が欠けていれば拒否する', () => {
+    // ⚠️ 無いまま起動すると、署名を確かめずに受けるか、全部拒否するかの
+    //    どちらかになる。前者は偽の決済成功を受け入れる。
+    expect(() => {
+      assertStripeConfig({ ...COMPLETE, STRIPE_WEBHOOK_SECRET: undefined });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('production でテスト鍵を拒否する', () => {
+    // 決済は全部通ったように見えて、入金が 1 円も無い。
+    expect(() => {
+      assertStripeConfig({ ...COMPLETE, APP_ENV: 'production' });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('staging で本番鍵を拒否する', () => {
+    // ⚠️ こちらのほうが重い。動作確認のつもりで本物のお金が動く。
+    expect(() => {
+      assertStripeConfig({ ...COMPLETE, STRIPE_SECRET_KEY: LIVE_KEY });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('production で本番鍵は通す', () => {
+    expect(() => {
+      assertStripeConfig({
+        ...COMPLETE,
+        APP_ENV: 'production',
+        STRIPE_SECRET_KEY: LIVE_KEY,
+      });
+    }).not.toThrow();
+  });
+
+  it('秘密鍵でない値を拒否する', () => {
+    // 公開鍵（pk_）や制限付きキー（rk_）を入れた場合。
+    expect(() => {
+      assertStripeConfig({ ...COMPLETE, STRIPE_SECRET_KEY: 'pk_test_dummyvalueforunittest' });
+    }).toThrow(UnsafeEnvironmentError);
+  });
+
+  it('理由に鍵の値を含めない', () => {
+    // ⚠️ 起動ログは広く共有される。
+    const secret = LIVE_KEY;
+    try {
+      assertStripeConfig({ ...COMPLETE, STRIPE_SECRET_KEY: secret });
+      throw new Error('拒否されるはず');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnsafeEnvironmentError);
+      expect(JSON.stringify((error as UnsafeEnvironmentError).reasons)).not.toContain(secret);
+    }
   });
 });
 

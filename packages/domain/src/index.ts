@@ -194,7 +194,7 @@ export {
   availableSupply,
   reserveSupply,
   releaseReservation,
-  commitReservation,
+  finalizeConsumedReservation,
   allocateSerialNumbers,
   type SupplyCounters,
 } from './supply/supply';
@@ -366,11 +366,6 @@ export type {
   ClaimTokenPort,
   IssuedClaimToken,
   IdempotencyKeyPort,
-  PaymentGatewayPort,
-  CheckoutSession,
-  CheckoutSessionRequest,
-  WebhookVerificationInput,
-  VerifiedWebhook,
   MintingPort,
   MintRequest,
   MintSubmission,
@@ -466,4 +461,39 @@ export type {
   ReleasedReservation,
   OrderListQuery,
   OrderListPage,
+} from './ports/order';
+
+export {
+  decideCheckout,
+  isSessionUsable,
+  type CheckoutDecision,
+  type CheckoutEligibilityInput,
+  type CheckoutSessionSnapshot,
+} from './payment/checkout';
+
+export {
+  PAYMENT_FACTS,
+  verifyPaymentFact,
+  isLivemodeConsistent,
+  toSafeFailureCode,
+  type PaymentFactKind,
+  type ProviderPaymentFact,
+  type OrderPaymentExpectation,
+} from './payment/provider-event';
+
+export type {
+  PaymentGatewayPort,
+  CreateCheckoutSessionInput,
+  CheckoutSessionCreated,
+} from './ports/payment';
+
+export type {
+  PaymentRepository,
+  PaymentAttemptView,
+  PaymentAttemptStatus,
+  RecordCheckoutSessionCommand,
+  ConfirmPaymentCommand,
+  RecordWebhookCommand,
+  WebhookClaim,
+  WebhookReceiptRecord,
 } from './ports/order';

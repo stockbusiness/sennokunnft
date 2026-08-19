@@ -81,8 +81,45 @@ const apiEnvObject = baseEnvObject.extend({
    */
   AUTH_PROVIDER: z.enum(['dev', 'supabase']).default('dev'),
   AUTH_DEV_SECRET: z.string().min(8).optional(),
-  PAYMENT_PROVIDER: z.enum(['fake']).default('fake'),
+  /**
+   * 決済事業者（決済 Phase P2 で `stripe` を追加）。
+   *
+   * ⚠️ **既定は `fake` のまま。** 既定を `stripe` にすると、鍵を入れていない
+   * 環境が「決済できるつもり」で起動する。使うときは明示的に選ばせる。
+   */
+  PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
   PAYMENT_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  // --- Stripe（決済 Phase P2） -------------------------------------------
+  /**
+   * 秘密鍵。`sk_test_` か `sk_live_` で始まる。
+   *
+   * ⚠️ **値をリポジトリに入れない。** `.env.example` には変数名だけ。
+   * ⚠️ **取り違えを起動時に検査する**（`assertStripeConfig`）。
+   * production で test 鍵、staging で live 鍵は拒否する。
+   */
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  /** Webhook の署名検証に使う秘密。`whsec_` で始まる。 */
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /**
+   * 固定する Stripe API バージョン。
+   *
+   * ⚠️ **固定する。** 未指定だとアカウントの既定版が使われ、Stripe 側の
+   * 更新でイベントの形が変わったときに、こちらの知らないうちに壊れる。
+   * 上げるのは、変更点を読んでテストを通してから。
+   *
+   * 既定は SDK（stripe 22.5.0）が固定している版に合わせてある。
+   * ずらすと、SDK の型と実際の応答が食い違う。
+   */
+  STRIPE_API_VERSION: z.string().min(1).default('2026-07-29.dahlia'),
+  /**
+   * 支払い後の戻り先。`{ORDER_ID}` を注文IDへ置き換える。
+   *
+   * ⚠️ **戻り先に Stripe の秘密を含めない。** 注文IDだけを渡す。
+   * ⚠️ **戻ってきたことを決済完了の根拠にしない**（指示書 §4-3）。
+   */
+  STRIPE_CHECKOUT_SUCCESS_URL: z.url().optional(),
+  STRIPE_CHECKOUT_CANCEL_URL: z.url().optional(),
   MINT_PROVIDER: z.enum(['fake']).default('fake'),
   MINT_IDEMPOTENCY_SECRET: z.string().min(1).optional(),
   CLAIM_BASE_URL: z.url().default('http://localhost:3000/claims'),
@@ -182,12 +219,15 @@ const apiEnvObject = baseEnvObject.extend({
   /**
    * プラットフォーム手数料率。**bps（1/100 %）の整数**。
    *
-   * ⚠️ **既定 0 は「まだ決めていない」の意味であって、決定ではない。**
-   * 率は事業判断（`UD-109`）で、決まるまでは取らない側へ倒してある。
-   * 逆にしておくと、決める前に取ってしまった注文の返金が要る。
+   * ✅ **決定済 2026-08-19（`UD-109`）: 20% = `2000`。**
+   * デジタルアート販売 MVP が対象。グッズは将来別の体系にする。
+   *
+   * ⚠️ **既定 0 は「手数料無料」ではなく「販売設定未完了」。**
+   * 0 のままでは Checkout を作らせない（`canCreateCheckoutSession`）。
+   * 「無料で売れてしまう」より「売れない」ほうが取り返しがつく。
    *
    * ⚠️ **小数で持たない。** 率を金額に掛けた瞬間に誤差が入る。
-   * 10% は `1000`。
+   * 20% は `2000`。
    */
   PLATFORM_FEE_RATE_BPS: integerFromEnv(0, 10_000, 0),
   /** 在庫のお取り置き時間（分）。指示書 §4.3 の既定は 30 分。 */

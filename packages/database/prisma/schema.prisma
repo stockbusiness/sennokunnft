@@ -382,12 +382,13 @@ model Order {
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  account      Account       @relation(fields: [accountId], references: [id])
-  creator      Account       @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
-  lines        OrderLine[]
-  payments     Payment[]
-  entitlements Entitlement[]
-  reservations InventoryReservation[]
+  account       Account                @relation(fields: [accountId], references: [id])
+  creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  lines         OrderLine[]
+  payments      Payment[]
+  entitlements  Entitlement[]
+  reservations  InventoryReservation[]
+  webhookEvents WebhookEvent[]
 
   /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
   /// アプリの重複チェックではなく、DB の制約で担保する。
@@ -469,6 +470,8 @@ enum PaymentStatus {
   pending
   succeeded
   failed
+  /// 支払い口の期限切れ・利用者の取消。⚠️ `failed`（カード拒否など）と分ける。
+  cancelled
   refunded
   partially_refunded
 }
@@ -493,16 +496,29 @@ model Payment {
   currency           String        @db.Char(3)
   amountRefunded     Int           @default(0) @map("amount_refunded")
   paidAt             DateTime?     @map("paid_at") @db.Timestamptz(6)
+  /// 支払い口が閉じる時刻。⚠️ お取り置きの期限を超えない。
+  expiresAt          DateTime?     @map("expires_at") @db.Timestamptz(6)
+  /// 利用者を送る先。⚠️ **管理画面へ出さない。** これを持つ人は誰でも
+  /// その注文を支払える。運用に要るのは識別子までで、URL は要らない。
+  checkoutUrl        String?       @map("checkout_url")
   failureCode        String?       @map("failure_code")
   /// ⚠️ 外部の応答本文をそのまま入れない。運用が読むための短い要約だけ。
   failureMessageSafe String?       @map("failure_message_safe")
   createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  order Order @relation(fields: [orderId], references: [id])
+  order         Order          @relation(fields: [orderId], references: [id])
+  webhookEvents WebhookEvent[]
 
+  /// ⚠️ 試行ごとに 1 行。失敗した行も消さない（決済 Phase P2 の決定 B）。
+  /// 「何回目で何が起きたか」を説明できないと、問い合わせに答えられない。
+  ///
+  /// ⚠️ **1 注文に成功は 1 件だけ**という制約は、Prisma では書けない
+  /// 部分 UNIQUE 索引（`WHERE status = 'succeeded'`）で守っている。
+  /// 手書きのマイグレーション側にだけ存在する。消さないこと。
   @@unique([provider, providerPaymentRef])
   @@index([orderId])
+  @@index([orderId, createdAt(sort: Desc)], map: "payments_order_created_idx")
   @@map("payments")
 }
 
@@ -526,15 +542,33 @@ model WebhookEvent {
   /// 送信元が採番したイベントID。
   eventId       String             @map("event_id")
   eventType     String             @map("event_type")
+  /// 固定した API バージョン。形が変わったことに後から気づくため。
+  apiVersion    String?            @map("api_version")
+  /// 本番モードの事象か。⚠️ 試験の知らせで本番の注文を確定させないため。
+  livemode      Boolean?
   receivedAt    DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt   DateTime?          @map("processed_at") @db.Timestamptz(6)
   status        WebhookEventStatus @default(received)
+  attemptCount  Int                @default(0) @map("attempt_count")
   payloadDigest String             @map("payload_digest")
   /// 失敗理由の要約。秘匿値を含めない。
   errorSummary  String?            @map("error_summary")
+  /// ⚠️ 事業者の符号をそのまま入れない。こちらで決めた安全な符号だけ。
+  lastErrorCode String?            @map("last_error_code")
+  orderId       String?            @map("order_id") @db.Uuid
+  paymentId     String?            @map("payment_id") @db.Uuid
 
+  /// ⚠️ `Restrict`。既定の `SetNull` にすると、注文を消したときに
+  /// 受信の記録だけが親を失って残る。注文と決済のデータは消さない決まり
+  /// （指示書 §9.3）なので、消そうとした時点で止める。
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  /// ⚠️ **本文の全体を保存しない**（指示書 §10）。残すのは digest だけ。
+  /// カード情報・個人情報・秘密が混ざる余地を作らない。
   @@unique([provider, eventId])
   @@index([status, receivedAt])
+  @@index([orderId, receivedAt(sort: Desc)], map: "webhook_events_order_idx")
   @@map("webhook_events")
 }
 

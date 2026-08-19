@@ -41,6 +41,13 @@ import type {
   EnvIntegrationSummary,
   CommonUserLink,
   CommonUserLinkRepository,
+  ConfirmPaymentCommand,
+  PaymentAttemptView,
+  PaymentRepository,
+  RecordCheckoutSessionCommand,
+  RecordWebhookCommand,
+  WebhookClaim,
+  WebhookReceiptRecord,
   CreateOrderCommand,
   CreateOrderOutcome,
   DomainError,
@@ -53,7 +60,23 @@ import type {
   Result,
 } from '@sengoku/domain';
 import { canManuallyResend, err, ok, reserveSupply } from '@sengoku/domain';
-import { contentHash, InMemoryStorage } from '@sengoku/integrations';
+import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
+import type { Logger } from '@sengoku/observability';
+
+/**
+ * 何も出さない記録係。
+ *
+ * ⚠️ **本物の logger を使わない。** 試験のたびに出力が混ざり、
+ * 本当に見たい失敗の行が埋もれる。
+ */
+const silentLogger: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  fatal: () => undefined,
+  child: () => silentLogger,
+} as unknown as Logger;
 import type { AppDependencies } from '../../src/app.module';
 
 /**
@@ -934,6 +957,80 @@ export class InMemoryOrderRepository implements OrderRepository {
     return Promise.resolve(this.orders.get(orderId) ?? null);
   }
 
+  // --- 決済からの書き込み（決済 Phase P2）--------------------------------
+  //
+  // ⚠️ **在庫のカウンタを動かさない**（決定 A）。決済が成功しても
+  //    `reservedCount` は減らさず、`issuedCount` も増やさない。
+
+  markCheckoutCreated(orderId: string, now: Date): Promise<void> {
+    const order = this.orders.get(orderId);
+    if (
+      order !== undefined &&
+      (order.status === 'pending' || order.status === 'checkout_created')
+    ) {
+      this.orders.set(orderId, {
+        ...order,
+        status: 'checkout_created',
+        paymentStatus: 'pending',
+      });
+    }
+    void now;
+    return Promise.resolve();
+  }
+
+  markPaid(orderId: string, paidAt: Date): Promise<void> {
+    const order = this.orders.get(orderId);
+    if (
+      order !== undefined &&
+      (order.status === 'pending' || order.status === 'checkout_created')
+    ) {
+      this.orders.set(orderId, {
+        ...order,
+        status: 'paid',
+        paymentStatus: 'succeeded',
+        paidAt,
+        // ⚠️ 予約は consumed になるが、枠は reservedCount 側で押さえ続ける。
+        reservation:
+          order.reservation === null
+            ? null
+            : { ...order.reservation, status: 'consumed', consumedAt: paidAt },
+      });
+    }
+    return Promise.resolve();
+  }
+
+  markPaymentFailed(orderId: string): Promise<void> {
+    const order = this.orders.get(orderId);
+    // ⚠️ 注文の状態は動かさない（決定 B）。期限内なら再試行できる。
+    if (order !== undefined && order.paymentStatus === 'pending') {
+      this.orders.set(orderId, { ...order, paymentStatus: 'failed' });
+    }
+    return Promise.resolve();
+  }
+
+  async expireByCheckout(orderId: string, now: Date): Promise<boolean> {
+    const order = this.orders.get(orderId);
+    const reservation = order?.reservation;
+    if (order === undefined || reservation == null || reservation.status !== 'reserved') {
+      // 解放ジョブが先に処理していた。在庫を二重に戻さない。
+      return false;
+    }
+    const artwork = await this.artworks.findById(order.item?.artworkId ?? '');
+    if (artwork !== null) {
+      await this.artworks.update({
+        ...artwork,
+        reservedCount: artwork.reservedCount - reservation.quantity,
+      });
+    }
+    this.orders.set(orderId, {
+      ...order,
+      status: 'expired',
+      paymentStatus: 'cancelled',
+      reservation: { ...reservation, status: 'released', releasedAt: now },
+    });
+    return true;
+  }
+
   list(query: OrderListQuery): Promise<OrderListPage> {
     const all = this.sequence
       .map((id) => this.orders.get(id))
@@ -1031,6 +1128,144 @@ export class SequentialRandom implements RandomPort {
   }
 }
 
+/**
+ * 決済の保管庫（テスト用）。
+ *
+ * ⚠️ **在庫のカウンタを動かさない**（決定 A）。決済が成功しても
+ * `reservedCount` は減らさず、`issuedCount` も増やさない。
+ * ここを動かす Fake にすると、本番の設計と食い違ったまま試験が通る。
+ */
+export class InMemoryPaymentRepository implements PaymentRepository {
+  private readonly attempts = new Map<string, PaymentAttemptView[]>();
+  private readonly events = new Map<string, { status: string; attemptCount: number }>();
+  /** 作られた出来事。⚠️ 1 注文につき 1 件だけであることを試験が見る。 */
+  readonly outbox: { orderId: string; eventId: string }[] = [];
+
+  constructor(private readonly orders: InMemoryOrderRepository) {}
+
+  claimWebhookEvent(command: RecordWebhookCommand): Promise<WebhookClaim> {
+    const key = `${command.provider} ${command.eventId}`;
+    const existing = this.events.get(key);
+    if (existing !== undefined) {
+      existing.attemptCount += 1;
+      return Promise.resolve({ kind: 'duplicate' });
+    }
+    this.events.set(key, { status: 'received', attemptCount: 1 });
+    return Promise.resolve({ kind: 'claimed' });
+  }
+
+  markWebhookProcessed(input: {
+    readonly provider: string;
+    readonly eventId: string;
+    readonly status: 'processed' | 'ignored' | 'failed';
+  }): Promise<void> {
+    const row = this.events.get(`${input.provider} ${input.eventId}`);
+    if (row !== undefined) {
+      row.status = input.status;
+    }
+    return Promise.resolve();
+  }
+
+  listAttempts(orderId: string): Promise<readonly PaymentAttemptView[]> {
+    return Promise.resolve([...(this.attempts.get(orderId) ?? [])].reverse());
+  }
+
+  listWebhookReceipts(): Promise<readonly WebhookReceiptRecord[]> {
+    // ⚠️ 本文は保存していないので、そもそも返せるものが無い。
+    return Promise.resolve(
+      [...this.events.entries()].map(([key, value]) => ({
+        eventType: key,
+        status: value.status as WebhookReceiptRecord['status'],
+        livemode: false,
+        apiVersion: null,
+        attemptCount: value.attemptCount,
+        receivedAt: new Date(0),
+        processedAt: null,
+        lastErrorCode: null,
+      })),
+    );
+  }
+
+  recordCheckoutSession(command: RecordCheckoutSessionCommand): Promise<PaymentAttemptView> {
+    const rows = this.attempts.get(command.orderId) ?? [];
+    const existing = rows.find((row) => row.id === command.paymentId);
+    if (existing !== undefined) {
+      return Promise.resolve(existing);
+    }
+    const attempt: PaymentAttemptView = {
+      id: command.paymentId,
+      provider: command.provider,
+      status: 'pending',
+      sessionRef: command.sessionRef,
+      paymentRef: command.paymentRef,
+      chargeRef: null,
+      url: command.url,
+      amount: command.amount,
+      currency: command.currency,
+      expiresAt: command.expiresAt,
+      paidAt: null,
+      failureCode: null,
+      createdAt: command.now,
+    };
+    rows.push(attempt);
+    this.attempts.set(command.orderId, rows);
+    void this.orders.markCheckoutCreated(command.orderId, command.now);
+    return Promise.resolve(attempt);
+  }
+
+  confirmPayment(command: ConfirmPaymentCommand): Promise<boolean> {
+    const rows = this.attempts.get(command.orderId) ?? [];
+    const target = [...rows]
+      .reverse()
+      .find(
+        (row) =>
+          row.status === 'pending' &&
+          (command.sessionRef === null || row.sessionRef === command.sessionRef),
+      );
+    if (target === undefined) {
+      // すでに確定済み。⚠️ 二重に進めない。
+      return Promise.resolve(false);
+    }
+    const index = rows.indexOf(target);
+    rows[index] = { ...target, status: 'succeeded', paidAt: command.paidAt };
+    void this.orders.markPaid(command.orderId, command.paidAt);
+    // ⚠️ 1 件だけ。再送で 2 件になっていないことを試験が見る。
+    this.outbox.push({ orderId: command.orderId, eventId: command.outboxEventId });
+    return Promise.resolve(true);
+  }
+
+  recordFailure(input: {
+    readonly orderId: string;
+    readonly sessionRef: string | null;
+    readonly failureCode: string;
+  }): Promise<void> {
+    const rows = this.attempts.get(input.orderId) ?? [];
+    const target = [...rows]
+      .reverse()
+      .find(
+        (row) =>
+          row.status === 'pending' &&
+          (input.sessionRef === null || row.sessionRef === input.sessionRef),
+      );
+    if (target !== undefined) {
+      rows[rows.indexOf(target)] = { ...target, status: 'failed', failureCode: input.failureCode };
+    }
+    // ⚠️ 注文は checkout_created のまま（決定 B）。決済の状態だけ戻す。
+    void this.orders.markPaymentFailed(input.orderId);
+    return Promise.resolve();
+  }
+
+  expireCheckout(input: { readonly orderId: string; readonly now: Date }): Promise<boolean> {
+    const rows = this.attempts.get(input.orderId) ?? [];
+    for (const [index, row] of rows.entries()) {
+      if (row.status === 'pending') {
+        rows[index] = { ...row, status: 'cancelled' };
+      }
+    }
+    return this.orders.expireByCheckout(input.orderId, input.now);
+  }
+}
+
 export interface TestHarness extends AppDependencies {
   readonly artworks: InMemoryArtworkRepository;
   readonly listings: InMemoryListingRepository;
@@ -1052,6 +1287,7 @@ export interface TestHarness extends AppDependencies {
   readonly clock: FixedClock;
   readonly orderRepository: InMemoryOrderRepository;
   readonly commonUserLinks: InMemoryCommonUserLinks;
+  readonly paymentRepository: InMemoryPaymentRepository;
 }
 
 export const TEST_TOKEN_SECRET = 'test-token-secret';
@@ -1060,6 +1296,10 @@ export const TEST_AUDIENCE = 'sennokunnft-test';
 export const TEST_NOW = new Date('2026-06-01T00:00:00.000Z');
 /** 内部ジョブの合言葉（テスト用）。⚠️ 実環境の値をここへ書かない。 */
 export const TEST_INTERNAL_JOB_TOKEN = 'test-internal-job-token-0123456789abcdef';
+/** 承認済みのプラットフォーム手数料率（20%）。 */
+export const APPROVED_FEE_RATE_BPS = 2000;
+/** 擬似決済の署名に使う秘密（テスト用）。⚠️ 実環境の値を書かない。 */
+export const TEST_WEBHOOK_SECRET = 'test-payment-webhook-secret';
 
 /**
  * 冪等キーの保管庫（テスト用）。
@@ -1185,6 +1425,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const artworks = new InMemoryArtworkRepository(listings);
   const orderRepository = new InMemoryOrderRepository(artworks);
   const commonUserLinks = new InMemoryCommonUserLinks();
+  const paymentRepository = new InMemoryPaymentRepository(orderRepository);
+  const paymentGateway = new FakePaymentGateway(
+    TEST_WEBHOOK_SECRET,
+    'http://localhost:3000/fake-checkout',
+    () => clock.now(),
+  );
+  const clock = new FixedClock(TEST_NOW);
   return {
     version: '0.1.0',
     probes: [],
@@ -1209,7 +1456,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     },
     integrationRepository,
     tokenVerifier,
-    clock: new FixedClock(TEST_NOW),
+    clock,
     ids: new SequentialIds(),
     storage: new InMemoryStorage(),
     audit,
@@ -1219,13 +1466,24 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     auditLogReader,
     orderRepository,
     commonUserLinks,
+    paymentRepository,
+    payments: {
+      gateway: paymentGateway,
+      repository: paymentRepository,
+      provider: 'fake',
+      // ⚠️ 試験は本番モードではない。livemode の食い違いを見る試験は
+      //    この値を反転させて確かめる。
+      expectLivemode: false,
+      logger: silentLogger,
+    },
     orders: {
       repository: orderRepository,
       commonUserLinks,
       random: new SequentialRandom(),
-      // ⚠️ 既定 0。率は事業判断待ち（UD-109）で、テストに仮の率を
-      //    焼き付けると「決まった値」として扱われる。
-      platformFeeRateBps: 0,
+      // ✅ 承認済み 2026-08-19（UD-109）: 20% = 2000。
+      // ⚠️ 0 は「無料」ではなく「販売設定未完了」。0 の挙動を見る試験は
+      //    `buildHarness` の戻りを書き換えて確かめる。
+      platformFeeRateBps: APPROVED_FEE_RATE_BPS,
       reservationMinutes: 30,
       internalJobToken: TEST_INTERNAL_JOB_TOKEN,
     },

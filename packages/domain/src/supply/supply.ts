@@ -6,12 +6,29 @@ import { err, ok, type Result } from '../shared/result';
  *
  * 仮引当方式（DOMAIN_MODEL.md §5）:
  *   販売可能数 = maxSupply - reservedCount - issuedCount
+ *
+ * ⚠️ **2 つのカウンタの意味を混ぜない（決済 Phase P2 で確定）。**
+ * `issuedCount` は「受取権を**実際に発行した**数」であって、
+ * 「売れた数」ではない。決済が済んだだけの枠は `reservedCount` に残す。
  */
 export interface SupplyCounters {
   readonly maxSupply: number;
-  /** 決済待ちの注文が押さえている数。 */
+  /**
+   * まだ受取権になっていない注文が押さえている数。
+   *
+   * ⚠️ **「決済待ち」だけではない。** 決済が済んで受取権の発行を待って
+   * いる枠も、ここに含まれる（決済 Phase P2 の決定 A）。決済成功で
+   * ここを減らすと、受取権を作る前のわずかな間だけ販売枠が復活し、
+   * その隙に売れた注文の発行が上限で弾かれる。
+   */
   readonly reservedCount: number;
-  /** 受取権として発行済みの数。 */
+  /**
+   * 受取権として発行済みの数。
+   *
+   * ⚠️ **`entitlements` の行数と一致させる。** ここだけ先に増やすと、
+   * シリアル番号の採番（`allocateSerialNumbers`）がずれる。
+   * 増やしてよいのは受取権を作るのと同じトランザクションの中だけ。
+   */
   readonly issuedCount: number;
 }
 
@@ -56,12 +73,22 @@ export function releaseReservation(
 }
 
 /**
- * 仮引当を確定させる（決済確定）。
+ * 押さえていた枠を、受取権の発行済みへ**移す**。
  *
- * 引当から発行済みへ**移す**だけなので、合計（reserved + issued）は変わらない。
+ * 引当から発行済みへ移すだけなので、合計（reserved + issued）は変わらない。
  * ここで合計が増えるとオーバーセルになる。
+ *
+ * ⚠️ **決済が成功しただけでは呼ばない**（決済 Phase P2 の決定 A）。
+ * 呼んでよいのは、**受取権を作るのと同じトランザクションの中**だけ。
+ * 名前を `commitReservation` から変えたのは、「決済の確定」と読めて
+ * 決済成功の経路から呼ばれかけたため。この関数がするのは
+ * 「発行済みへ移すこと」であって、決済の確定ではない。
+ *
+ * ⚠️ **シリアル番号の採番はこの関数の**前**に行う。**
+ * `allocateSerialNumbers` は `issuedCount` を見て番号を決めるので、
+ * 先に増やすと 1 番から始まらない。
  */
-export function commitReservation(
+export function finalizeConsumedReservation(
   counters: SupplyCounters,
   quantity: number,
 ): Result<SupplyCounters, DomainError> {

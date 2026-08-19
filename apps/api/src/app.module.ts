@@ -22,6 +22,8 @@ import type {
   IntegrationRepository,
   AuditLogReadPort,
   OrderRepository,
+  PaymentRepository,
+  PaymentGatewayPort,
   CommonUserLinkRepository,
   RandomPort,
   WalletDeliveryAdminPort,
@@ -62,8 +64,15 @@ import { IntegrationController } from './integration/integration.controller';
 import { IntegrationService_ } from './integration/integration.service';
 import { WalletDeliveryController } from './wallet-delivery/wallet-delivery.controller';
 import { WalletDeliveryAdminService } from './wallet-delivery/wallet-delivery.service';
-import { OrderController, AdminOrderController } from './order/order.controller';
+import {
+  OrderController,
+  AdminOrderController,
+  CheckoutController,
+} from './order/order.controller';
 import { OrderService } from './order/order.service';
+import { CheckoutService } from './order/checkout.service';
+import { PaymentWebhookService } from './order/webhook.service';
+import { PaymentWebhookController } from './order/webhook.controller';
 import {
   INTERNAL_JOB_CONFIG,
   InternalJobsController,
@@ -162,6 +171,22 @@ export interface AppDependencies {
     readonly reservationMinutes: number;
     readonly internalJobToken?: string | undefined;
   };
+  /**
+   * 決済（決済 Phase P2）。
+   *
+   * ⚠️ **無い環境では経路ごと生やさない。** 「渡すが中で落ちる」形にすると、
+   * 鍵の設定を忘れた環境で Webhook の口だけが開き、署名を確かめずに
+   * 受けるか全部拒否するかのどちらかになる。前者は誰でも
+   * 「決済成功」を送れる。
+   */
+  readonly payments?: {
+    readonly gateway: PaymentGatewayPort;
+    readonly repository: PaymentRepository;
+    readonly provider: string;
+    /** この配備が本番の決済を扱うか。⚠️ 事業者の `livemode` と突き合わせる。 */
+    readonly expectLivemode: boolean;
+    readonly logger: Logger;
+  };
   readonly tokenVerifier: TokenVerifierPort;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
@@ -243,6 +268,7 @@ export class AppModule implements NestModule {
     const walletDeliveries = deps.walletDeliveries;
     const auditLogs = deps.auditLogs;
     const internalJobToken = deps.orders.internalJobToken;
+    const payments = deps.payments;
     return {
       module: AppModule,
       controllers: [
@@ -258,6 +284,7 @@ export class AppModule implements NestModule {
         ...(internalJobToken === undefined || internalJobToken === ''
           ? []
           : [InternalJobsController]),
+        ...(payments === undefined ? [] : [CheckoutController, PaymentWebhookController]),
         ...(integrations === undefined ? [] : [IntegrationController]),
         ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
         ...(auditLogs === undefined ? [] : [AuditLogController]),
@@ -315,6 +342,8 @@ export class AppModule implements NestModule {
               deps.listings,
               deps.artworks,
               deps.orders.commonUserLinks,
+              // ⚠️ 決済を繋いでいない配備では null。詳細画面が 500 にならない。
+              payments?.repository ?? null,
               deps.clock,
               deps.ids,
               deps.orders.random,
@@ -331,6 +360,37 @@ export class AppModule implements NestModule {
               {
                 provide: INTERNAL_JOB_CONFIG,
                 useFactory: (): InternalJobConfig => ({ token: internalJobToken }),
+              },
+            ]),
+        ...(payments === undefined
+          ? []
+          : [
+              {
+                provide: CheckoutService,
+                useFactory: () =>
+                  new CheckoutService(
+                    deps.orders.repository,
+                    payments.repository,
+                    payments.gateway,
+                    deps.clock,
+                    deps.ids,
+                    deps.audit,
+                    { provider: payments.provider },
+                  ),
+              },
+              {
+                provide: PaymentWebhookService,
+                useFactory: () =>
+                  new PaymentWebhookService(
+                    payments.gateway,
+                    payments.repository,
+                    deps.orders.repository,
+                    deps.clock,
+                    deps.ids,
+                    deps.audit,
+                    payments.logger,
+                    { provider: payments.provider, expectLivemode: payments.expectLivemode },
+                  ),
               },
             ]),
         ...(integrations === undefined

@@ -12,6 +12,8 @@ import {
   paymentStatusLabel,
   refundStatusLabel,
   reservationStatusLabel,
+  attemptStatusLabel,
+  webhookStatusLabel,
 } from '../../../../src/order-copy';
 
 /**
@@ -163,9 +165,102 @@ export default async function AdminOrderDetailPage({
         <dd className="sengoku-code-inline">{order.accountId}</dd>
       </dl>
 
+      {order.payments === undefined ? null : (
+        <>
+          <h2>{ORDER_COPY.adminPaymentsHeading}</h2>
+          {order.payments.attempts.length === 0 ? (
+            <EmptyState title={ORDER_COPY.adminNoPayments} hint="" />
+          ) : (
+            /*
+              ⚠️ **支払いページの URL を出さない。** これを持つ人は誰でも
+                 その注文を支払える。運用に要るのは識別子まで。
+            */
+            <ul className="sengoku-order-list">
+              {order.payments.attempts.map((attempt) => (
+                <li className="sengoku-order-card" key={attempt.id}>
+                  <div className="sengoku-order-card__head">
+                    <span>{attemptStatusLabel(attempt.status)}</span>
+                    <span className="sengoku-form__hint">{formatDateTime(attempt.createdAt)}</span>
+                  </div>
+                  <dl className="sengoku-facts sengoku-facts--compact">
+                    <dt>{ORDER_COPY.columnAttemptAmount}</dt>
+                    <dd>
+                      <PriceTag price={{ amount: attempt.amount, currency: attempt.currency }} />
+                    </dd>
+                    <dt>{ORDER_COPY.columnSessionRef}</dt>
+                    <dd className="sengoku-code-inline">{attempt.sessionRef ?? '—'}</dd>
+                    <dt>{ORDER_COPY.columnPaymentRef}</dt>
+                    <dd className="sengoku-code-inline">{attempt.paymentRef ?? '—'}</dd>
+                    <dt>{ORDER_COPY.columnChargeRef}</dt>
+                    <dd className="sengoku-code-inline">{attempt.chargeRef ?? '—'}</dd>
+                    <dt>{ORDER_COPY.columnAttemptExpires}</dt>
+                    <dd>{formatDateTime(attempt.expiresAt)}</dd>
+                    {attempt.failureCode === null ? null : (
+                      <>
+                        <dt>{ORDER_COPY.columnFailureCode}</dt>
+                        {/* ⚠️ 決済会社の符号ではなく、こちらで決めた安全な符号。 */}
+                        <dd className="sengoku-code-inline">{attempt.failureCode}</dd>
+                      </>
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <dl className="sengoku-facts">
+            <dt>{ORDER_COPY.amountMatchesLabel}</dt>
+            <dd>{amountMatchesLabel(order.payments.amountMatches)}</dd>
+          </dl>
+
+          <h2>{ORDER_COPY.adminWebhooksHeading}</h2>
+          {order.payments.webhooks.length === 0 ? (
+            <EmptyState title={ORDER_COPY.adminNoWebhooks} hint="" />
+          ) : (
+            /* ⚠️ 本文は保存していない。出せるものが無い（指示書 §13）。 */
+            <ul className="sengoku-order-list">
+              {order.payments.webhooks.map((receipt, index: number) => (
+                <li className="sengoku-order-card" key={`${receipt.eventType}-${String(index)}`}>
+                  <div className="sengoku-order-card__head">
+                    <span className="sengoku-code-inline">{receipt.eventType}</span>
+                    <span>{webhookStatusLabel(receipt.status)}</span>
+                  </div>
+                  <dl className="sengoku-facts sengoku-facts--compact">
+                    <dt>{ORDER_COPY.columnReceivedAt}</dt>
+                    <dd>{formatDateTime(receipt.receivedAt)}</dd>
+                    <dt>{ORDER_COPY.columnAttemptCount}</dt>
+                    <dd>{receipt.attemptCount}回</dd>
+                    <dt>{ORDER_COPY.columnLivemode}</dt>
+                    <dd>
+                      {receipt.livemode === null
+                        ? '—'
+                        : receipt.livemode
+                          ? ORDER_COPY.livemodeLive
+                          : ORDER_COPY.livemodeTest}
+                    </dd>
+                    {receipt.lastErrorCode === null ? null : (
+                      <>
+                        <dt>{ORDER_COPY.columnFailureCode}</dt>
+                        <dd className="sengoku-code-inline">{receipt.lastErrorCode}</dd>
+                      </>
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
       <p className="sengoku-back-link">
         <a href="/admin/orders">{ORDER_COPY.backToOrders}</a>
       </p>
     </>
   );
+}
+
+/** 金額の一致。⚠️ 受領がまだ無いときは「一致しない」と言わない。 */
+function amountMatchesLabel(matches: boolean | null): string {
+  if (matches === null) return ORDER_COPY.amountMatchesUnknown;
+  return matches ? ORDER_COPY.amountMatchesYes : ORDER_COPY.amountMatchesNo;
 }

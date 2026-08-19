@@ -3,6 +3,8 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -12,13 +14,16 @@ import {
   adminOrderListQuerySchema,
   createOrderRequestSchema,
   type AdminOrderListResponse,
-  type AdminOrderView,
+  type AdminOrderDetail,
+  type CheckoutSessionResponse,
   type OrderView,
 } from '@sengoku/contracts';
+import { currentRequestId } from '@sengoku/observability';
 import type { Actor } from '@sengoku/auth';
 import { CurrentActor, RequireAction } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
 import { OrderService } from './order.service';
+import { CheckoutService } from './checkout.service';
 
 /**
  * 購入者向けの注文。
@@ -61,6 +66,36 @@ export class OrderController {
   }
 }
 
+/**
+ * 支払いの口を作る（指示書 §5.2）。
+ *
+ * ⚠️ **決済の設定が無い環境では、この経路ごと生えない。** 押しても
+ * 500 になるボタンを画面に出さないため、`AppModule` が登録を分けている。
+ */
+@Controller('api/v1/orders')
+export class CheckoutController {
+  constructor(private readonly checkout: CheckoutService) {}
+
+  /**
+   * ⚠️ **本文を受け取らない。** 金額も通貨も注文から引く。
+   * ここに `@Body()` を足した瞬間、ブラウザから金額を送れる道ができる。
+   */
+  @Post(':id/checkout-session')
+  @RequireAction('checkout.create')
+  @HttpCode(HttpStatus.CREATED)
+  createCheckoutSession(
+    @CurrentActor() actor: Actor,
+    @Param('id') id: string,
+  ): Promise<CheckoutSessionResponse> {
+    return this.checkout.create({
+      orderId: id,
+      // ⚠️ 購入者はトークンから取る。本文からは受け取らない。
+      accountId: requireAccountId(actor),
+      correlationId: currentRequestId() ?? null,
+    });
+  }
+}
+
 /** 運営向けの注文一覧・詳細（指示書 §9.1・§9.2）。 */
 @Controller('api/v1/admin/orders')
 export class AdminOrderController {
@@ -80,7 +115,7 @@ export class AdminOrderController {
 
   @Get(':id')
   @RequireAction('order.view_any')
-  async detail(@Param('id') id: string): Promise<AdminOrderView> {
+  async detail(@Param('id') id: string): Promise<AdminOrderDetail> {
     const order = await this.orders.findForAdmin(id);
     if (order === null) {
       throw new NotFoundException();

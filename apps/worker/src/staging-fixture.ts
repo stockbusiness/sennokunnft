@@ -1,7 +1,7 @@
 import {
   allocateSerialNumbers,
   reserveSupply,
-  commitReservation,
+  finalizeConsumedReservation,
   type ClaimTokenPort,
   type ClockPort,
 } from '@sengoku/domain';
@@ -117,7 +117,9 @@ export async function createStagingEntitlement(
     if (!reserved.ok) {
       throw new StagingFixtureError('insufficient_supply');
     }
-    const committed = commitReservation(reserved.value, 1);
+    // Fixture は受取権をこの場で作るので、発行済みへ移してよい。
+    // ⚠️ 決済成功だけの経路から呼ばないこと（決済 Phase P2 の決定 A）。
+    const committed = finalizeConsumedReservation(reserved.value, 1);
     if (!committed.ok) {
       throw new StagingFixtureError('insufficient_supply');
     }
