@@ -58,6 +58,23 @@ export const DOMAIN_ERROR_CODES = [
    * 変えても誰も読まないため、受け付けること自体が嘘になる。
    */
   'INTEGRATION_NOT_MANAGED',
+  // --- 決済の設定（管理画面から変える分）---
+  'PAYMENT_SETTINGS_INVALID',
+  'PAYMENT_SECRET_INVALID',
+  /**
+   * 鍵と環境が食い違っている。
+   *
+   * ⚠️ **「無効な鍵」と分けてある。** 形は正しいのに置き場所が違う、
+   * という状態を、直す人がすぐ見分けられるようにするため。
+   */
+  'PAYMENT_SECRET_ENVIRONMENT_MISMATCH',
+  /**
+   * 決済連携が管理画面から止められている。
+   *
+   * ⚠️ **「設定が足りない」と分けてある。** 直し方が違う。止めたのなら
+   * 戻す、足りないなら埋める。混ぜると、止めた本人が「壊れた」と読む。
+   */
+  'PAYMENT_PROVIDER_DISABLED',
   // --- 注文（決済 Phase P0・P1）---
   /** 注文時の手数料率が受け付けられない値。 */
   'INVALID_FEE_RATE',
@@ -110,6 +127,33 @@ export const DOMAIN_ERROR_CODES = [
   'COMMON_USER_ID_INVALID',
   'COMMON_USER_PENDING',
   'COMMON_USER_MISMATCH',
+  // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
+  /**
+   * 公開済みの版を書き換えようとした。
+   *
+   * ⚠️ **「権限が無い」ではない。** オーナーでも書き換えられない。
+   * 過去にどう書いてあったかが変わると、あとから確かめられなくなる。
+   */
+  'LEGAL_VERSION_NOT_DRAFT',
+  /** 入力が受け付けられない（長すぎる・HTML が入っている等）。 */
+  'LEGAL_DOCUMENT_INVALID',
+  /**
+   * 公開に必要な項目が埋まっていない。
+   *
+   * ⚠️ **`LEGAL_DOCUMENT_INVALID` と分けてある。** 直し方が違う。
+   * 片方は書き直し、片方は書き足し。
+   */
+  'LEGAL_DOCUMENT_INCOMPLETE',
+  /** 施行日が過去、または現行版より前。 */
+  'LEGAL_EFFECTIVE_DATE_INVALID',
+  /**
+   * 画面が見ていた版と、いま施行中の版が違う。
+   *
+   * ⚠️ **黙って差し替えない。** 差し替えると、利用者が読んだものと
+   * 記録が食い違う。「読んでいない条件に同意したことになっている」を
+   * 作らないための符号。
+   */
+  'LEGAL_CONSENT_VERSION_MISMATCH',
   /**
    * Wallet へ送るイベントを組み立てられなかった。
    *

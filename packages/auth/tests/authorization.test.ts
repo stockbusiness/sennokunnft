@@ -59,6 +59,16 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'integration.manage_secret': { anonymous: false, buyer: false, operator: false, auditor: false },
   // 再送は印を要らない。運営の日常業務。
   'wallet_delivery.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // --- 法務文書 ---
+  // ⚠️ 監査役も過去の版を見られる。「その時点でどう書いてあったか」を
+  //    確かめるのは監査の仕事そのもの。
+  'legal.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // 下書きは運営スタッフが書ける。
+  'legal.edit': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // ⚠️ 印が無い operator は通らない。公開は取り消せない。
+  'legal.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
+  // 同意は本人が行う。会員なら誰でも持つ。
+  'legal.consent': { anonymous: false, buyer: true, operator: true, auditor: true },
 };
 
 describe('権限マトリクスの全セル検証（Z-1）', () => {
@@ -242,6 +252,7 @@ describe('オーナーの印', () => {
     'staff.manage',
     'integration.manage',
     'integration.manage_secret',
+    'legal.publish',
   ] as const;
 
   for (const action of STAFF_ACTIONS) {

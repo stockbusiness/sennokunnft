@@ -44,14 +44,24 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           本文へ移動
         </a>
         {/*
-          ⚠️ 行き先の無い項目を並べない。
-          「このサイトについて」「お問い合わせ」「特定商取引法に基づく表記」は
-          用意でき次第ここへ足す。押せるのに何も無いページへ着くと、
+          ⚠️ 行き先の無い項目を並べない。押せるのに何も無いページへ着くと、
           利用者は自分の操作を疑う。
+
+          法務の 3 つは、管理画面から公開されるまで「準備中」と出る。
+          リンクを出しておくのは、**特商法の表記は販売前に掲げる義務がある**
+          ためで、押せる場所が無いほうが困るから。中身が空であることは
+          そのページ自身が正直に伝える。
         */}
         <SiteHeader siteName={name} />
         <main id="main">{children}</main>
-        <SiteFooter siteName={name} />
+        <SiteFooter
+          siteName={name}
+          links={[
+            { href: '/legal/terms', label: '利用規約' },
+            { href: '/legal/privacy', label: 'プライバシーポリシー' },
+            { href: '/legal/tokushoho', label: '特定商取引法に基づく表記' },
+          ]}
+        />
       </body>
     </html>
   );

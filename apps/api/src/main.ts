@@ -12,6 +12,8 @@ import {
   loadEnv,
   parseHmacKeys,
   UnsafeEnvironmentError,
+  STRIPE_TEST_KEY_PREFIX,
+  STRIPE_LIVE_KEY_PREFIX,
 } from '@sengoku/config';
 import { createLogger } from '@sengoku/observability';
 import {
@@ -24,12 +26,15 @@ import {
   PrismaArtworkRepository,
   PrismaAuditLogRepository,
   PrismaAuditLogReadRepository,
+  PrismaLegalDocumentRepository,
+  PrismaLegalConsentRepository,
   PrismaWalletDeliveryAdminRepository,
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
   PrismaIdempotencyStore,
   PrismaOrderRepository,
   PrismaPaymentRepository,
+  PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
   PrismaClaimRepository,
   PrismaNonceStore,
@@ -49,6 +54,9 @@ import {
   CryptoRandom,
   FakePaymentGateway,
   StripePaymentGateway,
+  ResolvingPaymentGateway,
+  createPaymentConfigResolver,
+  createPlatformFeeRateResolver,
   generateStorageKey,
   AeadSecretBox,
   parseEncryptionKeys,
@@ -79,6 +87,26 @@ const VERSION = '0.1.0';
  * 「起動はしたが設定が欠けていて一部機能が壊れている」状態を作らないため、
  * 検証を通過するまでサーバーを立ち上げない。
  */
+/**
+ * 鍵からモードだけを取り出す。
+ *
+ * ⚠️ **判別した結果しか返さない。** 鍵そのものも、その一部も返さない。
+ * 画面が要るのは「取り違えていないか」を人が確かめられる粒度までで、
+ * 値そのものではない。
+ */
+function stripeMode(secretKey: string | undefined): 'test' | 'live' | 'unknown' {
+  if (secretKey === undefined || secretKey === '') {
+    return 'unknown';
+  }
+  if (secretKey.startsWith(STRIPE_TEST_KEY_PREFIX)) {
+    return 'test';
+  }
+  if (secretKey.startsWith(STRIPE_LIVE_KEY_PREFIX)) {
+    return 'live';
+  }
+  return 'unknown';
+}
+
 async function bootstrap(): Promise<void> {
   /*
     0. 実行環境の検査。
@@ -139,6 +167,19 @@ async function bootstrap(): Promise<void> {
 
   // 3. DB 接続。ここで初めて外部へ繋ぐ。
   const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+
+  /*
+    決済の記録。⚠️ 決済を繋いでいない配備でも作る。管理画面の状態表示
+    （最後に知らせが届いた時刻）は、決済が無効でも見えたほうがよい。
+    「届いているのに処理されていない」ことに気づける唯一の手掛かりになる。
+  */
+  const paymentRepository = new PrismaPaymentRepository(prisma);
+
+  /*
+    法務文書。⚠️ 注文の作成からも引くので、ここで作って共有する。
+    ⚠️ 暗号鍵を要らない。公開する文なので秘密ではない。
+  */
+  const legalDocuments = new PrismaLegalDocumentRepository(prisma);
 
   const probes: DependencyProbe[] = [
     {
@@ -251,6 +292,21 @@ async function bootstrap(): Promise<void> {
         ⚠️ **値を渡さない。** 渡すのは方式と、欠けている設定の名前まで。
       */
       describeEnvironment: describeIntegrationEnvironment(env),
+      /*
+        決済の配備側の状態。
+        ⚠️ **鍵そのもの・先頭・末尾を渡さない**（2026-08-19 決定）。
+           渡すのは「設定されているか」「テストか本番か」まで。
+           モードは鍵の頭で判別するが、判別した結果しか外へ出さない。
+      */
+      describePaymentDeployment: async () => ({
+        secretKeyConfigured: (env.STRIPE_SECRET_KEY ?? '') !== '',
+        webhookSecretConfigured: (env.STRIPE_WEBHOOK_SECRET ?? '') !== '',
+        mode: stripeMode(env.STRIPE_SECRET_KEY),
+        lastWebhookReceivedAt:
+          paymentRepository === null
+            ? null
+            : await paymentRepository.findLastWebhookReceivedAt(env.PAYMENT_PROVIDER),
+      }),
       repository: new PrismaIntegrationRepository(
         prisma,
         new AeadSecretBox({ keys, activeKeyVersion: version }),
@@ -271,16 +327,46 @@ async function bootstrap(): Promise<void> {
        `stripe` のときは既に止めているので、ここへ来るのは
        `PAYMENT_WEBHOOK_SECRET` を入れていない `fake` の場合だけ。
   */
+  /*
+    ⚠️ **設定は呼び出しのたびに引く。** 管理画面で鍵・戻り先・手数料率を
+       変えたら、次の呼び出しから効いてほしい。起動時に読んだ値を
+       持ち回ると「保存できたのに効かない」になり、しかも効いていない
+       ことに気づく手掛かりが無い。
+
+    ⚠️ **環境変数は引き継ぎ元。** DB に鍵が入るまではこちらが正で、
+       入ったあとは DB が正。DB 側で止めてあるときは環境変数へ
+       落ちない（落ちると管理画面の「停止」が効かない）。
+  */
+  const paymentConfigResolver = createPaymentConfigResolver({
+    integrations: integrations?.repository ?? null,
+    appEnvironment: integrations?.appEnvironment ?? 'staging',
+    deployment:
+      env.PAYMENT_PROVIDER === 'stripe'
+        ? {
+            // 起動時のガード（`assertStripeConfig`）で存在を確認済み。
+            secretKey: env.STRIPE_SECRET_KEY ?? '',
+            webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+            apiVersion: env.STRIPE_API_VERSION,
+            successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
+            cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
+          }
+        : null,
+  });
+
   const paymentGateway = ((): PaymentGatewayPort | null => {
     if (env.PAYMENT_PROVIDER === 'stripe') {
-      return new StripePaymentGateway({
-        // 上のガードで存在を確認済み。
-        secretKey: env.STRIPE_SECRET_KEY ?? '',
-        webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-        apiVersion: env.STRIPE_API_VERSION,
-        successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
-        cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
-      });
+      return new ResolvingPaymentGateway(
+        paymentConfigResolver,
+        (config) =>
+          new StripePaymentGateway({
+            secretKey: config.secretKey,
+            webhookSecret: config.webhookSecret,
+            apiVersion: config.apiVersion === '' ? env.STRIPE_API_VERSION : config.apiVersion,
+            successUrlTemplate: config.successUrlTemplate,
+            cancelUrlTemplate: config.cancelUrlTemplate,
+          }),
+        'stripe',
+      );
     }
     if (env.PAYMENT_WEBHOOK_SECRET === undefined) {
       logger.warn({}, '決済の機能は無効です（PAYMENT_WEBHOOK_SECRET が未設定）。');
@@ -288,6 +374,24 @@ async function bootstrap(): Promise<void> {
     }
     return new FakePaymentGateway(env.PAYMENT_WEBHOOK_SECRET);
   })();
+
+  /*
+    手数料率。
+    ⚠️ **資格情報とは別に引く。** 率は決済事業者の設定ではなく販売の条件で、
+       事業者が `fake`（鍵を持たない手元・E2E）でも要る。束ねると、
+       鍵の無い環境で率が 0 に落ちる。
+    ⚠️ **注文のたびに引く。** 引いた値は注文へスナップショットされるので、
+       あとから率を変えても**過去の注文は動かない**。
+  */
+  const resolvePlatformFeeRateBps = createPlatformFeeRateResolver({
+    /*
+      ⚠️ **暗号鍵に依存させない。** 率は秘密ではないので、復号の仕組みを
+         通す理由が無い。`integrations`（暗号鍵が要る）に紐づけると、
+         鍵を置いていない配備で率が 0 に落ちる。
+    */
+    reader: new PrismaPlatformFeeRateReader(prisma),
+    appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
+  });
 
   const app = await NestFactory.create(
     AppModule.register({
@@ -311,6 +415,17 @@ async function bootstrap(): Promise<void> {
         outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
       },
       auditLogs: new PrismaAuditLogReadRepository(prisma),
+      /*
+        法務文書（利用規約・プライバシーポリシー・特商法表記）。
+
+        ⚠️ **暗号鍵を要らない。** 公開する文なので秘密ではない。
+           連携設定の保管庫と同じ経路に載せると、鍵を置いていない配備で
+           法務ページごと開かなくなる。
+      */
+      legalDocuments: {
+        documents: legalDocuments,
+        consents: new PrismaLegalConsentRepository(prisma),
+      },
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       /*
@@ -335,7 +450,7 @@ async function bootstrap(): Promise<void> {
           ? undefined
           : {
               gateway: paymentGateway,
-              repository: new PrismaPaymentRepository(prisma),
+              repository: paymentRepository,
               provider: env.PAYMENT_PROVIDER,
               expectLivemode: env.APP_ENV === 'production',
               logger,
@@ -344,7 +459,18 @@ async function bootstrap(): Promise<void> {
         repository: new PrismaOrderRepository(prisma),
         commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
         random: new CryptoRandom(),
-        platformFeeRateBps: env.PLATFORM_FEE_RATE_BPS,
+        resolvePlatformFeeRateBps,
+        /*
+          注文へ残す規約の版（`UD-126`）。
+          ⚠️ **同意を確かめる口ではない。** 同意は会員登録のときに取る。
+             ここは「何が表示されていたか」を注文へ残すためだけに引く。
+          ⚠️ 未公開なら null。**注文を止めない。** 止めると、規約を
+             公開する前に手元で試すことができなくなる。
+        */
+        resolveEffectiveTerms: async () => {
+          const effective = await legalDocuments.findEffective('terms', new Date());
+          return effective === null ? null : { id: effective.id, version: effective.version };
+        },
         reservationMinutes: env.ORDER_RESERVATION_MINUTES,
         internalJobToken: env.INTERNAL_JOB_TOKEN,
       },

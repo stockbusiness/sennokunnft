@@ -29,6 +29,13 @@ function settings(overrides: Partial<IntegrationSettings> = {}): IntegrationSett
     timeoutMs: 8000,
     maxAttempts: 5,
     enabled: true,
+    // 決済にだけ意味のある欄。Wallet では既定のまま使わない。
+    payment: {
+      apiVersion: null,
+      checkoutSuccessUrl: null,
+      checkoutCancelUrl: null,
+      platformFeeRateBps: 0,
+    },
     rowVersion: 1,
     ...overrides,
   };

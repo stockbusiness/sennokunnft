@@ -120,6 +120,7 @@ export {
   integrationListResponseSchema,
   integrationSecretSchema,
   integrationStatusSchema,
+  paymentSettingsSchema,
   registerSecretRequestSchema,
   updateIntegrationRequestSchema,
   type ConnectionCheckView,
@@ -127,6 +128,7 @@ export {
   type IntegrationListResponse,
   type IntegrationSecretView,
   type IntegrationStatusView,
+  type PaymentSettingsView,
   type RegisterSecretRequest,
   type UpdateIntegrationRequest,
 } from './integration';
@@ -183,3 +185,27 @@ export {
   type AdminOrderPayments,
   type AdminOrderDetail,
 } from './order';
+
+export {
+  LEGAL_DOCUMENT_KIND_VALUES,
+  LEGAL_VERSION_STATUS_VALUES,
+  legalVersionSchema,
+  legalVersionListResponseSchema,
+  publicLegalDocumentSchema,
+  publishLegalVersionRequestSchema,
+  legalConsentStatusSchema,
+  recordConsentRequestSchema,
+  saveLegalDraftRequestSchema,
+  tokushohoFieldsSchema,
+  type LegalVersionView,
+  type LegalVersionListResponse,
+  type PublicLegalDocument,
+  type PublishLegalVersionRequest,
+  type LegalConsentStatus,
+  type RecordConsentRequest,
+  type SaveLegalDraftRequest,
+  type TokushohoFieldsInput,
+  renderLegalBody,
+  type LegalBlock,
+  type LegalDocumentKind,
+} from './legal';

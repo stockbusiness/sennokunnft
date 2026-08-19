@@ -89,3 +89,14 @@ export {
   type ReachabilityProbeOptions,
   type ProbeResult,
 } from './reachability-probe';
+
+export {
+  createPaymentConfigResolver,
+  createPlatformFeeRateResolver,
+  type EnvPaymentConfig,
+  type PaymentConfigResolution,
+  type PaymentConfigResolver,
+  type PaymentConfigResolverOptions,
+  type ResolvedPaymentConfig,
+} from './payment-config';
+export { ResolvingPaymentGateway } from './resolving-payment';

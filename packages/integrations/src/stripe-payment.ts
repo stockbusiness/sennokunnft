@@ -119,10 +119,10 @@ export class StripePaymentGateway implements PaymentGatewayPort {
     }
   }
 
-  verifyAndParseWebhook(
+  async verifyAndParseWebhook(
     rawBody: Buffer,
     signatureHeader: string,
-  ): Result<ProviderPaymentFact, DomainError> {
+  ): Promise<Result<ProviderPaymentFact, DomainError>> {
     let event: Stripe.Event;
     try {
       // ⚠️ 生のバイト列を渡す。組み直した JSON では署名が合わない。

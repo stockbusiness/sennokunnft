@@ -60,6 +60,16 @@ export interface CreateOrderCommand {
   readonly reservationExpiresAt: Date;
   /** 要求数量。⚠️ 実装はロック後のカウンタで**もう一度**在庫を判定する。 */
   readonly quantity: number;
+  /**
+   * 注文時点で施行されていた利用規約の版（`UD-126`）。
+   *
+   * ⚠️ **同意の記録ではない。** 「何が表示されていたか」の記録で、
+   * 価格・手数料率と同じスナップショット原則。あとから規約を改定しても
+   * 過去の注文は動かない。
+   * ⚠️ 規約が未公開なら `null`。**無いことを、無いまま残す。**
+   */
+  readonly termsVersionId: string | null;
+  readonly termsVersion: number | null;
   readonly now: Date;
 }
 
@@ -312,6 +322,17 @@ export interface PaymentRepository {
    * 返せるものが無い（指示書 §13「Webhook Payload 全文表示」は禁止）。
    */
   listWebhookReceipts(orderId: string): Promise<readonly WebhookReceiptRecord[]>;
+
+  /**
+   * その事業者から最後に知らせが届いた時刻。無ければ `null`。
+   *
+   * ⚠️ **注文に紐づかないものも数える。** 宛先の設定が誤っていると、
+   * こちらの注文に一致しない知らせだけが届く。それでも「届いてはいる」
+   * ことは、設定を直す人にとって重要な手掛かりになる。
+   *
+   * ⚠️ **本文も署名も返さない。** 返すのは時刻だけ。
+   */
+  findLastWebhookReceivedAt(provider: string): Promise<Date | null>;
 
   /** 支払い口を記録する。⚠️ 同じ冪等キーなら既存を返す。 */
   recordCheckoutSession(command: RecordCheckoutSessionCommand): Promise<PaymentAttemptView>;

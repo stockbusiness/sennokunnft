@@ -65,7 +65,7 @@ export class PaymentWebhookService {
       return false;
     }
 
-    const verified = this.gateway.verifyAndParseWebhook(rawBody, signatureHeader);
+    const verified = await this.gateway.verifyAndParseWebhook(rawBody, signatureHeader);
     if (!verified.ok) {
       // ⚠️ 本文を記録しない。何が届いたかは事業者側のダッシュボードで見る。
       await this.audit.record({

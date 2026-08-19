@@ -65,8 +65,12 @@ const apiServer: ServerSpec = {
     */
     PAYMENT_PROVIDER: 'fake',
     PAYMENT_WEBHOOK_SECRET: E2E_WEBHOOK_SECRET,
-    // ✅ 承認済み 20%。0 のままだと支払い口を作れない。
-    PLATFORM_FEE_RATE_BPS: '2000',
+    /*
+      ⚠️ **手数料率はここでは渡さない**（2026-08-19 決定）。正は DB だけで、
+         環境変数へ落ちない。E2E で 20% が効くのは、マイグレーション
+         `20260819110000_platform_fee_rate_seed` が DB へ 2000 を
+         入れているため。ここに書き足すと二重管理が復活する。
+    */
     LOG_LEVEL: 'warn',
   },
 };

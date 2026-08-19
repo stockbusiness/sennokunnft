@@ -65,10 +65,10 @@ export class FakePaymentGateway implements PaymentGatewayPort {
    * ⚠️ **検証を通るまで本文を解釈しない。** 検証前の本文は
    * 攻撃者が中身を決められるデータで、記録もしない。
    */
-  verifyAndParseWebhook(
+  async verifyAndParseWebhook(
     rawBody: Buffer,
     signatureHeader: string,
-  ): Result<ProviderPaymentFact, DomainError> {
+  ): Promise<Result<ProviderPaymentFact, DomainError>> {
     const parsed = parseSignatureHeader(signatureHeader);
     if (parsed === null) {
       return err(domainError('WEBHOOK_SIGNATURE_INVALID', 'signature header is malformed'));

@@ -48,3 +48,10 @@ export {
   PrismaStaffMemberRepository,
 } from './repositories/staff.repository';
 export { PrismaIntegrationRepository } from './repositories/integration.repository';
+
+export { PrismaPlatformFeeRateReader } from './repositories/platform-fee-rate.repository';
+
+export {
+  PrismaLegalDocumentRepository,
+  PrismaLegalConsentRepository,
+} from './repositories/legal.repository';

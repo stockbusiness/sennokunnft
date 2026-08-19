@@ -2,9 +2,11 @@ import {
   artworkDetailSchema,
   artworkListResponseSchema,
   publicListingSchema,
+  publicLegalDocumentSchema,
   type ArtworkDetail,
   type ArtworkListResponse,
   type PublicListing,
+  type PublicLegalDocument,
 } from '@sengoku/contracts';
 import { getWebEnv } from './env';
 
@@ -102,6 +104,26 @@ export async function fetchPublicListing(id: string): Promise<FetchResult<Public
   }
 
   const parsed = publicListingSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid_response' };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * 法務文書（利用規約・プライバシーポリシー・特商法表記）。
+ *
+ * ⚠️ **施行中の版だけが返る。** 下書きも、施行日が来ていない版も出ない。
+ * 何も無ければ `version` は `null` で、画面は「準備中」と出す。
+ * 空の文を作って取り繕わない。無いことが分かるほうがよい。
+ */
+export async function fetchLegalDocument(kind: string): Promise<FetchResult<PublicLegalDocument>> {
+  const response = await fetchJson(`/api/v1/legal/${encodeURIComponent(kind)}`);
+  if (response === null || !response.ok) {
+    return { ok: false, reason: response?.status === 404 ? 'not_found' : 'unavailable' };
+  }
+
+  const parsed = publicLegalDocumentSchema.safeParse(await response.json());
   if (!parsed.success) {
     return { ok: false, reason: 'invalid_response' };
   }

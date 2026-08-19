@@ -52,6 +52,13 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PAYMENT_PROVIDER_ERROR: HttpStatus.BAD_GATEWAY,
   // ⚠️ 401 にしない。誰かの資格情報の問題ではなく、署名が合っていない。
   WEBHOOK_SIGNATURE_INVALID: HttpStatus.BAD_REQUEST,
+  // --- 決済の設定（管理画面から変える分）---
+  // 運営の入力の誤り。利用者には出ない。
+  PAYMENT_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
+  PAYMENT_SECRET_INVALID: HttpStatus.BAD_REQUEST,
+  PAYMENT_SECRET_ENVIRONMENT_MISMATCH: HttpStatus.BAD_REQUEST,
+  // ⚠️ 「壊れている」ではなく「止めてある」。運営が戻せる。
+  PAYMENT_PROVIDER_DISABLED: HttpStatus.CONFLICT,
   // --- 運営スタッフの招待と権限（`UD-803`）---
   STAFF_INVITE_INVALID: HttpStatus.BAD_REQUEST,
   // ⚠️ 「宛先が違う」も「もう使えない」もこれ 1 つ。
@@ -87,6 +94,16 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   //    ときにだけ立ち、運用ログとアラートで扱う。万一 HTTP へ漏れたときに
   //    利用者の入力のせいに見せないよう 5xx 側へ置く。
   WALLET_EVENT_INVALID: HttpStatus.INTERNAL_SERVER_ERROR,
+  // --- 法務文書 ---
+  // ⚠️ 403 にしない。権限の話ではなく、公開済みの版は誰であっても
+  //    書き換えられない。
+  LEGAL_VERSION_NOT_DRAFT: HttpStatus.CONFLICT,
+  LEGAL_DOCUMENT_INVALID: HttpStatus.BAD_REQUEST,
+  // ⚠️ 400 にしない。送った内容の形は正しく、足りないだけ。
+  LEGAL_DOCUMENT_INCOMPLETE: HttpStatus.CONFLICT,
+  LEGAL_EFFECTIVE_DATE_INVALID: HttpStatus.BAD_REQUEST,
+  // 画面が古い。読み込み直せば直る。
+  LEGAL_CONSENT_VERSION_MISMATCH: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -138,6 +155,17 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'ただいまお支払いのお手続きができませんでした。しばらくしてからお試しください。',
   // 外へ返す想定が無い。Webhook の送信元にだけ返る。
   WEBHOOK_SIGNATURE_INVALID: 'ただいま処理できませんでした。',
+  /*
+    ⚠️ **設定の誤りは、運営にだけ具体的に伝える。** これらは管理画面の
+       操作でしか出ない。利用者に見える経路（購入）では
+       `SALES_SETUP_INCOMPLETE` に倒れる。
+  */
+  PAYMENT_SETTINGS_INVALID: '決済の設定に誤りがあります。入力内容をご確認ください。',
+  PAYMENT_SECRET_INVALID: '鍵の形式が正しくありません。貼り付ける値をご確認ください。',
+  PAYMENT_SECRET_ENVIRONMENT_MISMATCH:
+    'この環境では使えない鍵です。本番用とテスト用を取り違えていないかご確認ください。',
+  PAYMENT_PROVIDER_DISABLED:
+    '決済連携が停止されています。管理画面の「外部連携」からご確認ください。',
   STAFF_INVITE_INVALID: 'この内容では招待できません。宛先と役割をご確認ください。',
   STAFF_INVITE_NOT_OPEN: 'この招待はお使いいただけません。',
   STAFF_INVITE_EXPIRED: 'この招待は期限が過ぎています。もう一度お送りください。',
@@ -167,6 +195,14 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   COMMON_USER_MISMATCH: 'この受取りは、ご購入されたご本人のアカウントでお受け取りください。',
   // 利用者に原因は無い。何が起きたかは伝えず、時間をおいて試せることだけ伝える。
   WALLET_EVENT_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
+  LEGAL_VERSION_NOT_DRAFT:
+    'すでに公開されている版は書き換えられません。新しい版を作成してください。',
+  LEGAL_DOCUMENT_INVALID: '入力内容を確認してください。HTMLタグは使用できません。',
+  LEGAL_DOCUMENT_INCOMPLETE: '公開に必要な項目が入力されていません。',
+  LEGAL_EFFECTIVE_DATE_INVALID:
+    '適用開始日は、現在より後で、いま適用中の版より後の日時にしてください。',
+  LEGAL_CONSENT_VERSION_MISMATCH:
+    '規約が更新されました。お手数ですが、画面を読み込み直してからご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

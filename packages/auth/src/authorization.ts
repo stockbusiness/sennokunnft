@@ -43,6 +43,20 @@ export const ACTIONS = [
   'integration.manage',
   'integration.manage_secret',
   'wallet_delivery.retry',
+  // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
+  // ⚠️ 下書きは運営スタッフが書ける。**公開はオーナーだけ**（下の
+  //    `OWNER_ONLY_ACTIONS`）。公開した版は取り消せず、そこに書いた
+  //    ことは購入者への約束になるため、書く人と決める人を分ける。
+  'legal.view',
+  'legal.edit',
+  'legal.publish',
+  /**
+   * 自分の同意を確かめ、同意する（`UD-126`）。
+   *
+   * ⚠️ **会員なら誰でも持つ。** 同意するのは本人で、代理はできない。
+   * 運営に免除を与えない（`OWNERSHIP_RULES` の `claim.accept` と同じ考え方）。
+   */
+  'legal.consent',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -103,6 +117,7 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'claim.accept',
     'claim.reissue',
     'collection.view',
+    'legal.consent',
   ],
   operator: [
     'artwork.view_public',
@@ -130,6 +145,12 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     // ⚠️ 再送はオーナーの印を要らない。運営の日常業務であり、
     //    送る内容は Outbox に確定済みで、新しく何かを決める操作ではない。
     'wallet_delivery.retry',
+    'legal.view',
+    'legal.edit',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'legal.publish',
+    // 運営も利用者として同意する。
+    'legal.consent',
   ],
   auditor: [
     'artwork.view_public',
@@ -140,6 +161,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'audit_log.view',
     // 状態と履歴は見られるが、変更も再送もできない（指示書 §8）。
     'integration.view',
+    // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
+    //    確かめるのは、まさに監査の仕事。
+    'legal.view',
+    'legal.consent',
   ],
 };
 
@@ -171,6 +196,10 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   //    運営の 1 人が乗っ取られただけで、送信先ごと差し替えられてしまう。
   'integration.manage',
   'integration.manage_secret',
+  // ⚠️ **公開はオーナーだけ。** 公開した版は取り消せない（新しい版を
+  //    足すことしかできない）。書いた内容は購入者への約束になるので、
+  //    下書き（`legal.edit`）と決裁を分ける。
+  'legal.publish',
 ];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {

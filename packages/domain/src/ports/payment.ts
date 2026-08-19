@@ -63,9 +63,13 @@ export interface PaymentGatewayPort {
    * ⚠️ **署名を確かめる前の生のバイト列を渡すこと。** JSON にして
    * 組み直したものでは、空白や順序が変わって署名が合わなくなる。
    * 合わせるために署名検証を緩めると、誰でも「決済成功」を送れる。
+   *
+   * ⚠️ **非同期なのは、署名鍵を毎回引き直すため。** 管理画面から鍵を
+   * 差し替えたら次の通知から効いてほしい。起動時に読んだ値を持ち回ると、
+   * 「差し替えたのに古い鍵で検証し続ける」という、気づきにくい形で壊れる。
    */
   verifyAndParseWebhook(
     rawBody: Buffer,
     signatureHeader: string,
-  ): Result<ProviderPaymentFact, DomainError>;
+  ): Promise<Result<ProviderPaymentFact, DomainError>>;
 }

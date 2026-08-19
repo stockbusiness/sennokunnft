@@ -24,8 +24,28 @@ import {
 import { DomainErrorException } from '../common/domain-error.filter';
 
 export interface OrderServiceConfig {
-  /** 注文時点の手数料率（bps）。⚠️ 設定から来る。ブラウザからは来ない。 */
-  readonly platformFeeRateBps: number;
+  /**
+   * 注文時点の手数料率（bps）を引く。
+   *
+   * ⚠️ **設定から来る。ブラウザからは来ない。**
+   * ⚠️ **呼び出しのたびに引く。** 管理画面で率を変えたら、次の注文から
+   * 効いてほしい。起動時に読んだ値を持ち回ると、変えたのに効かない。
+   * 引いた値は注文へスナップショットされるので、**過去の注文は動かない。**
+   */
+  readonly resolvePlatformFeeRateBps: () => Promise<number>;
+  /**
+   * 注文時点で施行されていた利用規約の版を引く（`UD-126`）。
+   *
+   * ⚠️ **同意を確かめる口ではない。** 同意は会員登録のときに取り、
+   * ここは「何が表示されていたか」を注文へ残すためだけに引く。
+   * ⚠️ 規約が未公開の配備では `null` を返す。**注文を止めない。**
+   * 止めると、規約を公開する前に手元で試すことができなくなる。
+   * 「規約が無いまま販売しない」は公開前の手順で守る（`UD-111`）。
+   */
+  readonly resolveEffectiveTerms: () => Promise<{
+    readonly id: string;
+    readonly version: number;
+  } | null>;
   readonly reservationMinutes: number;
 }
 
@@ -105,7 +125,7 @@ export class OrderService {
       creatorAccountId: artwork.creatorAccountId,
       counters: artwork,
       quantity: 1,
-      platformFeeRateBps: this.config.platformFeeRateBps,
+      platformFeeRateBps: await this.config.resolvePlatformFeeRateBps(),
       now,
       reservationMinutes: this.config.reservationMinutes,
     });
@@ -146,6 +166,12 @@ export class OrderService {
       reservationId: this.ids.generate(),
       reservationExpiresAt: draft.value.reservationExpiresAt,
       quantity: item.quantity,
+      /*
+        ⚠️ **その時点の規約の版を注文へ残す**（`UD-126`）。同意の記録では
+           なく「何が表示されていたか」の記録。あとから改定しても
+           この注文は動かない。未公開なら null のまま残す。
+      */
+      ...termsSnapshot(await this.config.resolveEffectiveTerms()),
       now,
     };
 
@@ -352,4 +378,19 @@ function toAdminView(order: OrderView): AdminOrderView {
     entitlementCount: order.entitlementCount,
     idempotencyKeyPrefix: order.idempotencyKeyPrefix,
   };
+}
+
+/**
+ * 注文へ残す規約の版。
+ *
+ * ⚠️ **無ければ両方 null。** 片方だけ埋まった行は DB の CHECK が弾く
+ * （`orders_terms_version_pair`）。それらしい版を埋めて取り繕わない。
+ */
+function termsSnapshot(terms: { readonly id: string; readonly version: number } | null): {
+  readonly termsVersionId: string | null;
+  readonly termsVersion: number | null;
+} {
+  return terms === null
+    ? { termsVersionId: null, termsVersion: null }
+    : { termsVersionId: terms.id, termsVersion: terms.version };
 }

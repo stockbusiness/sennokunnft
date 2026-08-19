@@ -20,6 +20,8 @@ import type {
   StaffInvitationRepository,
   StaffMemberRepository,
   IntegrationRepository,
+  LegalDocumentRepository,
+  LegalConsentRepository,
   AuditLogReadPort,
   OrderRepository,
   PaymentRepository,
@@ -61,7 +63,10 @@ import { ArtworkImageService, type StorageKeyFactory } from './catalog/image.ser
 import { StaffController, StaffInvitationAcceptController } from './staff/staff.controller';
 import { StaffService } from './staff/staff.service';
 import { IntegrationController } from './integration/integration.controller';
-import { IntegrationService_ } from './integration/integration.service';
+import {
+  IntegrationService_,
+  type PaymentDeploymentStatus,
+} from './integration/integration.service';
 import { WalletDeliveryController } from './wallet-delivery/wallet-delivery.controller';
 import { WalletDeliveryAdminService } from './wallet-delivery/wallet-delivery.service';
 import {
@@ -78,6 +83,12 @@ import {
   InternalJobsController,
   type InternalJobConfig,
 } from './order/internal-jobs.controller';
+import {
+  AdminLegalController,
+  LegalConsentController,
+  PublicLegalController,
+} from './legal/legal.controller';
+import { LegalService } from './legal/legal.service';
 import { AuditLogController } from './audit/audit.controller';
 import { AuditLogQueryService } from './audit/audit.service';
 import { HealthController } from './health/health.controller';
@@ -126,6 +137,13 @@ export interface AppDependencies {
      * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
      */
     readonly describeEnvironment: (service: IntegrationServiceName) => EnvIntegrationSummary;
+    /**
+     * 決済の配備側の状態。
+     *
+     * ⚠️ **鍵そのもの・先頭・末尾を返させない。** 返すのは
+     * 「設定されているか」「テストか本番か」「最後に知らせが届いた時刻」まで。
+     */
+    readonly describePaymentDeployment: () => Promise<PaymentDeploymentStatus>;
     readonly repository: IntegrationRepository & {
       ensureSettings(
         id: string,
@@ -152,6 +170,17 @@ export interface AppDependencies {
   };
   /** 監査ログの閲覧（指示書 §5）。 */
   readonly auditLogs?: AuditLogReadPort;
+  /**
+   * 法務文書（利用規約・プライバシーポリシー・特商法表記）。
+   *
+   * ⚠️ **無い環境では経路ごと生やさない。** 公開ページの口だけが開いて
+   * 500 を返すより、404 のほうが原因が分かる。
+   */
+  readonly legalDocuments?: {
+    readonly documents: LegalDocumentRepository;
+    /** 規約への同意（`UD-126`）。 */
+    readonly consents: LegalConsentRepository;
+  };
   readonly idempotency: IdempotencyStore;
   /**
    * 注文と在庫の仮引当（決済 Phase P0・P1）。
@@ -167,7 +196,18 @@ export interface AppDependencies {
     readonly repository: OrderRepository;
     readonly commonUserLinks: CommonUserLinkRepository;
     readonly random: RandomPort;
-    readonly platformFeeRateBps: number;
+    /** ⚠️ 呼び出しのたびに引く。管理画面で変えたら次の注文から効く。 */
+    readonly resolvePlatformFeeRateBps: () => Promise<number>;
+    /**
+     * 注文時点で施行されていた規約の版（`UD-126`）。
+     *
+     * ⚠️ **同意を確かめる口ではない。** 注文へ「何が表示されていたか」を
+     * 残すためだけに引く。未公開なら `null` を返し、**注文を止めない**。
+     */
+    readonly resolveEffectiveTerms: () => Promise<{
+      readonly id: string;
+      readonly version: number;
+    } | null>;
     readonly reservationMinutes: number;
     readonly internalJobToken?: string | undefined;
   };
@@ -267,6 +307,7 @@ export class AppModule implements NestModule {
     const integrations = deps.integrations;
     const walletDeliveries = deps.walletDeliveries;
     const auditLogs = deps.auditLogs;
+    const legalDocuments = deps.legalDocuments;
     const internalJobToken = deps.orders.internalJobToken;
     const payments = deps.payments;
     return {
@@ -288,6 +329,9 @@ export class AppModule implements NestModule {
         ...(integrations === undefined ? [] : [IntegrationController]),
         ...(walletDeliveries === undefined ? [] : [WalletDeliveryController]),
         ...(auditLogs === undefined ? [] : [AuditLogController]),
+        ...(legalDocuments === undefined
+          ? []
+          : [PublicLegalController, AdminLegalController, LegalConsentController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
       ],
       providers: [
@@ -349,7 +393,8 @@ export class AppModule implements NestModule {
               deps.orders.random,
               deps.audit,
               {
-                platformFeeRateBps: deps.orders.platformFeeRateBps,
+                resolvePlatformFeeRateBps: deps.orders.resolvePlatformFeeRateBps,
+                resolveEffectiveTerms: deps.orders.resolveEffectiveTerms,
                 reservationMinutes: deps.orders.reservationMinutes,
               },
             ),
@@ -407,6 +452,7 @@ export class AppModule implements NestModule {
                     integrations.appEnvironment,
                     integrations.probe,
                     integrations.describeEnvironment,
+                    integrations.describePaymentDeployment,
                   ),
               },
             ]),
@@ -430,6 +476,20 @@ export class AppModule implements NestModule {
               {
                 provide: AuditLogQueryService,
                 useFactory: () => new AuditLogQueryService(auditLogs),
+              },
+            ]),
+        ...(legalDocuments === undefined
+          ? []
+          : [
+              {
+                provide: LegalService,
+                useFactory: () =>
+                  new LegalService(
+                    legalDocuments.documents,
+                    deps.clock,
+                    deps.audit,
+                    legalDocuments.consents,
+                  ),
               },
             ]),
         {

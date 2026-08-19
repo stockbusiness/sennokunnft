@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import type { CreateOrderCommand } from '@sengoku/domain';
 import type { PrismaClient } from '../../generated/client';
 import { PrismaOrderRepository } from '../../src/repositories/order.repository';
-import { createTestClient, integrationTestsAvailable, resetDatabase } from '../helpers/database';
+import {
+  createTestClient,
+  integrationTestsAvailable,
+  resetDatabase,
+  violatesConstraint,
+} from '../helpers/database';
 
 /**
  * 注文リポジトリを実 PostgreSQL に対して確かめる。
@@ -77,6 +82,9 @@ function command(seeded: Seeded, overrides: Partial<CreateOrderCommand> = {}): C
     commonUserId: null,
     creatorAccountId: seeded.creatorAccountId,
     idempotencyKey: randomUUID(),
+    // 規約が未公開の配備を模す。注文は止まらない（`UD-126`）。
+    termsVersionId: null,
+    termsVersion: null,
     currency: 'JPY',
     amounts: {
       subtotalAmount: 3000,
@@ -277,5 +285,25 @@ suite('期限切れ予約の解放', () => {
     const retry = await repo.createWithReservation(command(seeded));
 
     expect(retry.ok && retry.value.kind).toBe('created');
+  });
+
+  /*
+    注文時点の規約の版（`UD-126`）。
+    ⚠️ **片方だけ入った行を作らせない。** ID だけ・番号だけの行は、
+       「どの版だったか」を答えられないのに答えられるように見える。
+  */
+  it('規約の版は、ID と番号の両方が揃っていなければ入らない', async () => {
+    const seeded = await seed(1);
+    const created = await repo.createWithReservation(command(seeded));
+    if (!created.ok || created.value.kind !== 'created') {
+      throw new Error('order not created');
+    }
+
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE "orders" SET "terms_version" = 3 WHERE id = $1::uuid`,
+        created.value.order.id,
+      ),
+    ).rejects.toSatisfy((error: unknown) => violatesConstraint(error, 'orders_terms_version_pair'));
   });
 });

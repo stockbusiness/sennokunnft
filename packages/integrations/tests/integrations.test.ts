@@ -172,9 +172,9 @@ describe('FakePaymentGateway の署名検証（TEST_STRATEGY §3.7）', () => {
     data: { order_id: 'order-1', amount: 12000, currency: 'jpy' },
   };
 
-  it('正しい署名の通知を受理し、業務の事象へ畳む', () => {
+  it('正しい署名の通知を受理し、業務の事象へ畳む', async () => {
     const { rawBody, header } = signed(EVENT);
-    const result = gateway.verifyAndParseWebhook(rawBody, header);
+    const result = await gateway.verifyAndParseWebhook(rawBody, header);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.eventId).toBe('evt_1');
@@ -185,48 +185,48 @@ describe('FakePaymentGateway の署名検証（TEST_STRATEGY §3.7）', () => {
     }
   });
 
-  it('署名が不正なら拒否する（W-1）', () => {
+  it('署名が不正なら拒否する（W-1）', async () => {
     const { rawBody, header } = signed(EVENT, { secret: 'wrong-secret' });
-    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(rawBody, header)).ok).toBe(false);
   });
 
-  it('本文が改竄されていたら拒否する（W-4）', () => {
+  it('本文が改竄されていたら拒否する（W-4）', async () => {
     const { header } = signed(EVENT);
     const tampered = Buffer.from(JSON.stringify({ id: 'evt_2', type: 'x' }), 'utf8');
-    expect(gateway.verifyAndParseWebhook(tampered, header).ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(tampered, header)).ok).toBe(false);
   });
 
-  it('タイムスタンプが古すぎる通知を拒否する（W-3 リプレイ）', () => {
+  it('タイムスタンプが古すぎる通知を拒否する（W-3 リプレイ）', async () => {
     const { rawBody, header } = signed(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS + 1000) });
-    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(rawBody, header)).ok).toBe(false);
   });
 
-  it('許容範囲内の時刻ずれは受理する', () => {
+  it('許容範囲内の時刻ずれは受理する', async () => {
     const { rawBody, header } = signed(EVENT, { skewMs: -(WEBHOOK_TOLERANCE_MS - 60_000) });
-    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(true);
+    expect((await gateway.verifyAndParseWebhook(rawBody, header)).ok).toBe(true);
   });
 
-  it('署名ヘッダの形式が不正なら拒否する', () => {
+  it('署名ヘッダの形式が不正なら拒否する', async () => {
     const { rawBody } = signed(EVENT);
-    expect(gateway.verifyAndParseWebhook(rawBody, 'garbage').ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(rawBody, 'garbage')).ok).toBe(false);
   });
 
-  it('署名は正しいが本文が JSON でなければ拒否する', () => {
+  it('署名は正しいが本文が JSON でなければ拒否する', async () => {
     const rawBody = Buffer.from('not-json', 'utf8');
     const timestampSec = Math.floor(NOW.getTime() / 1000);
     const header = `t=${String(timestampSec)},v1=${signWebhookPayload(SECRET, timestampSec, rawBody)}`;
-    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(rawBody, header)).ok).toBe(false);
   });
 
-  it('イベントIDのない通知を拒否する（冪等排除ができないため）', () => {
+  it('イベントIDのない通知を拒否する（冪等排除ができないため）', async () => {
     const { rawBody, header } = signed({ type: 'payment.succeeded' });
-    expect(gateway.verifyAndParseWebhook(rawBody, header).ok).toBe(false);
+    expect((await gateway.verifyAndParseWebhook(rawBody, header)).ok).toBe(false);
   });
 
-  it('知らないイベントは ignored へ畳む（拒否しない）', () => {
+  it('知らないイベントは ignored へ畳む（拒否しない）', async () => {
     // ⚠️ 拒否すると相手が再送し続ける。受け取って無視する。
     const { rawBody, header } = signed({ id: 'evt_9', type: 'charge.updated' });
-    const result = gateway.verifyAndParseWebhook(rawBody, header);
+    const result = await gateway.verifyAndParseWebhook(rawBody, header);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.kind).toBe('ignored');

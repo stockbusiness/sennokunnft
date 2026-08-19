@@ -130,12 +130,79 @@ export {
   disableIntegration,
   enableIntegration,
   isCheckFresh,
+  requiredSecretPurposes,
+  storesSecrets,
   updateSettings,
   type EnableInput,
   type IntegrationSettings,
   type UpdateSettingsInput,
   type UpdatedSettings,
 } from './integration/settings';
+
+export {
+  isSalesSetupComplete,
+  updatePaymentSettings,
+  validateSecretKeyForEnvironment,
+  validateWebhookSecret,
+  ORDER_ID_PLACEHOLDER,
+  PAYMENT_API_ENDPOINT,
+  PAYMENT_LIVE_KEY_PREFIX,
+  PAYMENT_TEST_KEY_PREFIX,
+  PAYMENT_WEBHOOK_SECRET_PREFIX,
+  PLATFORM_FEE_RATE_BPS_MAX,
+  type PaymentSettingsFields,
+  type UpdatePaymentSettingsInput,
+} from './integration/payment-settings';
+
+// --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------
+
+export {
+  LEGAL_BODY_MAX,
+  LEGAL_DOCUMENT_KINDS,
+  LEGAL_TITLE_MAX,
+  LEGAL_VERSION_STATUSES,
+  TOKUSHOHO_FIELD_KEYS,
+  TOKUSHOHO_FIELD_MAX,
+  effectiveVersion,
+  isLegalDocumentKind,
+  missingTokushohoFields,
+  publish as publishLegalVersion,
+  saveDraft as saveLegalDraft,
+  type LegalDocumentKind,
+  type LegalDocumentVersion,
+  type LegalVersionStatus,
+  type PublishInput as PublishLegalVersionInput,
+  type SaveDraftInput as SaveLegalDraftInput,
+  type TokushohoFields,
+} from './legal/document';
+
+export {
+  renderLegalBody,
+  versionLabel,
+  type LegalBlock,
+  type LegalVersionLabel,
+} from './legal/render';
+
+export {
+  CONSENT_REQUIRED_KINDS,
+  evaluateConsentRequirement,
+  requiresConsent,
+  snapshotForOrder,
+  type ConsentRequiredKind,
+  type ConsentRequirement,
+  type ConsentRequirementInput,
+  type LegalConsentRecord,
+  type OrderLegalSnapshot,
+} from './legal/consent';
+
+export type {
+  LegalDocumentRepository,
+  LegalConsentRepository,
+  CreateLegalDraftCommand,
+  SaveLegalDraftCommand,
+  PublishLegalVersionCommand,
+  RecordConsentCommand,
+} from './ports/legal';
 
 export {
   createListing,
