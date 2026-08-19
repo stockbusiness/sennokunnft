@@ -53,6 +53,10 @@ import {
 import { describeIntegrationEnvironment } from './integration/environment-summary';
 import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
+import {
+  assertDecoratorMetadata,
+  DecoratorMetadataMissingError,
+} from './common/decorator-metadata';
 import { NestStructuredLogger } from './common/nest-logger';
 import type { DependencyProbe } from './health/health.service';
 
@@ -62,6 +66,7 @@ const VERSION = '0.1.0';
  * API プロセスの起動。
  *
  * 起動順序に意味がある:
+ *  0. 実行環境が型の情報を残しているかを確かめる
  *  1. 環境変数を検証する（不足していれば**この時点で異常終了**する）
  *  2. 設定の組み合わせが安全かを検査する
  *  3. アプリケーションを組み立てる
@@ -70,6 +75,26 @@ const VERSION = '0.1.0';
  * 検証を通過するまでサーバーを立ち上げない。
  */
 async function bootstrap(): Promise<void> {
+  /*
+    0. 実行環境の検査。
+
+    ⚠️ **環境変数より前に見る。** ここが崩れていると、環境変数が
+       すべて揃っていても全エンドポイントが 500 を返す。しかも起動は
+       成功したように見え、エラーログも出ない。順番を後ろへ動かさないこと。
+
+    ⚠️ **logger より前なので `console` を使う。** logger の生成にも
+       設定が要るが、ここで止めたい相手は設定とは無関係の壊れ方である。
+  */
+  try {
+    assertDecoratorMetadata();
+  } catch (error) {
+    if (error instanceof DecoratorMetadataMissingError) {
+      console.error(`api を起動できません。\n\n${error.message}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+
   // 1. 環境変数の検証。失敗時は変数名のみを出力してプロセスを終了する。
   const env = loadEnv(apiEnvSchema);
 
