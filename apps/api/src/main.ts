@@ -12,6 +12,8 @@ import {
   loadEnv,
   parseHmacKeys,
   UnsafeEnvironmentError,
+  STRIPE_TEST_KEY_PREFIX,
+  STRIPE_LIVE_KEY_PREFIX,
 } from '@sengoku/config';
 import { createLogger } from '@sengoku/observability';
 import {
@@ -30,6 +32,7 @@ import {
   PrismaIdempotencyStore,
   PrismaOrderRepository,
   PrismaPaymentRepository,
+  PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
   PrismaClaimRepository,
   PrismaNonceStore,
@@ -82,6 +85,26 @@ const VERSION = '0.1.0';
  * 「起動はしたが設定が欠けていて一部機能が壊れている」状態を作らないため、
  * 検証を通過するまでサーバーを立ち上げない。
  */
+/**
+ * 鍵からモードだけを取り出す。
+ *
+ * ⚠️ **判別した結果しか返さない。** 鍵そのものも、その一部も返さない。
+ * 画面が要るのは「取り違えていないか」を人が確かめられる粒度までで、
+ * 値そのものではない。
+ */
+function stripeMode(secretKey: string | undefined): 'test' | 'live' | 'unknown' {
+  if (secretKey === undefined || secretKey === '') {
+    return 'unknown';
+  }
+  if (secretKey.startsWith(STRIPE_TEST_KEY_PREFIX)) {
+    return 'test';
+  }
+  if (secretKey.startsWith(STRIPE_LIVE_KEY_PREFIX)) {
+    return 'live';
+  }
+  return 'unknown';
+}
+
 async function bootstrap(): Promise<void> {
   /*
     0. 実行環境の検査。
@@ -142,6 +165,13 @@ async function bootstrap(): Promise<void> {
 
   // 3. DB 接続。ここで初めて外部へ繋ぐ。
   const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
+
+  /*
+    決済の記録。⚠️ 決済を繋いでいない配備でも作る。管理画面の状態表示
+    （最後に知らせが届いた時刻）は、決済が無効でも見えたほうがよい。
+    「届いているのに処理されていない」ことに気づける唯一の手掛かりになる。
+  */
+  const paymentRepository = new PrismaPaymentRepository(prisma);
 
   const probes: DependencyProbe[] = [
     {
@@ -254,6 +284,21 @@ async function bootstrap(): Promise<void> {
         ⚠️ **値を渡さない。** 渡すのは方式と、欠けている設定の名前まで。
       */
       describeEnvironment: describeIntegrationEnvironment(env),
+      /*
+        決済の配備側の状態。
+        ⚠️ **鍵そのもの・先頭・末尾を渡さない**（2026-08-19 決定）。
+           渡すのは「設定されているか」「テストか本番か」まで。
+           モードは鍵の頭で判別するが、判別した結果しか外へ出さない。
+      */
+      describePaymentDeployment: async () => ({
+        secretKeyConfigured: (env.STRIPE_SECRET_KEY ?? '') !== '',
+        webhookSecretConfigured: (env.STRIPE_WEBHOOK_SECRET ?? '') !== '',
+        mode: stripeMode(env.STRIPE_SECRET_KEY),
+        lastWebhookReceivedAt:
+          paymentRepository === null
+            ? null
+            : await paymentRepository.findLastWebhookReceivedAt(env.PAYMENT_PROVIDER),
+      }),
       repository: new PrismaIntegrationRepository(
         prisma,
         new AeadSecretBox({ keys, activeKeyVersion: version }),
@@ -287,7 +332,7 @@ async function bootstrap(): Promise<void> {
   const paymentConfigResolver = createPaymentConfigResolver({
     integrations: integrations?.repository ?? null,
     appEnvironment: integrations?.appEnvironment ?? 'staging',
-    fallback:
+    deployment:
       env.PAYMENT_PROVIDER === 'stripe'
         ? {
             // 起動時のガード（`assertStripeConfig`）で存在を確認済み。
@@ -296,7 +341,6 @@ async function bootstrap(): Promise<void> {
             apiVersion: env.STRIPE_API_VERSION,
             successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
             cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
-            platformFeeRateBps: env.PLATFORM_FEE_RATE_BPS,
           }
         : null,
   });
@@ -332,9 +376,13 @@ async function bootstrap(): Promise<void> {
        あとから率を変えても**過去の注文は動かない**。
   */
   const resolvePlatformFeeRateBps = createPlatformFeeRateResolver({
-    integrations: integrations?.repository ?? null,
-    appEnvironment: integrations?.appEnvironment ?? 'staging',
-    fallbackBps: env.PLATFORM_FEE_RATE_BPS,
+    /*
+      ⚠️ **暗号鍵に依存させない。** 率は秘密ではないので、復号の仕組みを
+         通す理由が無い。`integrations`（暗号鍵が要る）に紐づけると、
+         鍵を置いていない配備で率が 0 に落ちる。
+    */
+    reader: new PrismaPlatformFeeRateReader(prisma),
+    appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
   });
 
   const app = await NestFactory.create(
@@ -383,7 +431,7 @@ async function bootstrap(): Promise<void> {
           ? undefined
           : {
               gateway: paymentGateway,
-              repository: new PrismaPaymentRepository(prisma),
+              repository: paymentRepository,
               provider: env.PAYMENT_PROVIDER,
               expectLivemode: env.APP_ENV === 'production',
               logger,

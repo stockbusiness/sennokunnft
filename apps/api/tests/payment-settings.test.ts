@@ -6,7 +6,7 @@ import {
   PAYMENT_TEST_KEY_PREFIX,
   PAYMENT_API_ENDPOINT,
   isSalesSetupComplete,
-  type IntegrationEnvironment,
+  storesSecrets,
   type IntegrationRepository,
   type IntegrationSettings,
   type PaymentSettingsFields,
@@ -41,31 +41,25 @@ const COMPLETE: PaymentSettingsFields = {
   platformFeeRateBps: 2000,
 };
 
-const ENV_FALLBACK = {
-  secretKey: `${PAYMENT_TEST_KEY_PREFIX}FROM_ENVIRONMENT`,
-  webhookSecret: 'whsec_FROM_ENVIRONMENT',
+/** 配備環境（Secret 管理）から読んだ設定。⚠️ 鍵はここにしか無い。 */
+const DEPLOYMENT = {
+  secretKey: `${PAYMENT_TEST_KEY_PREFIX}NOT_A_REAL_KEY`,
+  webhookSecret: 'whsec_NOT_A_REAL_SECRET',
   apiVersion: '2026-07-29.dahlia',
   successUrlTemplate: 'https://env.example.com/orders/{ORDER_ID}',
   cancelUrlTemplate: 'https://env.example.com/orders',
-  platformFeeRateBps: 1000,
 };
 
-const DB_SECRET_KEY = `${PAYMENT_TEST_KEY_PREFIX}FROM_DATABASE`;
-const DB_WEBHOOK_SECRET = 'whsec_FROM_DATABASE';
-
-/** 設定と鍵だけを持つ、最小限の保管庫。 */
-function repositoryDouble(options: {
-  readonly settings: IntegrationSettings | null;
-  readonly secrets?: Partial<Record<'api_key' | 'hmac_secret', string>>;
-}): IntegrationRepository {
-  const secrets = options.secrets ?? {};
+function repositoryDouble(settings: IntegrationSettings | null): IntegrationRepository {
   return {
-    findSettings: async () => options.settings,
-    revealForAdapter: async (
-      _service: string,
-      _environment: IntegrationEnvironment,
-      purpose: 'api_key' | 'hmac_secret',
-    ) => secrets[purpose] ?? null,
+    findSettings: async () => settings,
+    /*
+      ⚠️ **決済ではここが呼ばれてはいけない。** 呼ばれたら、鍵を保管庫から
+         読もうとしている。呼ばれたことが分かるよう例外を投げる。
+    */
+    revealForAdapter: async () => {
+      throw new Error('決済の鍵を保管庫から読もうとしています');
+    },
   } as unknown as IntegrationRepository;
 }
 
@@ -86,76 +80,41 @@ function settings(overrides: Partial<IntegrationSettings> = {}): IntegrationSett
   };
 }
 
+describe('決済の鍵は保管庫へ置かない', () => {
+  /*
+    2026-08-19 決定。鍵は配備環境の Secret 管理に置く。
+    画面から交換できる仕組みは、再認証・二者承認・ローテーション・
+    復旧経路まで揃えた別仕様として扱う。
+  */
+  it('決済は資格情報を預からない', () => {
+    expect(storesSecrets('payment')).toBe(false);
+  });
+
+  it('Wallet は従来どおり預かる', () => {
+    expect(storesSecrets('ovew_wallet')).toBe(true);
+  });
+
+  /* 保管庫を一切引かないこと。引いたら repositoryDouble が例外を投げる。 */
+  it('設定を解決するとき、保管庫から鍵を読まない', async () => {
+    const resolve = createPaymentConfigResolver({
+      integrations: repositoryDouble(settings()),
+      appEnvironment: 'staging',
+      deployment: DEPLOYMENT,
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.secretKey).toBe(DEPLOYMENT.secretKey);
+    }
+  });
+});
+
 describe('決済設定の解決', () => {
-  /*
-    管理画面で何も保存していない間は、配備時の設定で動き続ける。
-    ここが崩れると、この変更を入れた瞬間に既存の配備が決済できなくなる。
-  */
-  it('DB に鍵が無ければ環境変数を使う', async () => {
+  it('配備環境に鍵が無ければ決済できない', async () => {
     const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble({ settings: null }),
+      integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
-    });
-    const result = await resolve();
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.config.source).toBe('environment');
-      expect(result.config.secretKey).toBe(ENV_FALLBACK.secretKey);
-      expect(result.config.platformFeeRateBps).toBe(1000);
-    }
-  });
-
-  /* 保存したら次の呼び出しから効く。効かないと「保存できたのに効かない」。 */
-  it('DB に鍵があれば DB を使う', async () => {
-    const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble({
-        settings: settings(),
-        secrets: { api_key: DB_SECRET_KEY, hmac_secret: DB_WEBHOOK_SECRET },
-      }),
-      appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
-    });
-    const result = await resolve();
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.config.source).toBe('database');
-      expect(result.config.secretKey).toBe(DB_SECRET_KEY);
-      expect(result.config.successUrlTemplate).toBe(COMPLETE.checkoutSuccessUrl);
-      expect(result.config.platformFeeRateBps).toBe(2000);
-    }
-  });
-
-  /*
-    ⚠️ いちばん大事な検査。止めたのに環境変数へ落ちると、
-       管理画面の「停止」が効かない。事故を止める操作が効かないのが
-       いちばん困る。
-  */
-  it('DB 側で止めてあれば、環境変数へ落ちない', async () => {
-    const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble({
-        settings: settings({ enabled: false }),
-        secrets: { api_key: DB_SECRET_KEY, hmac_secret: DB_WEBHOOK_SECRET },
-      }),
-      appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
-    });
-    const result = await resolve();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('disabled');
-    }
-  });
-
-  /* 署名鍵が無いと、支払い口は作れても入金を確定できない。 */
-  it('署名鍵が欠けていれば使わない', async () => {
-    const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble({
-        settings: settings(),
-        secrets: { api_key: DB_SECRET_KEY },
-      }),
-      appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
+      deployment: null,
     });
     const result = await resolve();
     expect(result.ok).toBe(false);
@@ -164,39 +123,136 @@ describe('決済設定の解決', () => {
     }
   });
 
-  it('手数料率 0 のままなら使わない', async () => {
+  it('署名鍵だけ欠けていても決済できない', async () => {
     const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble({
-        settings: settings({ payment: { ...COMPLETE, platformFeeRateBps: 0 } }),
-        secrets: { api_key: DB_SECRET_KEY, hmac_secret: DB_WEBHOOK_SECRET },
-      }),
+      integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
+      deployment: { ...DEPLOYMENT, webhookSecret: '' },
     });
-    const result = await resolve();
-    expect(result.ok).toBe(false);
+    expect((await resolve()).ok).toBe(false);
   });
 
-  it('保管庫が無ければ環境変数で動く', async () => {
+  /* 戻り先は DB が正。保存したら次の呼び出しから効く。 */
+  it('DB に戻り先があれば DB を使う', async () => {
     const resolve = createPaymentConfigResolver({
-      integrations: null,
+      integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
-      fallback: ENV_FALLBACK,
+      deployment: DEPLOYMENT,
     });
     const result = await resolve();
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.config.source).toBe('environment');
+      expect(result.config.settingsSource).toBe('database');
+      expect(result.config.successUrlTemplate).toBe(COMPLETE.checkoutSuccessUrl);
     }
   });
 
-  it('保管庫も環境変数も無ければ、決済できない', async () => {
+  it('DB に戻り先が無ければ配備環境の値を使う', async () => {
     const resolve = createPaymentConfigResolver({
-      integrations: null,
+      integrations: repositoryDouble(
+        settings({ payment: { ...COMPLETE, checkoutSuccessUrl: null } }),
+      ),
       appEnvironment: 'staging',
-      fallback: null,
+      deployment: DEPLOYMENT,
     });
-    expect((await resolve()).ok).toBe(false);
+    const result = await resolve();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.settingsSource).toBe('environment');
+      expect(result.config.successUrlTemplate).toBe(DEPLOYMENT.successUrlTemplate);
+    }
+  });
+
+  /*
+    ⚠️ いちばん大事な検査。止めたのに配備環境の値へ落ちると、
+       管理画面の「停止」が効かない。事故を止める操作が効かないのが
+       いちばん困る。
+  */
+  it('DB 側で止めてあれば、配備環境の値へ落ちない', async () => {
+    const resolve = createPaymentConfigResolver({
+      integrations: repositoryDouble(settings({ enabled: false })),
+      appEnvironment: 'staging',
+      deployment: DEPLOYMENT,
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('disabled');
+    }
+  });
+});
+
+describe('手数料率の解決', () => {
+  /** 率だけを返す口。⚠️ 暗号鍵も保管庫も要らない。 */
+  function feeReader(bps: number) {
+    return { readPlatformFeeRateBps: async () => bps };
+  }
+
+  /*
+    ⚠️ **正は DB だけ**（2026-08-19 決定）。環境変数へ落とすと、
+       DB と環境変数で違う値が使われる「二重管理」になる。
+       ずれに気づくのは請求の段階になる。
+  */
+  it('DB の値をそのまま使う', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      reader: feeReader(1500),
+      appEnvironment: 'staging',
+    });
+    expect(await resolve()).toBe(1500);
+  });
+
+  /* 未設定なら 0 のまま。ここで既定値を作らない。 */
+  it('DB に行が無ければ 0（販売設定未完了）', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      reader: feeReader(0),
+      appEnvironment: 'staging',
+    });
+    expect(await resolve()).toBe(0);
+  });
+
+  it('DB の値が 0 なら 0（既定値を入れない）', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      reader: feeReader(0),
+      appEnvironment: 'staging',
+    });
+    expect(await resolve()).toBe(0);
+  });
+
+  /*
+    ⚠️ **暗号鍵の有無に左右されないこと。** 率は秘密ではないので、
+       復号の仕組みを通す理由が無い。紐づけていたせいで、鍵を置いて
+       いない配備（E2E・手元）で率が 0 に落ちかけた。
+  */
+  it('暗号鍵を置いていない配備でも読める', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      reader: feeReader(2000),
+      appEnvironment: 'staging',
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  /*
+    ⚠️ 「連携を止める」のはお金の受け口であって、取り分の約束ではない。
+       止めるたびに 0 へ戻すと、再開したときに手数料が消えていることに
+       気づけない。
+  */
+  it('連携を止めていても、率は変わらない', async () => {
+    const resolve = createPlatformFeeRateResolver({
+      reader: feeReader(2000),
+      appEnvironment: 'staging',
+    });
+    expect(await resolve()).toBe(2000);
+  });
+
+  /*
+    ⚠️ **二重管理を作らないことの検査。** 解決する関数が環境変数を
+       受け取れないこと自体を、型ではなく実物で確かめる。引数を足した
+       だけで黙って読み始める、という形の後退を防ぐ。
+  */
+  it('解決する関数は環境変数を受け取らない', () => {
+    const source = createPlatformFeeRateResolver.toString();
+    expect(source).not.toContain('process.env');
+    expect(source).not.toContain('fallback');
   });
 });
 
@@ -215,17 +271,16 @@ describe('解決するゲートウェイ', () => {
   /* 同じ設定なら作り直さない。事業者の SDK は接続を内部に抱える。 */
   it('設定が同じなら作り直さない', async () => {
     const calls: string[] = [];
-    let secret = DB_SECRET_KEY;
+    let secret = DEPLOYMENT.secretKey;
     const gateway = new ResolvingPaymentGateway(
       async () => ({
         ok: true,
-        config: { ...ENV_FALLBACK, secretKey: secret, source: 'database' as const },
+        config: { ...DEPLOYMENT, secretKey: secret, settingsSource: 'database' as const },
       }),
       build(calls),
       'stub',
     );
 
-    await gateway.currentConfig();
     await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
     await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
     expect(calls).toHaveLength(1);
@@ -262,87 +317,28 @@ describe('解決するゲートウェイ', () => {
       expect(result.error.code).toBe('SALES_SETUP_INCOMPLETE');
     }
   });
+
+  /*
+    ⚠️ **接続できないときに、鍵が例外の文面へ混ざらないこと。**
+       Stripe が落ちている・網が届かない場面はいずれ必ず来る。
+       そのとき例外がそのままログへ流れると、鍵が残る。
+  */
+  it('解決に失敗しても、鍵が符号や文面へ出ない', async () => {
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: false, reason: 'incomplete' }),
+      build([]),
+      'stub',
+    );
+    const result = await gateway.createCheckoutSession({} as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(JSON.stringify(result.error)).not.toContain('NOT_A_REAL');
+    }
+  });
 });
 
 describe('販売設定の完了判定', () => {
   it('0 は未完了', () => {
     expect(isSalesSetupComplete({ ...COMPLETE, platformFeeRateBps: 0 })).toBe(false);
-  });
-});
-
-describe('手数料率の解決', () => {
-  /*
-    ⚠️ この検査は、実際に起きた不具合から来ている。
-       率を資格情報と束ねて解決していたため、鍵を持たない環境
-       （`PAYMENT_PROVIDER=fake` の手元・E2E）で率が 0 に落ちた。
-       結果は「作家さまの取り分＝売上全額」と「購入手続きに進めない」。
-       率は決済事業者の設定ではなく販売の条件なので、別に引く。
-  */
-  it('鍵が無くても、環境変数の率で解決できる', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: repositoryDouble({ settings: null }),
-      appEnvironment: 'staging',
-      fallbackBps: 2000,
-    });
-    expect(await resolve()).toBe(2000);
-  });
-
-  it('保管庫が無くても解決できる', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: null,
-      appEnvironment: 'staging',
-      fallbackBps: 2000,
-    });
-    expect(await resolve()).toBe(2000);
-  });
-
-  it('DB に率が入っていれば、そちらが正', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: repositoryDouble({
-        settings: settings({ payment: { ...COMPLETE, platformFeeRateBps: 1500 } }),
-      }),
-      appEnvironment: 'staging',
-      fallbackBps: 2000,
-    });
-    expect(await resolve()).toBe(1500);
-  });
-
-  /*
-    設定行は管理画面を開いただけでできる。行の有無で見ると、
-    一度開いただけで環境変数の値が無視される。
-  */
-  it('行はあるが率が 0 なら、環境変数へ落ちる', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: repositoryDouble({
-        settings: settings({ payment: { ...COMPLETE, platformFeeRateBps: 0 } }),
-      }),
-      appEnvironment: 'staging',
-      fallbackBps: 2000,
-    });
-    expect(await resolve()).toBe(2000);
-  });
-
-  /*
-    ⚠️ 「連携を止める」のはお金の受け口であって、取り分の約束ではない。
-       止めたからといって率を 0 に戻すと、再開したときに
-       「手数料が消えている」ことに気づけない。
-  */
-  it('連携を止めていても、率は変わらない', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: repositoryDouble({ settings: settings({ enabled: false }) }),
-      appEnvironment: 'staging',
-      fallbackBps: 1000,
-    });
-    expect(await resolve()).toBe(2000);
-  });
-
-  /* どちらも 0 なら 0 のまま。勝手に既定値を入れない。 */
-  it('どちらも未設定なら 0 のまま', async () => {
-    const resolve = createPlatformFeeRateResolver({
-      integrations: repositoryDouble({ settings: null }),
-      appEnvironment: 'staging',
-      fallbackBps: 0,
-    });
-    expect(await resolve()).toBe(0);
   });
 });

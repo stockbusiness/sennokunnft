@@ -131,6 +131,7 @@ export {
   enableIntegration,
   isCheckFresh,
   requiredSecretPurposes,
+  storesSecrets,
   updateSettings,
   type EnableInput,
   type IntegrationSettings,

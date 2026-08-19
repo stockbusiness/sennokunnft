@@ -15,3 +15,29 @@ ALTER TABLE "integration_settings"
 ALTER TABLE "integration_settings"
   ADD CONSTRAINT "integration_settings_fee_rate_range"
   CHECK ("platform_fee_rate_bps" >= 0 AND "platform_fee_rate_bps" <= 10000);
+
+-- サービス名の許容値へ `payment` を足す。
+--
+-- ⚠️ **3 つの表すべてに同じ CHECK がある。** 設定・資格情報・接続確認。
+--    1 つでも外すと、そこだけ `payment` の行を作れず、
+--    「画面は出るのに保存で落ちる」になる。
+--
+-- ⚠️ `integration_secrets` にも足すのは、**決済の鍵を置くためではない**。
+--    決済の鍵は配備環境の Secret 管理に置く（2026-08-19 決定）。
+--    ここは、将来この判断が変わったときに DDL とアプリの規則が
+--    食い違わないようにするためで、置かない規則はアプリ側
+--    （`storesSecrets`）が持つ。
+ALTER TABLE "integration_settings"
+  DROP CONSTRAINT "integration_settings_service_valid",
+  ADD CONSTRAINT "integration_settings_service_valid"
+  CHECK ("service" IN ('ovew_wallet', 'payment', 'storage', 'auth'));
+
+ALTER TABLE "integration_secrets"
+  DROP CONSTRAINT "integration_secrets_service_valid",
+  ADD CONSTRAINT "integration_secrets_service_valid"
+  CHECK ("service" IN ('ovew_wallet', 'payment', 'storage', 'auth'));
+
+ALTER TABLE "integration_connection_checks"
+  DROP CONSTRAINT "integration_connection_checks_service_valid",
+  ADD CONSTRAINT "integration_connection_checks_service_valid"
+  CHECK ("service" IN ('ovew_wallet', 'payment', 'storage', 'auth'));

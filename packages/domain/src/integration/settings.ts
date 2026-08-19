@@ -113,13 +113,29 @@ function normalizeKeyId(value: string | null): string | null {
  */
 export function requiredSecretPurposes(service: IntegrationService): readonly SecretPurpose[] {
   switch (service) {
-    case 'payment':
-      return ['api_key', 'hmac_secret'];
     case 'ovew_wallet':
       return ['hmac_secret'];
+    /*
+      決済の鍵は**この保管庫に置かない**（2026-08-19 決定）。秘密鍵も
+      Webhook 署名鍵も配備環境の Secret 管理に置く。管理画面から
+      交換できる仕組みは、再認証・二者承認・ローテーション・復旧経路まで
+      揃えた別仕様として扱う。半端に口だけ開けると、
+      「画面から替えられるが、間違えたときに戻せない」状態になる。
+    */
+    case 'payment':
     default:
       return [];
   }
+}
+
+/**
+ * その連携の資格情報を、この保管庫で預かるか。
+ *
+ * ⚠️ **偽のときは登録の口そのものが断る。** 画面で隠すだけにすると、
+ * 直接叩けば預かれてしまい、置かないと決めた場所に鍵が残る。
+ */
+export function storesSecrets(service: IntegrationService): boolean {
+  return service === 'ovew_wallet';
 }
 
 export interface EnableInput {
@@ -168,19 +184,12 @@ export function enableIntegration(input: EnableInput): Result<IntegrationSetting
 
   if (settings.service === 'payment') {
     /*
-      ⚠️ **戻り先が無いまま有効にしない。** 支払いを終えた購入者の行き先が
-         決まっていない状態で決済を開けると、お金だけ動いて画面が迷子になる。
-    */
-    if (settings.payment.checkoutSuccessUrl === null) {
-      return err(domainError('PAYMENT_SETTINGS_INVALID', 'success url is not configured'));
-    }
-    if (settings.payment.checkoutCancelUrl === null) {
-      return err(domainError('PAYMENT_SETTINGS_INVALID', 'cancel url is not configured'));
-    }
-    /*
       ⚠️ **手数料率 0 のまま有効にしない。** 0 は「無料」ではなく
          「まだ決めていない」。決めないまま売れると、こちらの取り分が
          無い注文が成立し、あとから請求し直すことはできない。
+
+      ⚠️ **戻り先はここで必須にしない。** 配備環境の値を引き継いで
+         動いている状態がありうる。欠けていれば支払い口の作成が断る。
     */
     if (!isSalesSetupComplete(settings.payment)) {
       return err(domainError('PAYMENT_SETTINGS_INVALID', 'fee rate is not configured'));

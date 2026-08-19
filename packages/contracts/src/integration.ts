@@ -87,6 +87,23 @@ export const paymentSettingsSchema = z.object({
   platformFeeRateBps: z.number().int(),
   /** 率が入っているか。⚠️ 画面が 0 を「無料」と読まないための印。 */
   salesSetupComplete: z.boolean(),
+  /** 鍵以外の設定を、どちらから読んでいるか。⚠️ 鍵の出どころではない。 */
+  settingsSource: z.enum(['database', 'environment']),
+  /*
+    ここから下は配備環境の状態。
+    ⚠️ **鍵そのもの・先頭・末尾・署名値をここへ入れない**（2026-08-19 決定）。
+       入るのは「設定されているか」「どちらのモードか」まで。
+  */
+  secretKeyConfigured: z.boolean(),
+  webhookSecretConfigured: z.boolean(),
+  /**
+   * テストか本番か。
+   *
+   * ⚠️ **鍵の値は出さない。** 取り違えに気づけるだけの粒度に留める。
+   */
+  mode: z.enum(['test', 'live', 'unknown']),
+  /** 最後に知らせが届いた時刻。⚠️ 本文も署名も返さない。 */
+  lastWebhookReceivedAt: z.string().nullable(),
 });
 export type PaymentSettingsView = z.infer<typeof paymentSettingsSchema>;
 

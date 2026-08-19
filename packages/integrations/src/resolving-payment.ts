@@ -100,11 +100,10 @@ export class ResolvingPaymentGateway implements PaymentGatewayPort {
  */
 function fingerprintOf(config: ResolvedPaymentConfig): string {
   return [
-    config.source,
+    config.settingsSource,
     config.apiVersion,
     config.successUrlTemplate,
     config.cancelUrlTemplate,
-    String(config.platformFeeRateBps),
     `sk:${config.secretKey.length}:${hash(config.secretKey)}`,
     `wh:${config.webhookSecret.length}:${hash(config.webhookSecret)}`,
   ].join('|');

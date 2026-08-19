@@ -1,19 +1,17 @@
-import {
-  isSalesSetupComplete,
-  type IntegrationEnvironment,
-  type IntegrationRepository,
-} from '@sengoku/domain';
+import type { IntegrationEnvironment, IntegrationRepository } from '@sengoku/domain';
 
 /**
- * 決済の設定を、呼び出しのたびに解決する（管理画面・外部連携 指示書 §14）。
+ * 決済の設定を、呼び出しのたびに解決する。
  *
- * ⚠️ **起動時に読んだ値を持ち回らない。** 管理画面で鍵や戻り先を変えたら、
- * 次の呼び出しから効いてほしい。持ち回ると「保存できたのに効かない」に
- * なり、しかも効いていないことに気づく手掛かりが無い。
+ * ⚠️ **鍵は DB へ置かない**（2026-08-19 決定）。決済の秘密鍵と Webhook
+ * 署名鍵は配備環境の Secret 管理に置き、ここは環境変数からのみ読む。
+ * 管理画面から交換できる仕組みは、再認証・二者承認・ローテーション・
+ * 復旧経路まで揃えた別仕様として扱う。半端に口だけ開けると、
+ * 「画面から鍵を替えられるが、間違えたときに戻せない」状態になる。
  *
- * ⚠️ **止めたら止まること。** DB 側で無効にしてあるときに環境変数へ
- * 落ちてしまうと、管理画面の「停止」が効かない。事故を止める操作が
- * 効かないのがいちばん困る。
+ * ⚠️ **管理画面が持つのは、鍵以外の設定と「止める」操作だけ。**
+ * 止めたときに環境変数へ落ちてしまうと、管理画面の停止が効かない。
+ * 事故を止める操作が効かないのがいちばん困る。
  */
 
 export interface ResolvedPaymentConfig {
@@ -24,119 +22,97 @@ export interface ResolvedPaymentConfig {
   readonly successUrlTemplate: string;
   readonly cancelUrlTemplate: string;
   /**
-   * プラットフォーム手数料。
+   * 鍵以外の設定を、どちらから読んだか。
    *
-   * ⚠️ **0 は「無料」ではなく「販売設定が未完了」。** ここが 0 のまま
-   * 支払い口を作らせない判断は、この値を受け取る側で行う。
+   * ⚠️ **鍵の出どころではない。** 鍵は常に配備環境から読む。
    */
-  readonly platformFeeRateBps: number;
-  /** どちらから読んだか。⚠️ 画面とログの説明に使う。値は含めない。 */
-  readonly source: 'database' | 'environment';
+  readonly settingsSource: 'database' | 'environment';
 }
 
-/** 環境変数から読んだ設定（DB に無いときの引き継ぎ元）。 */
+/** 配備環境（Secret 管理・環境変数）から読んだ決済の設定。 */
 export interface EnvPaymentConfig {
   readonly secretKey: string;
   readonly webhookSecret: string;
   readonly apiVersion: string;
   readonly successUrlTemplate: string;
   readonly cancelUrlTemplate: string;
-  readonly platformFeeRateBps: number;
 }
 
 export type PaymentConfigResolution =
   | { readonly ok: true; readonly config: ResolvedPaymentConfig }
   /** 管理画面から止められている。**環境変数へ落ちない。** */
   | { readonly ok: false; readonly reason: 'disabled' }
-  /** 設定か鍵が欠けている。 */
+  /** 鍵か設定が欠けている。 */
   | { readonly ok: false; readonly reason: 'incomplete' };
 
 export type PaymentConfigResolver = () => Promise<PaymentConfigResolution>;
 
 export interface PaymentConfigResolverOptions {
-  /** 保管庫。持たない配備（鍵を DB に置かない運用）では `null`。 */
+  /** 設定の保管庫。持たない配備では `null`。⚠️ 鍵はここから読まない。 */
   readonly integrations: IntegrationRepository | null;
   /** このプロセスの環境。⚠️ 要求から受け取らない。 */
   readonly appEnvironment: IntegrationEnvironment;
-  /** DB に設定が入るまでの引き継ぎ元。無ければ `null`。 */
-  readonly fallback: EnvPaymentConfig | null;
+  /** 配備環境から読んだ設定。鍵が無ければ `null`。 */
+  readonly deployment: EnvPaymentConfig | null;
 }
 
 /**
- * 解決の規則（`createWalletDeliveryResolver` と同じ形にそろえてある）。
+ * 解決の規則。
  *
- * 1. DB に鍵が入っていれば、**DB が正**。
- *    - 止められていれば使わない。環境変数へ落ちない。
- *    - 欠けていれば使わない。半端な設定で支払い口を作ると、
- *      作れたのに入金を確定できない、という最悪の形になる。
- * 2. DB に鍵が入っていなければ、環境変数へ落ちる。
- *    管理画面を開いただけで行はできるので、**行の有無ではなく
- *    鍵の有無**で「引き継いだか」を判定する。
+ * 1. 鍵が配備環境に無ければ、決済できない（`incomplete`）
+ * 2. DB に設定行があり、止めてあれば使わない（`disabled`）。
+ *    ⚠️ **ここで環境変数へ落ちない。** 落ちると停止が効かない
+ * 3. DB に戻り先が入っていれば DB を使い、無ければ配備環境の値を使う
+ *
+ * ⚠️ **戻り先は鍵ではないので、引き継ぎを許している。** どちらを使ったかは
+ * `settingsSource` で分かるようにし、画面にも出す。黙って切り替わるのを
+ * 避けるためで、隠すためではない。
  */
 export function createPaymentConfigResolver(
   options: PaymentConfigResolverOptions,
 ): PaymentConfigResolver {
   return async (): Promise<PaymentConfigResolution> => {
-    const integrations = options.integrations;
-    const settings =
-      integrations === null
-        ? null
-        : await integrations.findSettings('payment', options.appEnvironment);
-
+    const deployment = options.deployment;
     /*
-      ⚠️ 「DB を採用したか」は鍵の有無で決める。設定行は画面を開いた
-         だけでできるので、行があること自体は何の意味も持たない。
+      ⚠️ 鍵が無ければここで止める。DB を見に行かない。
+         「DB に何か入っていれば動くかもしれない」という期待を残さない。
     */
-    const secretKey =
-      settings === null || integrations === null
-        ? null
-        : await integrations.revealForAdapter('payment', options.appEnvironment, 'api_key');
-
-    if (secretKey === null) {
-      const fallback = options.fallback;
-      if (fallback === null) {
-        return { ok: false, reason: 'incomplete' };
-      }
-      return { ok: true, config: { ...fallback, source: 'environment' } };
+    if (deployment === null || deployment.secretKey === '' || deployment.webhookSecret === '') {
+      return { ok: false, reason: 'incomplete' };
     }
 
-    // ここから先、`settings` は非 null（鍵は設定行があるときしか引けない）。
-    const row = settings as NonNullable<typeof settings>;
+    const settings =
+      options.integrations === null
+        ? null
+        : await options.integrations.findSettings('payment', options.appEnvironment);
 
-    if (!row.enabled) {
+    if (settings !== null && !settings.enabled) {
       return { ok: false, reason: 'disabled' };
     }
 
-    const webhookSecret = await (integrations as IntegrationRepository).revealForAdapter(
-      'payment',
-      options.appEnvironment,
-      'hmac_secret',
-    );
-    /*
-      ⚠️ 署名鍵が無ければ使わない。支払い口だけ作れて入金を確定できない
-         状態は、お金を受け取ったのに注文が進まないという形で表に出る。
-    */
-    if (webhookSecret === null) {
-      return { ok: false, reason: 'incomplete' };
-    }
-    if (row.payment.checkoutSuccessUrl === null || row.payment.checkoutCancelUrl === null) {
-      return { ok: false, reason: 'incomplete' };
-    }
-    if (!isSalesSetupComplete(row.payment)) {
-      return { ok: false, reason: 'incomplete' };
+    const fromDatabase =
+      settings !== null &&
+      settings.payment.checkoutSuccessUrl !== null &&
+      settings.payment.checkoutCancelUrl !== null;
+
+    if (!fromDatabase) {
+      if (deployment.successUrlTemplate === '' || deployment.cancelUrlTemplate === '') {
+        return { ok: false, reason: 'incomplete' };
+      }
+      return { ok: true, config: { ...deployment, settingsSource: 'environment' } };
     }
 
+    const row = settings as NonNullable<typeof settings>;
     return {
       ok: true,
       config: {
-        secretKey,
-        webhookSecret,
-        // 空なら実装側の既定に任せる。
-        apiVersion: row.payment.apiVersion ?? options.fallback?.apiVersion ?? '',
-        successUrlTemplate: row.payment.checkoutSuccessUrl,
-        cancelUrlTemplate: row.payment.checkoutCancelUrl,
-        platformFeeRateBps: row.payment.platformFeeRateBps,
-        source: 'database',
+        secretKey: deployment.secretKey,
+        webhookSecret: deployment.webhookSecret,
+        // 空なら配備環境の版に従う。
+        apiVersion: row.payment.apiVersion ?? deployment.apiVersion,
+        successUrlTemplate: row.payment.checkoutSuccessUrl ?? '',
+        cancelUrlTemplate: row.payment.checkoutCancelUrl ?? '',
+        settingsSource: 'database',
       },
     };
   };
@@ -145,39 +121,40 @@ export function createPaymentConfigResolver(
 /**
  * 手数料率だけを引く。
  *
- * ⚠️ **資格情報とは別に引く。** 率は決済事業者の設定ではなく、販売の
- * 条件。事業者が `fake`（鍵を持たない手元・E2E）でも率は要る。
- * 資格情報と束ねていたせいで、鍵の無い環境で率が 0 に落ち、
- * 「作家さまの取り分＝売上全額」「購入手続きに進めない」が起きた。
+ * ⚠️ **正は DB だけ。環境変数へ落とさない**（2026-08-19 決定）。
+ * 落とすと、DB と環境変数で違う値が使われる「二重管理」になる。
+ * どちらが効いているかは、金額がずれてから請求で気づくことになる。
  *
- * ⚠️ **「連携を止めている」ことは率に影響しない。** 止めるのは
- * お金の受け口であって、取り分の約束ではない。
+ * ⚠️ **資格情報とは別に引く。** 率は決済事業者の設定ではなく販売の条件。
+ * 事業者が `fake`（鍵を持たない手元・E2E）でも率は要る。束ねていたせいで、
+ * 鍵の無い環境で率が 0 に落ちた。
  *
- * 解決の規則:
+ * ⚠️ **「連携を止めている」ことは率に影響しない。** 止めるのはお金の
+ * 受け口であって、取り分の約束ではない。止めるたびに 0 へ戻すと、
+ * 再開したときに手数料が消えていることに気づけない。
  *
- * 1. DB に率が入っていれば（0 より大きければ）、DB が正
- * 2. 入っていなければ環境変数へ落ちる
+ * ⚠️ **未設定なら 0 を返す。既定値を作らない。** 0 は「無料」ではなく
+ * 「まだ決めていない」。ここで気を利かせて 20% を入れると、
+ * 決めていないまま売れてしまう。0 のときは支払い口を作らせない側が
+ * 受け止める。
  *
- * ⚠️ **「行があるか」ではなく「値が入っているか」で判定する。** 設定行は
- * 管理画面を開いただけでできる。行の有無で見ると、画面を一度開いた
- * だけで環境変数の値が無視される。
- *
- * ⚠️ **どちらも 0 なら 0 のまま返す。** 0 は「無料」ではなく
- * 「まだ決めていない」。ここで勝手に既定値を入れると、
- * 決めていないまま売れてしまう。
+ * 初期値（2000）は**一度限りのマイグレーション**で DB へ入れてある。
+ * 起動のたびに環境変数から読み直す作りにはしない。
  */
-export function createPlatformFeeRateResolver(options: {
-  readonly integrations: IntegrationRepository | null;
-  readonly appEnvironment: IntegrationEnvironment;
-  readonly fallbackBps: number;
-}): () => Promise<number> {
-  return async (): Promise<number> => {
-    const settings =
-      options.integrations === null
-        ? null
-        : await options.integrations.findSettings('payment', options.appEnvironment);
+export interface PlatformFeeRateReader {
+  readPlatformFeeRateBps(environment: IntegrationEnvironment): Promise<number>;
+}
 
-    const fromDatabase = settings?.payment.platformFeeRateBps ?? 0;
-    return fromDatabase > 0 ? fromDatabase : options.fallbackBps;
-  };
+export function createPlatformFeeRateResolver(options: {
+  /**
+   * 率だけを読む口。
+   *
+   * ⚠️ **設定の保管庫（暗号鍵を要る口）と分けてある。** 率は秘密では
+   * ないので、復号の仕組みに依存させない。依存させると、鍵を置いて
+   * いない配備で率が 0 に落ちる。
+   */
+  readonly reader: PlatformFeeRateReader;
+  readonly appEnvironment: IntegrationEnvironment;
+}): () => Promise<number> {
+  return async (): Promise<number> => options.reader.readPlatformFeeRateBps(options.appEnvironment);
 }

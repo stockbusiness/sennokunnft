@@ -170,7 +170,7 @@ describe('販売設定の完了判定', () => {
 describe('決済の有効化', () => {
   const check = { succeeded: true, executedAt: FRESH };
   const base = {
-    activeSecretPurposes: ['api_key', 'hmac_secret'] as const,
+    activeSecretPurposes: [] as const,
     lastCheck: check,
     freshnessMs: CHECK_FRESHNESS_MS,
     now: NOW,
@@ -184,26 +184,18 @@ describe('決済の有効化', () => {
     }
   });
 
-  /* 決済は鍵が 2 本要る。片方だけでは半端な状態になる。 */
-  it('秘密鍵だけでは有効にできない', () => {
+  /*
+    ⚠️ 決済の鍵は保管庫に無い（2026-08-19 決定）。配備環境の Secret 管理に
+       あるので、有効化の条件に「預けた鍵」を課さない。課すと、
+       預けようのないものを求めることになり、有効化できなくなる。
+  */
+  it('保管庫に鍵が無くても有効にできる', () => {
     const result = enableIntegration({
       ...base,
       settings: paymentSettings(),
-      activeSecretPurposes: ['api_key'],
+      activeSecretPurposes: [],
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe('INTEGRATION_SECRET_MISSING');
-    }
-  });
-
-  it('署名鍵だけでは有効にできない', () => {
-    const result = enableIntegration({
-      ...base,
-      settings: paymentSettings(),
-      activeSecretPurposes: ['hmac_secret'],
-    });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('手数料率 0 のままでは有効にできない', () => {
@@ -217,12 +209,16 @@ describe('決済の有効化', () => {
     }
   });
 
-  it('戻り先が無ければ有効にできない', () => {
+  /*
+    ⚠️ 戻り先はここで必須にしない。配備環境の値を引き継いで動いている
+       状態がありうる。欠けていれば支払い口の作成が断る。
+  */
+  it('戻り先が DB に無くても有効にできる', () => {
     const result = enableIntegration({
       ...base,
       settings: paymentSettings({ checkoutSuccessUrl: null }),
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('接続テストの成功が無ければ有効にできない', () => {
@@ -244,8 +240,9 @@ describe('決済の有効化', () => {
 });
 
 describe('要る資格情報', () => {
-  it('決済は 2 種類', () => {
-    expect(requiredSecretPurposes('payment')).toEqual(['api_key', 'hmac_secret']);
+  /* 決済の鍵は配備環境にあるので、保管庫へは何も求めない。 */
+  it('決済は保管庫へ何も求めない', () => {
+    expect(requiredSecretPurposes('payment')).toEqual([]);
   });
 
   it('Wallet は署名鍵だけ', () => {

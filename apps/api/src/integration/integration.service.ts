@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   ConnectionCheckView,
   IntegrationListResponse,
@@ -18,10 +23,9 @@ import {
   discardPendingSecret,
   enableIntegration,
   isCheckFresh,
+  storesSecrets,
   updatePaymentSettings,
   updateSettings,
-  validateSecretKeyForEnvironment,
-  validateWebhookSecret,
   isSalesSetupComplete,
   type AuditLogPort,
   type ClockPort,
@@ -50,6 +54,25 @@ import { DomainErrorException } from '../common/domain-error.filter';
  * ⚠️ **判断はドメインが持つ。** 「接続テストの成功が要る」「古い成功では
  * 通さない」といった規則をここへ書き足さない。2 か所に散ると必ずずれる。
  */
+/**
+ * 決済の配備側の状態。
+ *
+ * ⚠️ **鍵そのもの・先頭・末尾・署名値を持たない**（2026-08-19 決定）。
+ */
+export interface PaymentDeploymentStatus {
+  readonly secretKeyConfigured: boolean;
+  readonly webhookSecretConfigured: boolean;
+  readonly mode: 'test' | 'live' | 'unknown';
+  readonly lastWebhookReceivedAt: Date | null;
+}
+
+const EMPTY_PAYMENT_DEPLOYMENT: PaymentDeploymentStatus = {
+  secretKeyConfigured: false,
+  webhookSecretConfigured: false,
+  mode: 'unknown',
+  lastWebhookReceivedAt: null,
+};
+
 @Injectable()
 export class IntegrationService_ {
   constructor(
@@ -83,6 +106,14 @@ export class IntegrationService_ {
      * ここが値を返す形になった瞬間、秘密が API の応答へ届く道ができる。
      */
     private readonly describeEnvironment: (service: IntegrationService) => EnvIntegrationSummary,
+    /**
+     * 決済の配備側の状態を返す。
+     *
+     * ⚠️ **鍵そのもの・先頭・末尾を返させない。** 返すのは
+     * 「設定されているか」「テストか本番か」「最後に知らせが届いた時刻」まで。
+     * 鍵は配備環境の Secret 管理にあり、ここへは流れてこない。
+     */
+    private readonly describePaymentDeployment: () => Promise<PaymentDeploymentStatus>,
   ) {}
 
   /**
@@ -131,6 +162,8 @@ export class IntegrationService_ {
 
     const now = this.clock.now();
     const fresh = isCheckFresh(lastCheck, CHECK_FRESHNESS_MS, now);
+    const deployment =
+      service === 'payment' ? await this.describePaymentDeployment() : EMPTY_PAYMENT_DEPLOYMENT;
     /*
       ⚠️ **有効化できるかの判定は、ドメインの関数をそのまま使う。**
          画面用に別式を書くと、「画面では押せるのに保存で断られる」
@@ -173,6 +206,19 @@ export class IntegrationService_ {
               ...settings.payment,
               // ⚠️ 0 を「手数料無料」と読ませないための印。
               salesSetupComplete: isSalesSetupComplete(settings.payment),
+              /*
+                戻り先が DB に入っていれば DB、無ければ配備環境の値で
+                動いている。⚠️ **鍵の出どころではない。** 鍵は常に配備環境。
+              */
+              settingsSource:
+                settings.payment.checkoutSuccessUrl !== null &&
+                settings.payment.checkoutCancelUrl !== null
+                  ? ('database' as const)
+                  : ('environment' as const),
+              secretKeyConfigured: deployment.secretKeyConfigured,
+              webhookSecretConfigured: deployment.webhookSecretConfigured,
+              mode: deployment.mode,
+              lastWebhookReceivedAt: deployment.lastWebhookReceivedAt?.toISOString() ?? null,
             }
           : null,
     };
@@ -326,6 +372,22 @@ export class IntegrationService_ {
          黙って保存されると、あとから読んだ人が「効くのか」を
          判断できなくなる。
     */
+    /*
+      ⚠️ **手数料率を変えられるのはオーナーだけ**（2026-08-19 決定）。
+         率はこちらと作家さまの取り分を決める約束で、日々の運営操作とは
+         重さが違う。`operator` に許すと、権限を配れない人が
+         お金の分け方を変えられることになる。
+
+      ⚠️ **要求の中身から判定しない。** `isOwner` の正は DB で、
+         認証ガードが DB から詰めている。
+    */
+    if (service === 'payment' && request.platformFeeRateBps !== undefined) {
+      const current = settings.payment.platformFeeRateBps;
+      if (request.platformFeeRateBps !== current && !actor.isOwner) {
+        throw new ForbiddenException();
+      }
+    }
+
     const withPayment =
       service === 'payment'
         ? {
@@ -370,6 +432,23 @@ export class IntegrationService_ {
         environment,
         changed: Object.keys(request).filter((key) => key !== 'rowVersion'),
         endpointChanged: updated.endpointChanged,
+        /*
+          ⚠️ **手数料率だけは、変更前後の値そのものを残す**（2026-08-19 決定）。
+             ほかの設定は「変えたかどうか」しか残さないが、率は
+             こちらと作家さまの取り分を決める約束で、あとから
+             「いつ何％から何％へ、誰が変えたか」を説明できないと、
+             支払いの問い合わせに答えられない。
+
+          ⚠️ **秘密ではないから残せる。** 率は契約条件であって資格情報ではない。
+             鍵の類はここにも残さない。
+        */
+        ...(service === 'payment' &&
+        withPayment.settings.payment.platformFeeRateBps !== settings.payment.platformFeeRateBps
+          ? {
+              platformFeeRateBpsBefore: settings.payment.platformFeeRateBps,
+              platformFeeRateBpsAfter: withPayment.settings.payment.platformFeeRateBps,
+            }
+          : {}),
       },
     });
     return this.status(service, environment);
@@ -446,18 +525,13 @@ export class IntegrationService_ {
     this.requireManaged(service);
 
     /*
-      ⚠️ **決済の鍵は保存の時点で確かめる。** 起動時の検査だけに任せると、
-         取り違えた鍵が DB に入り、次の再起動まで気づけない。しかも
-         気づく形が「入金が無い」か「本物のお金が動いた」のどちらか。
+      ⚠️ **決済の鍵はここで預からない**（2026-08-19 決定）。秘密鍵も
+         Webhook 署名鍵も配備環境の Secret 管理に置く。画面で隠すだけに
+         すると、直接叩けば預かれてしまい、置かないと決めた場所に
+         鍵が残る。口そのものを断る。
     */
-    if (service === 'payment') {
-      const verdict =
-        request.purpose === 'api_key'
-          ? validateSecretKeyForEnvironment(request.value, environment)
-          : validateWebhookSecret(request.value);
-      if (!verdict.ok) {
-        throw new DomainErrorException(verdict.error.code);
-      }
+    if (!storesSecrets(service)) {
+      throw new DomainErrorException('INTEGRATION_NOT_MANAGED');
     }
 
     const created = await this.repository.createSecret({

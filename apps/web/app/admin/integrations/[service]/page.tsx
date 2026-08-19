@@ -5,6 +5,7 @@ import { formatDateTime } from '../../../../src/delivery-copy';
 import {
   INTEGRATION_COPY,
   checkDetailLabel,
+  paymentModeLabel,
   integrationServiceLabel,
   secretPurposeLabel,
   secretStatusLabel,
@@ -275,15 +276,62 @@ export default async function AdminIntegrationPage({
             </>
           )}
 
-          <h2>{INTEGRATION_COPY.secretHeading}</h2>
-          <p>{INTEGRATION_COPY.secretIntro}</p>
-          {status.payment === null ? null : (
+          {/*
+            ⚠️ **決済には鍵の入力欄を出さない**（2026-08-19 決定）。
+               鍵は配備環境の Secret 管理に置く。画面から替えられる
+               仕組みは、再認証・二者承認・ローテーション・復旧経路まで
+               揃えた別仕様として扱う。ここに出すのは状態だけ。
+          */}
+          {status.payment === null ? (
             <>
-              <p>{INTEGRATION_COPY.paymentSecretHint}</p>
-              <Notice tone="alert" title={INTEGRATION_COPY.paymentKeyEnvironmentHint} />
+              <h2>{INTEGRATION_COPY.secretHeading}</h2>
+              <p>{INTEGRATION_COPY.secretIntro}</p>
+              <SecretForm service={status.service} />
+            </>
+          ) : (
+            <>
+              <h2>{INTEGRATION_COPY.paymentKeyHeading}</h2>
+              <p>{INTEGRATION_COPY.paymentKeyIntro}</p>
+              <dl className="sengoku-detail">
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentSecretKeyLabel}</dt>
+                  <dd>
+                    {status.payment.secretKeyConfigured
+                      ? INTEGRATION_COPY.paymentConfigured
+                      : INTEGRATION_COPY.notConfigured}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentWebhookSecretLabel}</dt>
+                  <dd>
+                    {status.payment.webhookSecretConfigured
+                      ? INTEGRATION_COPY.paymentConfigured
+                      : INTEGRATION_COPY.notConfigured}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentModeLabel}</dt>
+                  <dd>{paymentModeLabel(status.payment.mode)}</dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentLastWebhookLabel}</dt>
+                  <dd>
+                    {status.payment.lastWebhookReceivedAt === null
+                      ? INTEGRATION_COPY.paymentNoWebhookYet
+                      : formatDateTime(status.payment.lastWebhookReceivedAt)}
+                  </dd>
+                </div>
+                <div className="sengoku-detail__row">
+                  <dt>{INTEGRATION_COPY.paymentSettingsSourceLabel}</dt>
+                  <dd>
+                    {status.payment.settingsSource === 'database'
+                      ? INTEGRATION_COPY.paymentSourceDatabase
+                      : INTEGRATION_COPY.paymentSourceEnvironment}
+                  </dd>
+                </div>
+              </dl>
             </>
           )}
-          <SecretForm service={status.service} />
 
           <h3>{INTEGRATION_COPY.secretsHeading}</h3>
           {status.secrets.length === 0 ? (

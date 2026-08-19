@@ -1177,6 +1177,12 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve([...(this.attempts.get(orderId) ?? [])].reverse());
   }
 
+  /* ⚠️ 本文も署名も持たない。持つのは時刻だけ。 */
+  findLastWebhookReceivedAt(): Promise<Date | null> {
+    // 本物と同じく「届いたことがあるか」だけを表す。
+    return Promise.resolve(this.events.size === 0 ? null : new Date(0));
+  }
+
   listWebhookReceipts(): Promise<readonly WebhookReceiptRecord[]> {
     // ⚠️ 本文は保存していないので、そもそも返せるものが無い。
     return Promise.resolve(
@@ -1412,6 +1418,17 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     配備環境から読める姿。⚠️ **値を持たない。**
     既定は「そろっている」。欠けを試す試験だけ `setEnvironmentSummary` で差し替える。
   */
+  /*
+    決済の配備側の状態。⚠️ 鍵そのものは入らない。
+    既定は「テスト鍵が設定済み」。欠けを試す試験だけ差し替える。
+  */
+  const paymentDeployment = {
+    secretKeyConfigured: true,
+    webhookSecretConfigured: true,
+    mode: 'test' as 'test' | 'live' | 'unknown',
+    lastWebhookReceivedAt: null as Date | null,
+  };
+
   const environmentSummaries: Record<IntegrationService, EnvIntegrationSummary> = {
     ovew_wallet: { provider: 'database', complete: false, missing: [], publicUrl: null },
     payment: { provider: 'database', complete: false, missing: [], publicUrl: null },
@@ -1455,6 +1472,11 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // 既定は「届いた（405）」。試験ごとに `harness.probeOutcome` で差し替える。
       probe: () => Promise.resolve(probeResult),
       describeEnvironment: (service) => environmentSummaries[service],
+      /*
+        決済の配備側の状態。
+        ⚠️ 本物と同じく、鍵そのものは持たない。持つのは有無とモードだけ。
+      */
+      describePaymentDeployment: async () => paymentDeployment,
     },
     setEnvironmentSummary: (service, summary) => {
       environmentSummaries[service] = summary;

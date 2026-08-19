@@ -159,17 +159,41 @@ export const INTEGRATION_COPY = {
   feeRateNotSet: '手数料が未設定のため、購入手続きに進めません',
   feeRateSet: (percent: string, creator: string): string =>
     `手数料 ${percent}％／作家さま ${creator}％`,
-  paymentSecretHint:
-    'シークレットキーと Webhook 署名シークレットの 2 つが必要です。どちらも決済会社の管理画面から取得できます。',
+  // --- お支払いの鍵（この画面では扱わない） ---
+  paymentKeyHeading: 'お支払いの鍵',
   /*
-    ⚠️ **取り違えの結果を具体的に書く。** 「正しい鍵を入れてください」では、
-       何が起きるか伝わらず、確認の手が省かれる。
+    ⚠️ **「なぜここで扱わないか」を書く。** 書かないと、探した人が
+       「機能が足りない」と受け取り、別の場所へ鍵を置き始める。
   */
-  paymentKeyEnvironmentHint:
-    '本番用（sk_live_）とテスト用（sk_test_）を取り違えると、本番では入金されない、試験では本物のお金が動く、のどちらかが起きます。保存の時点で確認します。',
-  paymentSourceDatabase: 'この画面の設定が使われています',
-  paymentSourceEnvironment: '配備時の設定が使われています（この画面ではまだ保存していません）',
+  paymentKeyIntro:
+    '決済の鍵は、この画面では扱いません。配備環境の秘密情報管理に置いてあり、画面からの入力・表示・変更はできません。ここに出るのは、設定されているかどうかだけです。',
+  paymentSecretKeyLabel: 'シークレットキー',
+  paymentWebhookSecretLabel: 'Webhook 署名シークレット',
+  paymentModeLabel: 'モード',
+  paymentLastWebhookLabel: '最後にお知らせが届いた日時',
+  paymentNoWebhookYet: 'まだ届いていません',
+  paymentSettingsSourceLabel: '戻り先・API 版の出どころ',
+  paymentConfigured: '設定されています',
+  paymentNotConfigured: '設定されていません',
+  paymentSourceDatabase: 'この画面の設定',
+  paymentSourceEnvironment: '配備時の設定（この画面ではまだ保存していません）',
 } as const;
+
+/**
+ * テストか本番か。
+ *
+ * ⚠️ **鍵の値は出さない。** 出すのは取り違えに気づける粒度まで。
+ */
+export function paymentModeLabel(mode: 'test' | 'live' | 'unknown'): string {
+  switch (mode) {
+    case 'test':
+      return 'テストモード（本物のお金は動きません）';
+    case 'live':
+      return '本番モード（本物のお金が動きます）';
+    case 'unknown':
+      return '判別できません（鍵が未設定か、想定外の形式です）';
+  }
+}
 
 /** どの提携先か。⚠️ 内部の名前をそのまま出さない。 */
 export function integrationServiceLabel(service: IntegrationStatusView['service']): string {
