@@ -50,6 +50,13 @@ export const ACTIONS = [
   'legal.view',
   'legal.edit',
   'legal.publish',
+  /**
+   * 自分の同意を確かめ、同意する（`UD-126`）。
+   *
+   * ⚠️ **会員なら誰でも持つ。** 同意するのは本人で、代理はできない。
+   * 運営に免除を与えない（`OWNERSHIP_RULES` の `claim.accept` と同じ考え方）。
+   */
+  'legal.consent',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -110,6 +117,7 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'claim.accept',
     'claim.reissue',
     'collection.view',
+    'legal.consent',
   ],
   operator: [
     'artwork.view_public',
@@ -141,6 +149,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'legal.edit',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'legal.publish',
+    // 運営も利用者として同意する。
+    'legal.consent',
   ],
   auditor: [
     'artwork.view_public',
@@ -154,6 +164,7 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
     //    確かめるのは、まさに監査の仕事。
     'legal.view',
+    'legal.consent',
   ],
 };
 

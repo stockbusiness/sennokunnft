@@ -103,7 +103,11 @@ export async function publishLegalAction(
     return { error: '適用開始日時の形式が正しくありません。' };
   }
 
-  const result = await publishLegalVersion(kind, { effectiveFrom: parsed.toISOString() });
+  const result = await publishLegalVersion(kind, {
+    effectiveFrom: parsed.toISOString(),
+    // ⚠️ 利用規約だけに効く。ほかの種類では欄そのものを出していない。
+    requiresReconsent: kind === 'terms' && form.get('requiresReconsent') === 'on',
+  });
   if (!result.ok) {
     return fail(result);
   }

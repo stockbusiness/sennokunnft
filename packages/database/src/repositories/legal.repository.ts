@@ -1,7 +1,11 @@
 import {
   TOKUSHOHO_FIELD_KEYS,
   isLegalDocumentKind,
+  type ConsentRequiredKind,
   type CreateLegalDraftCommand,
+  type LegalConsentRecord,
+  type LegalConsentRepository,
+  type RecordConsentCommand,
   type LegalDocumentKind,
   type LegalDocumentRepository,
   type LegalDocumentVersion,
@@ -107,6 +111,7 @@ export class PrismaLegalDocumentRepository implements LegalDocumentRepository {
         effectiveFrom: command.effectiveFrom,
         publishedAt: command.publishedAt,
         publishedByAccountId: command.publishedByAccountId,
+        requiresReconsent: command.requiresReconsent,
       },
     });
     if (updated.count === 0) {
@@ -125,6 +130,7 @@ interface LegalRow {
   readonly bodyText: string | null;
   readonly tokushoho: unknown;
   readonly effectiveFrom: Date | null;
+  readonly requiresReconsent: boolean;
   readonly publishedAt: Date | null;
   readonly createdByAccountId: string;
   readonly publishedByAccountId: string | null;
@@ -149,6 +155,7 @@ function toDomain(row: LegalRow): LegalDocumentVersion {
     bodyText: row.bodyText,
     tokushoho: toTokushoho(row.tokushoho),
     effectiveFrom: row.effectiveFrom,
+    requiresReconsent: row.requiresReconsent,
     publishedAt: row.publishedAt,
     createdByAccountId: row.createdByAccountId,
     publishedByAccountId: row.publishedByAccountId,
@@ -174,4 +181,101 @@ function toTokushoho(value: unknown): TokushohoFields | null {
     return [key, typeof field === 'string' ? field : ''] as const;
   });
   return Object.fromEntries(entries) as unknown as TokushohoFields;
+}
+
+/**
+ * 規約への同意（`UD-126`）。
+ *
+ * ⚠️ **書き換えも削除もしない。** 同意は起きた出来事で、あとから
+ * 無かったことにはできない。この class に更新も削除も置かない。
+ */
+export class PrismaLegalConsentRepository implements LegalConsentRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async findLatestConsent(
+    accountId: string,
+    kind: ConsentRequiredKind,
+  ): Promise<LegalConsentRecord | null> {
+    const row = await this.prisma.legalConsent.findFirst({
+      where: { accountId, kind },
+      // ⚠️ 版番号の降順。日時ではない（同意した順と版の順は必ずしも一致しない）。
+      orderBy: { version: 'desc' },
+    });
+    if (row === null) {
+      return null;
+    }
+    return {
+      accountId: row.accountId,
+      kind,
+      versionId: row.versionId,
+      version: row.version,
+      consentedAt: row.consentedAt,
+    };
+  }
+
+  async hasPendingReconsent(
+    kind: ConsentRequiredKind,
+    consentedVersion: number,
+    now: Date,
+  ): Promise<boolean> {
+    /*
+      ⚠️ **「新しい版があるか」を見ない。** 印が立っている版だけを見る。
+         誤字を直しただけの改定で全員を止めると、同意の画面が
+         「とりあえず押すもの」になる。
+      ⚠️ 施行日が来ているものに限る。予約公開の版で先に止めない。
+    */
+    const count = await this.prisma.legalDocumentVersion.count({
+      where: {
+        kind,
+        status: 'published',
+        requiresReconsent: true,
+        version: { gt: consentedVersion },
+        effectiveFrom: { lte: now },
+      },
+    });
+    return count > 0;
+  }
+
+  async recordConsent(command: RecordConsentCommand): Promise<LegalConsentRecord> {
+    /*
+      ⚠️ **二度押しで増やさない。** `(account_id, version_id)` の一意制約が
+         あるので、既にあれば何もしない。日時は最初の 1 回を残す。
+         あとから上書きすると「いつ同意したのか」が動く。
+    */
+    await this.prisma.legalConsent.upsert({
+      where: {
+        accountId_versionId: {
+          accountId: command.accountId,
+          versionId: command.versionId,
+        },
+      },
+      update: {},
+      create: {
+        accountId: command.accountId,
+        kind: command.kind,
+        versionId: command.versionId,
+        version: command.version,
+        consentedAt: command.consentedAt,
+      },
+    });
+
+    const stored = await this.prisma.legalConsent.findUnique({
+      where: {
+        accountId_versionId: {
+          accountId: command.accountId,
+          versionId: command.versionId,
+        },
+      },
+    });
+    if (stored === null) {
+      throw new Error('consent row disappeared after upsert');
+    }
+    return {
+      accountId: stored.accountId,
+      kind: command.kind,
+      versionId: stored.versionId,
+      version: stored.version,
+      consentedAt: stored.consentedAt,
+    };
+  }
 }

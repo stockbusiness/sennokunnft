@@ -102,6 +102,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 400 にしない。送った内容の形は正しく、足りないだけ。
   LEGAL_DOCUMENT_INCOMPLETE: HttpStatus.CONFLICT,
   LEGAL_EFFECTIVE_DATE_INVALID: HttpStatus.BAD_REQUEST,
+  // 画面が古い。読み込み直せば直る。
+  LEGAL_CONSENT_VERSION_MISMATCH: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -199,6 +201,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   LEGAL_DOCUMENT_INCOMPLETE: '公開に必要な項目が入力されていません。',
   LEGAL_EFFECTIVE_DATE_INVALID:
     '適用開始日は、現在より後で、いま適用中の版より後の日時にしてください。',
+  LEGAL_CONSENT_VERSION_MISMATCH:
+    '規約が更新されました。お手数ですが、画面を読み込み直してからご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

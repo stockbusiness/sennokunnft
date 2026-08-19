@@ -60,6 +60,16 @@ export interface CreateOrderCommand {
   readonly reservationExpiresAt: Date;
   /** 要求数量。⚠️ 実装はロック後のカウンタで**もう一度**在庫を判定する。 */
   readonly quantity: number;
+  /**
+   * 注文時点で施行されていた利用規約の版（`UD-126`）。
+   *
+   * ⚠️ **同意の記録ではない。** 「何が表示されていたか」の記録で、
+   * 価格・手数料率と同じスナップショット原則。あとから規約を改定しても
+   * 過去の注文は動かない。
+   * ⚠️ 規約が未公開なら `null`。**無いことを、無いまま残す。**
+   */
+  readonly termsVersionId: string | null;
+  readonly termsVersion: number | null;
   readonly now: Date;
 }
 

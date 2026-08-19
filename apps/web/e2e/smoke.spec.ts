@@ -107,6 +107,17 @@ test('法務のページが壊れずに開く（中身が未公開でも）', as
   }
 });
 
+/**
+ * 同意画面（`UD-126`）。
+ *
+ * ⚠️ **未ログインで開いてもエラーにしない。** ログインへ案内する。
+ *    行き止まりを作らない。
+ */
+test('同意画面は未ログインならログインへ案内する', async ({ page }) => {
+  const response = await page.goto('/legal/consent');
+  expect(response?.status()).toBeLessThan(400);
+});
+
 test.describe('スマートフォン幅', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

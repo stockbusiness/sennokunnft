@@ -1,4 +1,5 @@
 import type { LegalDocumentKind, LegalDocumentVersion, TokushohoFields } from '../legal/document';
+import type { ConsentRequiredKind, LegalConsentRecord } from '../legal/consent';
 
 /**
  * 法務文書の保管庫。
@@ -31,6 +32,8 @@ export interface PublishLegalVersionCommand {
   readonly effectiveFrom: Date;
   readonly publishedByAccountId: string;
   readonly publishedAt: Date;
+  /** この版から再同意を求めるか（`UD-126`）。 */
+  readonly requiresReconsent: boolean;
 }
 
 export interface LegalDocumentRepository {
@@ -68,4 +71,50 @@ export interface LegalDocumentRepository {
 
   /** 下書きだけを公開する。すでに公開済みなら `null`。 */
   publish(command: PublishLegalVersionCommand): Promise<LegalDocumentVersion | null>;
+}
+
+/**
+ * 同意の記録（`UD-126`）。
+ *
+ * ⚠️ **書き換えも削除もしない。** 同意は起きた出来事で、あとから
+ * 無かったことにはできない。撤回したいときは、退会として別に扱う。
+ */
+export interface RecordConsentCommand {
+  readonly accountId: string;
+  readonly kind: ConsentRequiredKind;
+  readonly versionId: string;
+  readonly version: number;
+  readonly consentedAt: Date;
+}
+
+export interface LegalConsentRepository {
+  /**
+   * その人の直近の同意。まだ無ければ `null`。
+   *
+   * ⚠️ **「同意済みか」ではなく「どの版か」を返す。** 真偽値だと、
+   * 改定したあとに何に同意したのか分からなくなる。
+   */
+  findLatestConsent(
+    accountId: string,
+    kind: ConsentRequiredKind,
+  ): Promise<LegalConsentRecord | null>;
+
+  /**
+   * 同意した版より後に施行された版のうち、再同意の印が立っているものがあるか。
+   *
+   * ⚠️ **「新しい版があるか」ではない。** 印が立っているものだけを見る。
+   */
+  hasPendingReconsent(
+    kind: ConsentRequiredKind,
+    consentedVersion: number,
+    now: Date,
+  ): Promise<boolean>;
+
+  /**
+   * 同意を記録する。
+   *
+   * ⚠️ **同じ版へ二重に押しても増やさない。** 画面の二度押しや
+   * 再読み込みで行が増えると、いつ同意したのかが読めなくなる。
+   */
+  recordConsent(command: RecordConsentCommand): Promise<LegalConsentRecord>;
 }

@@ -343,3 +343,173 @@ describe('操作の記録', () => {
     expect(entries[0]?.summary).toMatchObject({ kind: 'terms', version: 1 });
   });
 });
+
+/**
+ * 規約への同意（`UD-126` 決定 2026-08-19）。
+ *
+ * ⚠️ **この組の主題は「締め出しを作らないこと」と「読んでいない条件に
+ * 同意させないこと」。**
+ */
+describe('規約への同意', () => {
+  async function publishTerms(
+    token: string,
+    body: string,
+    options: { readonly requiresReconsent?: boolean } = {},
+  ): Promise<string> {
+    await saveTermsDraft(token, body);
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/legal/terms/publish')
+      .set(auth(token))
+      .send({
+        effectiveFrom: new Date(harness.clock.now().getTime() + 1_000).toISOString(),
+        ...(options.requiresReconsent === undefined
+          ? {}
+          : { requiresReconsent: options.requiresReconsent }),
+      })
+      .expect(201);
+    // 施行日をまたぐ。
+    harness.clock.set(new Date(harness.clock.now().getTime() + 60_000));
+    return response.body.id as string;
+  }
+
+  it('未認証では同意の状態を見られない', async () => {
+    await request(app.getHttpServer()).get('/api/v1/legal-consent').expect(401);
+  });
+
+  /*
+    ⚠️ **いちばん大事な試験。** 規約が未公開のときに同意を求めると、
+       立ち上げ時に誰もログインできなくなる。規約を公開できるのは
+       管理画面へ入れる人で、その人が入れなければ永久に公開できない。
+  */
+  it('規約が未公開なら同意を求めない（締め出しを作らない）', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/legal-consent')
+      .set(auth(actorToken('buyer', 'buyer-consent-1')))
+      .expect(200);
+    expect(response.body).toMatchObject({ required: false, reason: 'no_document', version: null });
+  });
+
+  it('公開されていれば、一度も同意していない人に求める', async () => {
+    await publishTerms(actorToken('operator', 'owner-c1', { isOwner: true }), '第1版の本文');
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/legal-consent')
+      .set(auth(actorToken('buyer', 'buyer-consent-2')))
+      .expect(200);
+    expect(response.body.required).toBe(true);
+    expect(response.body.reason).toBe('never_consented');
+    expect(response.body.version.bodyText).toBe('第1版の本文');
+  });
+
+  it('同意すると、次からは求められない', async () => {
+    const versionId = await publishTerms(
+      actorToken('operator', 'owner-c2', { isOwner: true }),
+      '第1版の本文',
+    );
+    const buyer = actorToken('buyer', 'buyer-consent-3');
+
+    const recorded = await request(app.getHttpServer())
+      .post('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .send({ versionId })
+      .expect(201);
+    expect(recorded.body).toMatchObject({ required: false, consentedVersion: 1 });
+
+    const again = await request(app.getHttpServer())
+      .get('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .expect(200);
+    expect(again.body).toMatchObject({ required: false, reason: 'already_consented' });
+  });
+
+  /*
+    ⚠️ **読んでいない条件に同意させない。** 画面が見ていた版と、いま
+       施行中の版が違えば断る。黙って差し替えると、利用者が読んだものと
+       記録が食い違う。
+  */
+  it('画面が見ていた版と食い違えば断る', async () => {
+    await publishTerms(actorToken('operator', 'owner-c3', { isOwner: true }), '第1版の本文');
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/legal-consent')
+      .set(auth(actorToken('buyer', 'buyer-consent-4')))
+      .send({ versionId: 'まったく別の版' })
+      .expect(409);
+    expect(response.body.error.code).toBe('LEGAL_CONSENT_VERSION_MISMATCH');
+  });
+
+  it('二度押しても記録は増えない', async () => {
+    const versionId = await publishTerms(
+      actorToken('operator', 'owner-c4', { isOwner: true }),
+      '第1版の本文',
+    );
+    const buyer = actorToken('buyer', 'buyer-consent-5');
+    for (const _ of [1, 2, 3]) {
+      await request(app.getHttpServer())
+        .post('/api/v1/legal-consent')
+        .set(auth(buyer))
+        .send({ versionId })
+        .expect(201);
+    }
+    const entries = harness.audit.entries.filter((entry) => entry.action === 'legal.consented');
+    // 監査ログは押した回数だけ残る（操作の記録なので）。
+    expect(entries).toHaveLength(3);
+    // 同意そのものは 1 件のまま。
+    const latest = await harness.legalConsents.findLatestConsent(
+      'account-buyer-consent-5',
+      'terms',
+    );
+    expect(latest?.version).toBe(1);
+  });
+
+  /*
+    ⚠️ **誤字の修正で全員を止めない。** 止めると、同意の画面が
+       「とりあえず押すもの」になり、同意という記録の意味が薄れる。
+  */
+  it('改定しても、再同意の印が無ければ求めない', async () => {
+    const owner = actorToken('operator', 'owner-c5', { isOwner: true });
+    const versionId = await publishTerms(owner, '第1版の本文');
+    const buyer = actorToken('buyer', 'buyer-consent-6');
+    await request(app.getHttpServer())
+      .post('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .send({ versionId })
+      .expect(201);
+
+    await publishTerms(owner, '第2版の本文（誤字を直しただけ）');
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .expect(200);
+    expect(response.body).toMatchObject({ required: false, reason: 'already_consented' });
+  });
+
+  it('再同意の印を立てて公開すると、次に確かめたときに求められる', async () => {
+    const owner = actorToken('operator', 'owner-c6', { isOwner: true });
+    const versionId = await publishTerms(owner, '第1版の本文');
+    const buyer = actorToken('buyer', 'buyer-consent-7');
+    await request(app.getHttpServer())
+      .post('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .send({ versionId })
+      .expect(201);
+
+    await publishTerms(owner, '第2版の本文（実質的な変更）', { requiresReconsent: true });
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/legal-consent')
+      .set(auth(buyer))
+      .expect(200);
+    expect(response.body.required).toBe(true);
+    expect(response.body.reason).toBe('reconsent');
+    expect(response.body.consentedVersion).toBe(1);
+  });
+
+  it('再同意の印は監査ログに残る', async () => {
+    await publishTerms(actorToken('operator', 'owner-c7', { isOwner: true }), '本文', {
+      requiresReconsent: true,
+    });
+    const entry = harness.audit.entries.find((item) => item.action === 'legal.published');
+    expect(entry?.summary).toMatchObject({ requiresReconsent: true });
+  });
+});

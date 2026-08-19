@@ -59,6 +59,8 @@ export const legalVersionSchema = z.object({
   bodyText: z.string().nullable(),
   tokushoho: tokushohoFieldsSchema.nullable(),
   effectiveFrom: z.string().nullable(),
+  /** この版から再同意を求めるか（`UD-126`）。 */
+  requiresReconsent: z.boolean(),
   publishedAt: z.string().nullable(),
   createdAt: z.string(),
   /**
@@ -109,6 +111,51 @@ export const publishLegalVersionRequestSchema = z
      * その場で効いてしまう。いつから効くのかを毎回書かせる。
      */
     effectiveFrom: z.string().datetime(),
+    /**
+     * この版から、利用者へもう一度同意を求めるか（`UD-126`）。
+     *
+     * ⚠️ **既定は false。** 誤字を直しただけの改定で全員を止めると、
+     * 同意の画面が「とりあえず押すもの」になり、同意という記録の意味が
+     * 薄れる。実質的な変更かどうかは、公開する人が決める。
+     */
+    requiresReconsent: z.boolean().default(false),
   })
   .strict();
 export type PublishLegalVersionRequest = z.infer<typeof publishLegalVersionRequestSchema>;
+
+/**
+ * 同意の状態（`UD-126`）。
+ *
+ * ⚠️ **同意を求めるのは利用規約だけ。** プライバシーポリシーを同じ
+ * チェックへ束ねない。個人情報保護法では利用目的は原則「公表」で足り、
+ * 「同意」が要るのは第三者提供などの場面。
+ */
+export const legalConsentStatusSchema = z.object({
+  required: z.boolean(),
+  /**
+   * なぜそう判定したか。
+   *
+   * ⚠️ `no_document` は「規約をまだ公開していない」。このとき同意は
+   * 求めない。求めると、規約を公開する人自身がログインできなくなる。
+   */
+  reason: z.enum(['no_document', 'already_consented', 'never_consented', 'reconsent']),
+  /** 同意を求める対象の版。求めないときは `null`。 */
+  version: legalVersionSchema.nullable(),
+  /** その人が最後に同意した版番号。まだ無ければ `null`。 */
+  consentedVersion: z.number().int().nullable(),
+});
+export type LegalConsentStatus = z.infer<typeof legalConsentStatusSchema>;
+
+export const recordConsentRequestSchema = z
+  .object({
+    /**
+     * 同意する版の ID。
+     *
+     * ⚠️ **画面が見ていた版を送らせる。** サーバー側で「いまの版」に
+     * 差し替えると、利用者が読んだものと記録が食い違う。読んだものと
+     * 違う版に同意させないため、食い違えば断る。
+     */
+    versionId: z.string().min(1),
+  })
+  .strict();
+export type RecordConsentRequest = z.infer<typeof recordConsentRequestSchema>;

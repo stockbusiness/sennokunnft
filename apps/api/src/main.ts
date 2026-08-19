@@ -27,6 +27,7 @@ import {
   PrismaAuditLogRepository,
   PrismaAuditLogReadRepository,
   PrismaLegalDocumentRepository,
+  PrismaLegalConsentRepository,
   PrismaWalletDeliveryAdminRepository,
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
@@ -173,6 +174,12 @@ async function bootstrap(): Promise<void> {
     「届いているのに処理されていない」ことに気づける唯一の手掛かりになる。
   */
   const paymentRepository = new PrismaPaymentRepository(prisma);
+
+  /*
+    法務文書。⚠️ 注文の作成からも引くので、ここで作って共有する。
+    ⚠️ 暗号鍵を要らない。公開する文なので秘密ではない。
+  */
+  const legalDocuments = new PrismaLegalDocumentRepository(prisma);
 
   const probes: DependencyProbe[] = [
     {
@@ -415,7 +422,10 @@ async function bootstrap(): Promise<void> {
            連携設定の保管庫と同じ経路に載せると、鍵を置いていない配備で
            法務ページごと開かなくなる。
       */
-      legalDocuments: new PrismaLegalDocumentRepository(prisma),
+      legalDocuments: {
+        documents: legalDocuments,
+        consents: new PrismaLegalConsentRepository(prisma),
+      },
       // ⚠️ 冪等キーは DB に置く。プロセス内メモリだと台数を増やした瞬間に効かなくなる。
       idempotency: new PrismaIdempotencyStore(prisma),
       /*
@@ -450,6 +460,17 @@ async function bootstrap(): Promise<void> {
         commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
         random: new CryptoRandom(),
         resolvePlatformFeeRateBps,
+        /*
+          注文へ残す規約の版（`UD-126`）。
+          ⚠️ **同意を確かめる口ではない。** 同意は会員登録のときに取る。
+             ここは「何が表示されていたか」を注文へ残すためだけに引く。
+          ⚠️ 未公開なら null。**注文を止めない。** 止めると、規約を
+             公開する前に手元で試すことができなくなる。
+        */
+        resolveEffectiveTerms: async () => {
+          const effective = await legalDocuments.findEffective('terms', new Date());
+          return effective === null ? null : { id: effective.id, version: effective.version };
+        },
         reservationMinutes: env.ORDER_RESERVATION_MINUTES,
         internalJobToken: env.INTERNAL_JOB_TOKEN,
       },

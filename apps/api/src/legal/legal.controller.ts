@@ -1,10 +1,15 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import type {
+  LegalConsentStatus,
   LegalVersionListResponse,
   LegalVersionView,
   PublicLegalDocument,
 } from '@sengoku/contracts';
-import { publishLegalVersionRequestSchema, saveLegalDraftRequestSchema } from '@sengoku/contracts';
+import {
+  publishLegalVersionRequestSchema,
+  recordConsentRequestSchema,
+  saveLegalDraftRequestSchema,
+} from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
 import { isLegalDocumentKind, type LegalDocumentKind } from '@sengoku/domain';
 import { CurrentActor, Public, RequireAction } from '../auth/auth.guard';
@@ -25,6 +30,32 @@ export class PublicLegalController {
   @Public()
   read(@Param('kind') kind: string): Promise<PublicLegalDocument> {
     return this.legal.public(parseKind(kind));
+  }
+}
+
+/**
+ * 規約への同意（`UD-126`）。
+ *
+ * ⚠️ **会員なら誰でも使える。** 運営の権限を要らない。同意するのは
+ * 利用者本人で、代理はできない。
+ *
+ * ⚠️ **`@Public()` にしない。** 誰が同意したのかを記録するため、
+ * 認証済みであることが要る。
+ */
+@Controller('api/v1/legal-consent')
+export class LegalConsentController {
+  constructor(private readonly legal: LegalService) {}
+
+  @Get()
+  @RequireAction('legal.consent')
+  status(@CurrentActor() actor: Actor): Promise<LegalConsentStatus> {
+    return this.legal.consentStatus(actor);
+  }
+
+  @Post()
+  @RequireAction('legal.consent')
+  record(@CurrentActor() actor: Actor, @Body() body: unknown): Promise<LegalConsentStatus> {
+    return this.legal.recordConsent(actor, parseOrThrow(recordConsentRequestSchema, body));
   }
 }
 

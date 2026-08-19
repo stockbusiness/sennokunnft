@@ -106,6 +106,17 @@ export interface LegalDocumentVersion {
   readonly tokushoho: TokushohoFields | null;
   /** 施行日。⚠️ 未来の日付を入れられる。公開の予約になる。 */
   readonly effectiveFrom: Date | null;
+  /**
+   * この版から、利用者へ**もう一度同意を求める**か（`UD-126`）。
+   *
+   * ⚠️ **システムに判定させない。** 誤字を直しただけの改定で全員を
+   * 止めると、同意の画面が「とりあえず押すもの」になり、同意という
+   * 記録の意味が薄れる。実質的な変更かどうかは、公開する人が決める。
+   *
+   * ⚠️ 同意を求めるのは利用規約だけ（`consent.ts`）。ほかの種類で
+   * 立てても効かない。
+   */
+  readonly requiresReconsent: boolean;
   readonly publishedAt: Date | null;
   readonly createdByAccountId: string;
   readonly publishedByAccountId: string | null;
@@ -192,6 +203,13 @@ export interface PublishInput {
   readonly version: LegalDocumentVersion;
   readonly effectiveFrom: Date;
   readonly publishedByAccountId: string;
+  /**
+   * この版から再同意を求めるか。
+   *
+   * ⚠️ **公開のときにしか決められない。** あとから立てられる形にすると、
+   * 「いつから求め始めたのか」が版から読み取れなくなる。
+   */
+  readonly requiresReconsent: boolean;
   readonly now: Date;
   /**
    * いま施行中の版の施行日。無ければ `null`。
@@ -247,6 +265,7 @@ export function publish(input: PublishInput): Result<LegalDocumentVersion, Domai
     effectiveFrom,
     publishedAt: now,
     publishedByAccountId: input.publishedByAccountId,
+    requiresReconsent: input.requiresReconsent,
   });
 }
 
