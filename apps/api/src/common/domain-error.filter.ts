@@ -108,6 +108,12 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PAYMENT_CREDENTIAL_CHECK_REQUIRED: HttpStatus.CONFLICT,
   PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: HttpStatus.CONFLICT,
   PAYMENT_CREDENTIAL_IN_USE: HttpStatus.CONFLICT,
+  // --- 返金と精算（`UD-104` / `UD-119`）---
+  // ⚠️ 409。状態が理由なので、同じ要求をやり直しても変わらない。
+  REFUND_NOT_ALLOWED: HttpStatus.CONFLICT,
+  REFUND_WINDOW_CLOSED: HttpStatus.CONFLICT,
+  REFUND_ALREADY_DONE: HttpStatus.CONFLICT,
+  SETTLEMENT_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
   // --- 注文の検索と問い合わせ対応（`UD-121`）---
   ORDER_SEARCH_INVALID: HttpStatus.BAD_REQUEST,
   ORDER_NOTE_INVALID: HttpStatus.BAD_REQUEST,
@@ -218,6 +224,13 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: 'この世代は有効化できません。状態をご確認ください。',
   PAYMENT_CREDENTIAL_IN_USE:
     'この世代はいま新規のお支払いを受け付けています。先に切り替えてください。',
+  REFUND_NOT_ALLOWED: 'このご注文は返金の対象外です。お支払いの状況をご確認ください。',
+  // ⚠️ 「できません」で終わらせない。運営の不具合なら期限の外でも返金する。
+  REFUND_WINDOW_CLOSED:
+    '返金を承れる期間を過ぎています。当方の不具合が原因の場合は期間を問わず対応しますので、事情をご確認ください。',
+  REFUND_ALREADY_DONE: 'このご注文はすでに全額を返金済みです。',
+  SETTLEMENT_SETTINGS_INVALID:
+    'この設定では保存できません。返金を受け付ける期間が、お支払いまでの猶予を超えていないかご確認ください。',
   ORDER_SEARCH_INVALID:
     '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
   ORDER_NOTE_INVALID:

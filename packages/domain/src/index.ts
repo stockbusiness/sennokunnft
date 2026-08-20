@@ -543,6 +543,31 @@ export {
 } from './order/timeline';
 
 export {
+  REFUND_REASONS,
+  decideRefund,
+  refundStatusAfter,
+  type RefundDecision,
+  type RefundEffects,
+  type RefundEligibilityInput,
+  type RefundReason,
+} from './order/refund';
+
+export {
+  TRANSFER_FEE_BEARERS,
+  REFUND_WINDOW_DAYS_MIN,
+  REFUND_WINDOW_DAYS_MAX,
+  PAYOUT_OFFSET_MONTHS_MIN,
+  PAYOUT_OFFSET_MONTHS_MAX,
+  MINIMUM_PAYOUT_AMOUNT_MAX,
+  refundableUntil,
+  validateSettlementSettings,
+  type SettlementSettings,
+  type TransferFeeBearer,
+} from './settlement/settings';
+
+export type { SettlementSettingsRepository } from './ports/settlement';
+
+export {
   ORDER_NOTE_MAX_LENGTH,
   validateOrderNote,
   type OrderNoteDraft,

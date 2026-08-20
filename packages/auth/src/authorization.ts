@@ -76,6 +76,18 @@ export const ACTIONS = [
   'payment_credential.view',
   // ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。入金先が変わる操作。
   'payment_credential.manage',
+  // --- 返金と精算の設定（`UD-104` / `UD-119`）---
+  // ⚠️ 見るのは運営と閲覧者にも開く。返金の期限が見えないと、
+  //    問い合わせに答えられない。
+  'settlement.view',
+  /**
+   * 返金の期限・締め・最低支払額・振込手数料の負担を変える。
+   *
+   * ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。購入者への返金と
+   * 作家さまへの支払いの**両方**を動かす。運営の 1 人が乗っ取られただけで、
+   * 「返金を受け付けない」「支払いを止める」に書き換えられてしまう。
+   */
+  'settlement.manage',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -176,6 +188,9 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'payment_credential.view',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'payment_credential.manage',
+    'settlement.view',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'settlement.manage',
   ],
   auditor: [
     'artwork.view_public',
@@ -191,6 +206,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'legal.view',
     'legal.consent',
     'payment_credential.view',
+    // ⚠️ 監査は返金の条件を確かめられる必要がある。変えることはできない。
+    'settlement.view',
   ],
 };
 
@@ -229,6 +246,9 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   // ⚠️ **入金先が変わる操作。** 運営の 1 人が乗っ取られただけで、
   //    売上の振込先を差し替えられてしまう。
   'payment_credential.manage',
+  // ⚠️ **返金と支払いの両方を動かす操作**（`UD-104` / `UD-119`）。
+  //    「返金を受け付けない」「支払いを止める」に書き換えられる。
+  'settlement.manage',
 ];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {

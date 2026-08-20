@@ -151,6 +151,12 @@ function confirmCommand(seeded: Seeded, attempt = 0) {
     amount: 12000,
     currency: 'JPY',
     paidAt: NOW,
+    /*
+      返金を受け付ける期限（`UD-104`）。
+      ⚠️ **決済確定の瞬間に決めて渡す。** リポジトリ側で設定を読み直さない。
+         読み直すと、日数を変えた瞬間に過去の注文の期限が動く。
+    */
+    refundableUntil: new Date(NOW.getTime() + 14 * 86_400_000),
     outboxEventId: randomUUID(),
     now: NOW,
   };
@@ -167,6 +173,12 @@ suite('決済成功の確定（決定A）', () => {
     expect(order.status).toBe('paid');
     expect(order.paymentStatus).toBe('succeeded');
     expect(order.paidAt).not.toBeNull();
+    /*
+      ⚠️ **返金の期限は、決済確定と同じ更新で焼き付ける**（`UD-104`）。
+         別の更新に分けると、片方だけ通った注文が残り、
+         「支払い済みだが期限が無い」＝返金の判定を通らない行になる。
+    */
+    expect(order.refundableUntil?.getTime()).toBe(NOW.getTime() + 14 * 86_400_000);
 
     const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: seeded.orderId } });
     expect(payment.status).toBe('succeeded');

@@ -35,6 +35,11 @@ import {
   adminOrderTimelineResponseSchema,
   adminOrderNotesResponseSchema,
   orderNoteViewSchema,
+  settlementSettingsSchema,
+  settlementSettingsResponseSchema,
+  type SettlementSettingsResponse,
+  type SettlementSettingsView,
+  type UpdateSettlementSettingsRequest,
   type AdminOrderTimelineResponse,
   type AdminOrderNotesResponse,
   type OrderNoteView,
@@ -213,7 +218,7 @@ async function callAdmin<T>(
   return { ok: false, reason: lastReason };
 }
 
-function json(body: unknown, method: 'POST' | 'PATCH'): RequestInit {
+function json(body: unknown, method: 'POST' | 'PATCH' | 'PUT'): RequestInit {
   return {
     method,
     headers: { 'content-type': 'application/json' },
@@ -577,6 +582,34 @@ export function lookupAdminOrdersByEmail(
     '/api/v1/admin/orders/search',
     adminOrderListResponseSchema,
     json({ email, limit }, 'POST'),
+  );
+}
+
+// --- 返金と精算の設定（`UD-104` / `UD-119`）---------------------------------
+
+/**
+ * いまの設定。
+ *
+ * ⚠️ **未設定なら `settings` が `null`。** 既定値を作らない。作ると、
+ * 決めていないのに「決まっている」ように見える。
+ */
+export function fetchSettlementSettings(): Promise<AdminResult<SettlementSettingsResponse>> {
+  return callAdmin('/api/v1/admin/settlement-settings', settlementSettingsResponseSchema);
+}
+
+/**
+ * 設定を書き換える。
+ *
+ * ⚠️ **オーナー限定＋再認証**（API 側で縛る）。ここで変わるのは
+ * 「これから」だけで、過去の注文の返金期限も確定した精算も動かない。
+ */
+export function updateSettlementSettings(
+  request: UpdateSettlementSettingsRequest,
+): Promise<AdminResult<SettlementSettingsView>> {
+  return callAdmin(
+    '/api/v1/admin/settlement-settings',
+    settlementSettingsSchema,
+    json(request, 'PUT'),
   );
 }
 

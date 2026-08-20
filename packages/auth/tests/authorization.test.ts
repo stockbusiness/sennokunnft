@@ -42,6 +42,13 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   // 問い合わせ対応（`UD-121`）。⚠️ auditor には渡していない。
   // 一覧を見ることと、人に紐づけて注文の有無を答えられることは別の力。
   'order.lookup_buyer': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // 返金・精算の設定（`UD-104` / `UD-119`）。
+  // ⚠️ 見るのは auditor にも開く。返金の条件を確かめられないと監査にならない。
+  //    変えるのはオーナーだけ（`OWNER_ONLY_ACTIONS` が追加で縛る）。
+  'settlement.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ この表は「オーナーの印が無い人」の判定。オーナー限定なので
+  //    operator でも拒否になる（下の「オーナーの印」で別に確かめる）。
+  'settlement.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
   'order.note': { anonymous: false, buyer: false, operator: true, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
@@ -262,6 +269,8 @@ describe('オーナーの印', () => {
     'integration.manage_secret',
     'legal.publish',
     'payment_credential.manage',
+    // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
+    'settlement.manage',
   ] as const;
 
   for (const action of STAFF_ACTIONS) {

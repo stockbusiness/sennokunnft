@@ -262,6 +262,17 @@ export interface RecordCheckoutSessionCommand {
 /** 決済成功を確定するときの値。 */
 export interface ConfirmPaymentCommand {
   readonly orderId: string;
+  /**
+   * 返金を受け付ける期限（`UD-104`）。
+   *
+   * ⚠️ **ここで確定して焼き付ける。** 判定のたびに「決済日 + 設定値」を
+   * 計算しない。計算すると、14 日 → 30 日に変えた瞬間、精算済みの注文が
+   * 「まだ返金できる」に化ける。
+   *
+   * ⚠️ 設定が未設定の配備では `null`。そのときは購入者都合の返金が
+   * 通らなくなる——**期限を勝手に決めるより良い**。
+   */
+  readonly refundableUntil: Date | null;
   readonly provider: string;
   readonly eventId: string;
   readonly sessionRef: string | null;

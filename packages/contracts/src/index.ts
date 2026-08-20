@@ -239,3 +239,13 @@ export {
   type RegisterPaymentCredentialRequest,
   type ActivatePaymentCredentialRequest,
 } from './payment-credential';
+
+export {
+  TRANSFER_FEE_BEARER_VALUES,
+  settlementSettingsSchema,
+  settlementSettingsResponseSchema,
+  updateSettlementSettingsRequestSchema,
+  type SettlementSettingsView,
+  type SettlementSettingsResponse,
+  type UpdateSettlementSettingsRequest,
+} from './settlement';
