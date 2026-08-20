@@ -6,10 +6,16 @@ import {
   type DomainError,
   type PaymentGatewayPort,
   type ProviderPaymentFact,
+  type RefundExecuted,
+  type RefundPaymentInput,
   type Result,
 } from '@sengoku/domain';
 
-import type { PaymentConfigResolver, ResolvedPaymentConfig } from './payment-config';
+import type {
+  PaymentConfigByCredentialResolver,
+  PaymentConfigResolver,
+  ResolvedPaymentConfig,
+} from './payment-config';
 
 /**
  * 署名検証で試す設定を、新しい順に返す口（`UD-128`）。
@@ -61,6 +67,14 @@ export class ResolvingPaymentGateway implements PaymentGatewayPort {
     private readonly verificationConfigs: WebhookVerificationConfigs | null = null,
     /** 検証が通った世代を記録する口。⚠️ 署名の中身は残さない。 */
     private readonly onVerified: ((credentialId: string) => Promise<void>) | null = null,
+    /**
+     * 返金のときに、決済した当時の世代を開く口（`UD-120`）。
+     *
+     * ⚠️ 省略すると、返金も受付中の世代で投げることになる。運営会社を
+     * 切り替えたあとに過去の注文を返金できなくなるので、世代を運用する
+     * 配備では必ず渡すこと。
+     */
+    private readonly resolveByCredential: PaymentConfigByCredentialResolver | null = null,
   ) {
     this.provider = provider;
   }
@@ -124,6 +138,54 @@ export class ResolvingPaymentGateway implements PaymentGatewayPort {
          手掛かりになる。
     */
     return err(lastError ?? domainError('WEBHOOK_SIGNATURE_INVALID', 'no credential matched'));
+  }
+
+  /**
+   * 返金を投げる（`UD-120`）。
+   *
+   * ⚠️ **決済した当時の世代で開く。** 受付中の世代で投げると、運営会社の
+   * 切り替え後に「そんな決済は無い」と断られる（`UD-118` §2）。
+   *
+   * ⚠️ **開けなかったら、受付中の世代へ落ちない。** 落ちると、別の
+   * アカウントへ返金を投げることになる。金額が合っていれば通ってしまい、
+   * **無関係のアカウントから現金が出ていく。** 断る方がはるかに軽い。
+   */
+  async refundPayment(input: RefundPaymentInput): Promise<Result<RefundExecuted, DomainError>> {
+    const resolved = await this.refundConfig(input.credentialId);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    return this.gatewayFor(resolved.value).refundPayment(input);
+  }
+
+  private async refundConfig(
+    credentialId: string | null,
+  ): Promise<Result<ResolvedPaymentConfig, DomainError>> {
+    if (credentialId === null) {
+      /*
+        世代を通していない決済（緊急上書き中・`fake`）。
+        ⚠️ **ここだけは、いま解決できる設定で投げる。** ほかに手掛かりが
+           無い。緊急上書きを常用してはいけない理由がこれで、
+           そのとき作られた決済は「どの鍵で返すか」を追えない。
+      */
+      const current = await this.resolve();
+      return current.ok ? { ok: true, value: current.config } : err(reasonToError(current.reason));
+    }
+
+    if (this.resolveByCredential === null) {
+      return err(
+        domainError('REFUND_CREDENTIAL_UNAVAILABLE', 'credential resolver is not configured'),
+      );
+    }
+
+    const resolved = await this.resolveByCredential(credentialId);
+    if (!resolved.ok) {
+      // ⚠️ 直し方は「その世代の鍵を取り込み直す」。注文側ではない。
+      return err(
+        domainError('REFUND_CREDENTIAL_UNAVAILABLE', 'the original credential cannot be opened'),
+      );
+    }
+    return { ok: true, value: resolved.config };
   }
 
   private async verificationCandidates(): Promise<

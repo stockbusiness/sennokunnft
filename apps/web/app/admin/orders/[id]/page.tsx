@@ -3,6 +3,7 @@ import { EmptyState, Notice, PageHeader, PriceTag, StatusBadge } from '@sengoku/
 import {
   fetchAdminOrder,
   fetchAdminOrderNotes,
+  fetchAdminOrderRefunds,
   fetchAdminOrderTimeline,
 } from '../../../../src/admin-client';
 import { ADMIN_COPY } from '../../../../src/admin-copy';
@@ -21,8 +22,12 @@ import {
   timelineKindLabel,
   timelineDetailText,
   shortId,
+  REFUND_COPY,
+  refundRecordStatusLabel,
+  refundReasonLabel,
 } from '../../../../src/order-copy';
 import { OrderNoteForm } from './note-form';
+import { RefundForm } from './refund-form';
 
 /**
  * 注文の詳細（指示書 §9.2）。
@@ -40,10 +45,11 @@ export default async function AdminOrderDetailPage({
     ⚠️ 3 本まとめて引く。順番に待つと、詳細が出るまでの待ち時間が
        そのぶん伸びる。どれか 1 本が落ちても、残りは出す。
   */
-  const [result, timeline, notes] = await Promise.all([
+  const [result, timeline, notes, refunds] = await Promise.all([
     fetchAdminOrder(id),
     fetchAdminOrderTimeline(id),
     fetchAdminOrderNotes(id),
+    fetchAdminOrderRefunds(id),
   ]);
 
   if (!result.ok) {
@@ -320,6 +326,70 @@ export default async function AdminOrderDetailPage({
         </ul>
       )}
       <OrderNoteForm orderId={id} />
+
+      <section>
+        <h2>{REFUND_COPY.heading}</h2>
+        {!refunds.ok ? (
+          <p>{ADMIN_COPY.unavailableHint}</p>
+        ) : refunds.data.items.length === 0 ? (
+          <p>{REFUND_COPY.listEmpty}</p>
+        ) : (
+          <ul className="sengoku-order-list">
+            {refunds.data.items.map((row) => (
+              <li className="sengoku-order-card" key={row.id}>
+                <div className="sengoku-order-card__head">
+                  <PriceTag price={{ amount: row.amount, currency: row.currency }} />{' '}
+                  <StatusBadge
+                    tone={
+                      row.status === 'succeeded'
+                        ? 'success'
+                        : row.status === 'failed'
+                          ? 'warning'
+                          : 'neutral'
+                    }
+                    label={refundRecordStatusLabel(row.status)}
+                  />
+                </div>
+                <dl className="sengoku-facts">
+                  <dt>{REFUND_COPY.reasonLabel}</dt>
+                  <dd>{refundReasonLabel(row.reason)}</dd>
+                  <dt>経路</dt>
+                  <dd>
+                    {row.initiatedBy === 'provider'
+                      ? REFUND_COPY.initiatedByProvider
+                      : REFUND_COPY.initiatedByAdmin}
+                    {/*
+                      ⚠️ **氏名やメールは出せない**（`UD-503`）。
+                         見分けが付くのはアカウントIDの先頭までで、
+                         それで足りる。
+                    */}
+                    {row.actorAccountId === null ? '' : ` ／ ${shortId(row.actorAccountId)}`}
+                  </dd>
+                  <dt>日時</dt>
+                  <dd>{formatDateTime(row.settledAt ?? row.createdAt)}</dd>
+                  {row.note === null ? null : (
+                    <>
+                      <dt>記録</dt>
+                      {/* ⚠️ 文字として描く。HTML として解釈しない。 */}
+                      <dd>{row.note}</dd>
+                    </>
+                  )}
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <RefundForm
+          orderId={id}
+          /*
+            ⚠️ **隠すのは導線を分かりやすくするためで、保護ではない。**
+               返してよいかの判定は API 側にある。ここでは「お支払いが
+               済んでいて、まだ全額返していない」注文にだけ出す。
+          */
+          refundable={order.paymentStatus === 'succeeded' && order.refundStatus !== 'refunded'}
+        />
+      </section>
 
       <p className="sengoku-back-link">
         <a href="/admin/orders">{ORDER_COPY.backToOrders}</a>

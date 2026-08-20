@@ -85,9 +85,20 @@ import {
   canManuallyResend,
   err,
   ok,
+  refundStatusAfter,
   reserveSupply,
   PAYMENT_API_ENDPOINT,
   TOKUSHOHO_FIELD_KEYS,
+} from '@sengoku/domain';
+import type {
+  EntitlementStatus,
+  MintJobStatus,
+  RefundContext,
+  RefundRecordView,
+  RefundRepository,
+  RefundSettlement,
+  SettleRefundCommand,
+  StartRefundCommand,
 } from '@sengoku/domain';
 import {
   contentHash,
@@ -1329,6 +1340,178 @@ export class InMemorySettlementSettings implements SettlementSettingsRepository 
   }
 }
 
+/**
+ * 返金の記録（`UD-104` / `UD-120`）。
+ *
+ * ⚠️ **本物と同じところで断る。** 「代替実装だから通す」を作ると、
+ * 手元では通るのに本番で落ちる経路ができる。二重反映の防止（条件付きの
+ * 成立）と、`processing` を取り消さないことは、ここでも同じに保つ。
+ */
+export class InMemoryRefunds implements RefundRepository {
+  private readonly rows: RefundRecordView[] = [];
+  /** 決済ごとの返金累計。⚠️ 事業者と同じく累計で持つ。 */
+  private readonly refundedByOrder = new Map<string, number>();
+
+  constructor(
+    private readonly orders: InMemoryOrderRepository,
+    /** 受取権と発行ジョブの「いまの姿」。⚠️ 試験ごとに差し替える。 */
+    public entitlementStatus: EntitlementStatus | null = null,
+    public mintStatus: MintJobStatus | null = null,
+    /** 決済の世代と識別子。⚠️ `null` は「世代を通していない決済」。 */
+    public credentialId: string | null = 'cred-1',
+  ) {}
+
+  /**
+   * 事業者側の決済識別子を差し替える。
+   *
+   * ⚠️ **`null` にすると、擬似ゲートウェイが本物と同じ所で断る。**
+   * 「送れなかったときに記録がどう残るか」を確かめるために要る。
+   * `undefined` は既定（注文IDから導く）。
+   */
+  paymentRefOverride: string | null | undefined = undefined;
+
+  /** 試験から返金の記録を覗く。 */
+  get all(): readonly RefundRecordView[] {
+    return this.rows;
+  }
+
+  listByOrder(orderId: string): Promise<readonly RefundRecordView[]> {
+    return Promise.resolve(
+      this.rows
+        .filter((row) => row.orderId === orderId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+    );
+  }
+
+  async loadContext(orderId: string): Promise<RefundContext | null> {
+    const order = await this.orders.findById(orderId);
+    if (order === null) {
+      return null;
+    }
+    const paid = order.paymentStatus === 'succeeded';
+    return {
+      orderId,
+      totalAmount: order.totalAmount,
+      currency: order.currency,
+      // ⚠️ 焼き付けた値をそのまま返す。設定から計算し直さない。
+      refundableUntil: this.orders.refundableUntil.get(orderId) ?? null,
+      paymentStatus: order.paymentStatus,
+      refundStatus: order.refundStatus,
+      amountRefunded: this.refundedByOrder.get(orderId) ?? 0,
+      /*
+        ⚠️ **成功した決済があるかで見る。** `OrderView.hasPayment` は
+           代替実装では常に `false`（決済行を持たないため）なので、
+           そちらを見ると本物と違う経路を試験することになる。
+      */
+      paymentId: paid ? `payment-${orderId}` : null,
+      credentialId: this.credentialId,
+      paymentRef:
+        this.paymentRefOverride === undefined
+          ? paid
+            ? `pi_${orderId}`
+            : null
+          : this.paymentRefOverride,
+      chargeRef: null,
+      entitlementStatus: this.entitlementStatus,
+      mintStatus: this.mintStatus,
+    };
+  }
+
+  start(command: StartRefundCommand): Promise<RefundRecordView> {
+    const row: RefundRecordView = {
+      id: command.refundId,
+      orderId: command.orderId,
+      amount: command.amount,
+      currency: command.currency,
+      reason: command.reason,
+      status: 'requested',
+      initiatedBy: command.initiatedBy,
+      actorAccountId: command.actorAccountId,
+      providerRefundRef: command.providerRefundRef,
+      note: command.note,
+      failureCode: null,
+      createdAt: command.now,
+      settledAt: null,
+    };
+    this.rows.push(row);
+    return Promise.resolve(row);
+  }
+
+  async settle(command: SettleRefundCommand): Promise<RefundSettlement> {
+    const index = this.rows.findIndex((row) => row.id === command.refundId);
+    const row = index === -1 ? undefined : this.rows[index];
+    const order = await this.orders.findById(command.orderId);
+
+    // ⚠️ すでに成立していたら何もしない。二重反映しない。
+    if (row === undefined || row.status !== 'requested') {
+      return {
+        alreadySettled: true,
+        refundStatus: order?.refundStatus ?? 'none',
+        amountRefunded: command.amountRefundedTotal,
+        revokedEntitlements: 0,
+        cancelledMintJobs: 0,
+        annotatedMintJobs: 0,
+        restoredSupply: 0,
+      };
+    }
+
+    this.rows[index] = {
+      ...row,
+      status: 'succeeded',
+      providerRefundRef: command.providerRefundRef ?? row.providerRefundRef,
+      settledAt: command.now,
+    };
+    this.refundedByOrder.set(command.orderId, command.amountRefundedTotal);
+
+    const refundStatus = refundStatusAfter(command.amountRefundedTotal, order?.totalAmount ?? 0);
+    this.orders.setRefundStatus(command.orderId, refundStatus);
+
+    let revokedEntitlements = 0;
+    if (command.revokeEntitlement && this.entitlementStatus === 'issued') {
+      this.entitlementStatus = 'revoked';
+      revokedEntitlements = 1;
+    }
+
+    let cancelledMintJobs = 0;
+    if (command.cancelMintJob && this.mintStatus === 'queued') {
+      this.mintStatus = 'cancelled';
+      cancelledMintJobs = 1;
+    }
+
+    /*
+      ⚠️ **`processing` を `cancelled` にしない**（`INV-M4`）。注記だけ。
+         ここを簡略化すると、いちばん確かめたい不変条件が試験から消える。
+    */
+    const annotatedMintJobs = command.mintNote !== null && this.mintStatus === 'processing' ? 1 : 0;
+
+    return {
+      alreadySettled: false,
+      refundStatus,
+      amountRefunded: command.amountRefundedTotal,
+      revokedEntitlements,
+      cancelledMintJobs,
+      annotatedMintJobs,
+      restoredSupply: revokedEntitlements,
+    };
+  }
+
+  fail(input: { readonly refundId: string; readonly failureCode: string }): Promise<void> {
+    const index = this.rows.findIndex((row) => row.id === input.refundId);
+    const row = index === -1 ? undefined : this.rows[index];
+    // ⚠️ 行は消さない。「試したが駄目だった」ことを残す。
+    if (row !== undefined && row.status === 'requested') {
+      this.rows[index] = { ...row, status: 'failed', failureCode: input.failureCode };
+    }
+    return Promise.resolve();
+  }
+
+  findByProviderRef(providerRefundRef: string): Promise<RefundRecordView | null> {
+    return Promise.resolve(
+      this.rows.find((row) => row.providerRefundRef === providerRefundRef) ?? null,
+    );
+  }
+}
+
 export class InMemoryOrderNotes implements OrderNoteRepository {
   listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]> {
     return Promise.resolve(
@@ -1487,12 +1670,30 @@ export class InMemoryOrderRepository implements OrderRepository {
     return Promise.resolve();
   }
 
-  markPaid(orderId: string, paidAt: Date): Promise<void> {
+  /**
+   * 返金を受け付ける期限（`UD-104`）。
+   *
+   * ⚠️ `OrderView` には載せていない。画面が使う値ではなく、返金の判定が
+   * 読む記録なので、試験と返金の代替実装からだけ覗ける形にしてある。
+   */
+  readonly refundableUntil = new Map<string, Date | null>();
+
+  /** 返金の反映で使う。⚠️ 直接呼ぶのは代替実装だけ。 */
+  setRefundStatus(orderId: string, refundStatus: OrderView['refundStatus']): void {
+    const order = this.orders.get(orderId);
+    if (order !== undefined) {
+      this.orders.set(orderId, { ...order, refundStatus });
+    }
+  }
+
+  markPaid(orderId: string, paidAt: Date, refundableUntil: Date | null = null): Promise<void> {
     const order = this.orders.get(orderId);
     if (
       order !== undefined &&
       (order.status === 'pending' || order.status === 'checkout_created')
     ) {
+      // ⚠️ 決済確定の瞬間に焼き付ける。あとから設定を変えても動かさない。
+      this.refundableUntil.set(orderId, refundableUntil);
       this.orders.set(orderId, {
         ...order,
         status: 'paid',
@@ -1781,7 +1982,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     }
     const index = rows.indexOf(target);
     rows[index] = { ...target, status: 'succeeded', paidAt: command.paidAt };
-    void this.orders.markPaid(command.orderId, command.paidAt);
+    void this.orders.markPaid(command.orderId, command.paidAt, command.refundableUntil);
     // ⚠️ 1 件だけ。再送で 2 件になっていないことを試験が見る。
     this.outbox.push({ orderId: command.orderId, eventId: command.outboxEventId });
     return Promise.resolve(true);
@@ -1846,6 +2047,8 @@ export interface TestHarness extends AppDependencies {
   readonly paymentCredentialRepository: InMemoryPaymentCredentials;
   /** ⚠️ 未設定の配備を作るために、実体の型で持つ（`clear()`）。 */
   readonly settlement: InMemorySettlementSettings;
+  /** ⚠️ 受取権・発行ジョブの姿を差し替えるため、実体の型で持つ。 */
+  readonly refunds: InMemoryRefunds;
 }
 
 /**
@@ -2023,6 +2226,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const orderRepository = new InMemoryOrderRepository(artworks, accounts);
   const orderNotes = new InMemoryOrderNotes();
   const settlementSettings = new InMemorySettlementSettings();
+  const refunds = new InMemoryRefunds(orderRepository);
   const commonUserLinks = new InMemoryCommonUserLinks();
   const paymentRepository = new InMemoryPaymentRepository(orderRepository);
   const paymentGateway = new FakePaymentGateway(
@@ -2048,6 +2252,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     listings,
     // 返金・精算の設定（`UD-104` / `UD-119`）。⚠️ 既定は決定した値。
     settlement: settlementSettings,
+    // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
+    refunds,
     idempotency: new InMemoryIdempotencyStore(),
     accounts,
     staffMembers,

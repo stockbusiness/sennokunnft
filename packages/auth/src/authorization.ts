@@ -37,6 +37,20 @@ export const ACTIONS = [
   'order.lookup_buyer',
   /** 対応メモを書く。⚠️ 追記のみ。直す口も消す口も無い。 */
   'order.note',
+  /**
+   * 返金する（`UD-104` / `UD-120`）。
+   *
+   * ⚠️ **オーナー限定にしていない。** 問い合わせ対応の日常業務で、
+   * オーナーを待たせると「返金してもらえない」時間が延びる。
+   *
+   * ⚠️ **`payment_credential.manage` と重さが違う**——あちらは**これからの
+   * 売上の振込先**が変わる（乗っ取った本人の口座へ流れる）。返金は
+   * **払った本人のカードへ戻る**だけで、攻撃者の利得にならない。
+   * 被害の形が違うので、守りの重さも変える。
+   *
+   * ⚠️ **`auditor` には渡さない。** お金が動く操作である。
+   */
+  'order.refund',
   'checkout.create',
   'claim.inspect',
   'claim.accept',
@@ -164,6 +178,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     // ⚠️ 問い合わせ対応（`UD-121`）。`auditor` には渡していない。
     'order.lookup_buyer',
     'order.note',
+    // ⚠️ お金が動く。`auditor` には渡さない（記録は見られる）。
+    'order.refund',
     'collection.view',
     'mint_job.retry',
     'audit_log.view',

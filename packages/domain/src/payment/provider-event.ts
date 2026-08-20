@@ -14,7 +14,21 @@ import { err, ok, type Result } from '../shared/result';
  * `@sengoku/integrations` の Adapter で止める。
  */
 
-export const PAYMENT_FACTS = ['succeeded', 'failed', 'checkout_expired', 'ignored'] as const;
+export const PAYMENT_FACTS = [
+  'succeeded',
+  'failed',
+  'checkout_expired',
+  /**
+   * 返金された（`UD-120`）。
+   *
+   * ⚠️ **こちらから投げたぶんも、事業者の画面から返したぶんも、同じ形で
+   * 届く。** 運営が慌てて事業者の管理画面から返金するのは実際に起きる。
+   * 「こちら発の返金だけ追随する」にすると、そのとき状態がずれたまま
+   * 誰も気づかない。
+   */
+  'refunded',
+  'ignored',
+] as const;
 export type PaymentFactKind = (typeof PAYMENT_FACTS)[number];
 
 /** 事業者から来た、注文と突き合わせるための値。 */
@@ -37,6 +51,20 @@ export interface ProviderPaymentFact {
   readonly currency: string | null;
   /** 失敗のときの、こちらで決めた安全な符号。 */
   readonly failureCode: string | null;
+  /**
+   * 事業者が採番した返金の識別子（`kind === 'refunded'` のときだけ）。
+   *
+   * ⚠️ **これで二重反映を防ぐ。** こちらから投げた返金にも、あとから
+   * 知らせが届く。識別子で引き当てて、同じ返金を 2 回積まないようにする。
+   */
+  readonly refundRef: string | null;
+  /**
+   * その決済で返された累計額。
+   *
+   * ⚠️ **今回返した額ではなく累計。** 事業者は「この決済でいくら返した
+   * か」を積算で持つ。差分だと、知らせが前後して届いたときに合わなくなる。
+   */
+  readonly refundedTotal: number | null;
   readonly occurredAt: Date;
   /**
    * どの世代の鍵で署名を検証できたか（`UD-118` / `UD-128`）。

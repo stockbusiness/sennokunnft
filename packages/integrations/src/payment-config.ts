@@ -198,6 +198,58 @@ export function createPaymentConfigResolver(
   };
 }
 
+/**
+ * 決済した当時の世代で設定を開く（`UD-118` §2 / `UD-120`）。
+ *
+ * ⚠️ **受付中の世代では返金できない。** `payment_intent` は発行した
+ * アカウントに紐づくので、運営会社が変わったあとに新しい鍵で投げると
+ * 「そんな決済は無い」と断られる。返金は必ず**当時の世代**で開く。
+ *
+ * ⚠️ **`retired` でも開く。** 退役は「新規を受け付けない」であって、
+ * 「返金できない」ではない。退役した世代で返せなくなると、
+ * 切り替え直前の注文が宙に浮く。
+ *
+ * ⚠️ **「連携を止めている」を理由に断らない。** 止めるのは新規の
+ * お支払いであって、すでに頂いたお金を返すことではない。ここで
+ * `enabled` を見ると、事故を止めるために止めた瞬間に、
+ * その事故の返金までできなくなる。
+ */
+export type PaymentConfigByCredentialResolver = (
+  credentialId: string,
+) => Promise<PaymentConfigResolution>;
+
+export function createPaymentConfigByCredentialResolver(
+  options: PaymentConfigResolverOptions,
+): PaymentConfigByCredentialResolver {
+  return async (credentialId: string): Promise<PaymentConfigResolution> => {
+    if (options.credentials === null) {
+      return { ok: false, reason: 'no_credential' };
+    }
+    const opened = await options.credentials.open(credentialId);
+    if (opened === null) {
+      // 行が消えたか、復号できない。⚠️ 受付中の世代へ落ちない。
+      return { ok: false, reason: 'no_credential' };
+    }
+    return {
+      ok: true,
+      config: {
+        secretKey: opened.secretKey,
+        webhookSecret: opened.webhookSecret,
+        apiVersion: opened.apiVersion ?? options.deployment?.apiVersion ?? '',
+        /*
+          ⚠️ 戻り先は返金に要らないが、型を満たすために入れる。
+             返金は口を開かないので、ここが空でも支障がない。
+        */
+        successUrlTemplate: options.deployment?.successUrlTemplate ?? '',
+        cancelUrlTemplate: options.deployment?.cancelUrlTemplate ?? '',
+        settingsSource: 'environment',
+        keySource: 'generation',
+        credentialId: opened.id,
+      },
+    };
+  };
+}
+
 type KeyResolution =
   | {
       readonly ok: true;

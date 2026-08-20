@@ -10,6 +10,8 @@ import {
   type PaymentGatewayPort,
   type PaymentFactKind,
   type ProviderPaymentFact,
+  type RefundExecuted,
+  type RefundPaymentInput,
   type Result,
 } from '@sengoku/domain';
 
@@ -57,6 +59,36 @@ export class FakePaymentGateway implements PaymentGatewayPort {
         credentialId: null,
         url: `${this.checkoutBaseUrl}/${sessionRef}`,
         expiresAt: input.expiresAt,
+      }),
+    );
+  }
+
+  /**
+   * 返金を投げる（`UD-120`）。
+   *
+   * ⚠️ **常に成功する擬似実装にしない。** 事業者側の識別子が無ければ
+   * 断る。本物と同じところで落ちないと、手元では通るのに本番で
+   * 落ちる経路ができる。
+   *
+   * ⚠️ **冪等キーから識別子を導く。** 同じ返金の行で 2 回投げても
+   * 同じ識別子を返す。毎回違う値にすると、擬似のときだけ二重に
+   * 記録される。
+   */
+  refundPayment(input: RefundPaymentInput): Promise<Result<RefundExecuted, DomainError>> {
+    if (
+      (input.paymentRef === null || input.paymentRef === '') &&
+      (input.chargeRef === null || input.chargeRef === '')
+    ) {
+      return Promise.resolve(
+        err(domainError('REFUND_PROVIDER_ERROR', 'no provider payment reference')),
+      );
+    }
+    return Promise.resolve(
+      ok({
+        refundRef: `fake_re_${input.idempotencyKey}`,
+        amount: input.amount,
+        // 擬似では即時に返る。銀行振込の遅延は再現しない。
+        pending: false,
       }),
     );
   }
@@ -117,6 +149,9 @@ interface FakeEnvelope {
     readonly amount?: unknown;
     readonly currency?: unknown;
     readonly failure_code?: unknown;
+    readonly refund_ref?: unknown;
+    /** ⚠️ 累計。今回ぶんではない（本物と同じ形にそろえてある）。 */
+    readonly refunded_total?: unknown;
   };
 }
 
@@ -141,6 +176,8 @@ function toFact(payload: unknown, timestampSec: number): ProviderPaymentFact | n
     currency: typeof data.currency === 'string' ? data.currency : null,
     failureCode:
       typeof data.failure_code === 'string' ? toSafeFailureCode(data.failure_code) : null,
+    refundRef: typeof data.refund_ref === 'string' ? data.refund_ref : null,
+    refundedTotal: typeof data.refunded_total === 'number' ? data.refunded_total : null,
     occurredAt: new Date(timestampSec * 1000),
     // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
     credentialId: null,
@@ -152,6 +189,7 @@ function toKind(eventType: string): PaymentFactKind {
   if (eventType === 'payment.succeeded') return 'succeeded';
   if (eventType === 'payment.failed') return 'failed';
   if (eventType === 'checkout.expired') return 'checkout_expired';
+  if (eventType === 'payment.refunded') return 'refunded';
   // ⚠️ 知らないものは無視する。拒否すると、相手が再送し続ける。
   return 'ignored';
 }

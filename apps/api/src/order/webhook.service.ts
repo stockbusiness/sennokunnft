@@ -12,6 +12,7 @@ import {
   type ProviderPaymentFact,
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
+import type { RefundService } from './refund.service';
 
 export interface WebhookServiceConfig {
   readonly provider: string;
@@ -50,6 +51,13 @@ export class PaymentWebhookService {
     private readonly audit: AuditLogPort,
     private readonly logger: Logger,
     private readonly config: WebhookServiceConfig,
+    /**
+     * 事業者の画面からの返金に追随する（`UD-120`）。
+     *
+     * ⚠️ **省略できるようにしていない。** 追随しないと、返金済みの注文が
+     * こちらでは「お支払い済み」のまま残り、精算にまで乗る。
+     */
+    private readonly refunds: RefundService,
   ) {}
 
   /**
@@ -145,6 +153,11 @@ export class PaymentWebhookService {
       return true;
     }
 
+    if (fact.kind === 'refunded') {
+      await this.follow(fact, order.id, order.orderNumber, now);
+      return true;
+    }
+
     if (fact.kind === 'failed') {
       await this.payments.recordFailure({
         orderId: order.id,
@@ -180,6 +193,53 @@ export class PaymentWebhookService {
     });
     await this.recordAndFinish(fact, 'processed', order.id, null, now);
     return true;
+  }
+
+  /**
+   * 事業者の画面からの返金に追随する（`UD-120`）。
+   *
+   * ⚠️ **こちらから投げた返金にも、この知らせは届く。** 二重に積まない
+   * 判定は `RefundService` が識別子で行う。ここでは判定しない。
+   *
+   * ⚠️ **追随に失敗しても 200 を返す。** 4xx/5xx を返すと事業者が再送し
+   * 続け、いずれ宛先ごと無効化される。失敗は記録に残して人が拾う。
+   */
+  private async follow(
+    fact: ProviderPaymentFact,
+    orderId: string,
+    orderNumber: string,
+    now: Date,
+  ): Promise<void> {
+    if (fact.refundedTotal === null) {
+      // 累計が読めない知らせでは金額を動かせない。⚠️ 推測で埋めない。
+      await this.recordAndFinish(fact, 'ignored', orderId, 'refund_total_missing', now);
+      return;
+    }
+
+    try {
+      const outcome = await this.refunds.followProviderRefund({
+        orderId,
+        providerRefundRef: fact.refundRef,
+        refundedTotal: fact.refundedTotal,
+        now,
+      });
+      await this.audit.record({
+        actorAccountId: null,
+        action: outcome === null ? 'payment.refund_already_known' : 'payment.refunded',
+        targetType: 'order',
+        targetId: orderId,
+        summary: { orderNumber, refundedTotal: fact.refundedTotal },
+      });
+      await this.recordAndFinish(fact, 'processed', orderId, null, now);
+    } catch {
+      /*
+        ⚠️ **例外の中身をログへ出さない。** 返金の処理には金額が載る。
+           運営が知りたいのは「追随できなかった注文がある」までで、
+           詳しくは注文の画面で見るほうが正確。
+      */
+      this.logger.error({ orderId }, '事業者からの返金に追随できませんでした');
+      await this.recordAndFinish(fact, 'failed', orderId, 'refund_follow_failed', now);
+    }
   }
 
   private async confirm(

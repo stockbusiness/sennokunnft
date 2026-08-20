@@ -207,6 +207,8 @@ describe('決済事業者の知らせと注文の突き合わせ', () => {
       amount: 12000,
       currency: 'jpy',
       failureCode: null,
+      refundRef: null,
+      refundedTotal: null,
       occurredAt: NOW,
       credentialId: 'cred-1',
       ...overrides,
@@ -288,6 +290,8 @@ describe('本番と試験の取り違え', () => {
       amount: null,
       currency: null,
       failureCode: null,
+      refundRef: null,
+      refundedTotal: null,
       occurredAt: NOW,
       credentialId: null,
     };

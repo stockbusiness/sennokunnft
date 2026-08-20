@@ -55,48 +55,63 @@ export function createTestClient(): PrismaClient {
  * 初期値はマイグレーションが一度だけ入れる決まりになっている
  * （`docs/SETTLEMENT_AND_REFUND.md` §1）。消えたまま次の試験が走ると、
  * すべての試験が「返金の取り決めが未登録」の配備を相手にすることになり、
- * 本番と違う前提で緑になる。控えて戻す。
- *
- * ⚠️ **値をここに書き写さない。** 書き写すと、既定値がマイグレーションと
- * この助っ人の 2 か所になる。読み出して、そのまま戻す。
+ * **本番と違う前提で緑になる**。切ったあとに必ず戻す。
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   const settlement = await prisma.settlementSettings.findMany();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, payments, orders,
-      wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
+      nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, refunds, payments,
+      orders, wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
       webhook_events, outbox_events, audit_logs, legal_consents, legal_document_versions,
       payment_credentials, settlement_settings
     RESTART IDENTITY CASCADE
   `);
+
   /*
-    ⚠️ **空だったら黙って進めない。** マイグレーションが必ず 2 行入れるので、
-       ここが空なのは「前の実行が truncate と復元の間で落ちた」ときだけ。
-       そのまま進めると、以降の試験がすべて「取り決めが未登録」の配備を
-       相手に緑になる。本番と違う前提で緑になるのが、いちばん質が悪い。
-       直し方: `pnpm --filter @sengoku/database exec prisma migrate reset`。
+    ⚠️ **変更者（`updated_by_account_id`）は復元しない。** アカウントごと
+       消えているので、参照が宙に浮く。取り決めの中身だけを戻す。
   */
-  if (settlement.length === 0) {
-    throw new Error(
-      'settlement_settings が空です。マイグレーションが入れた取り決めが失われています。' +
-        'prisma migrate reset で作り直してください。',
-    );
-  }
-  {
-    // ⚠️ 変更者（`updated_by_account_id`）は復元しない。アカウントごと
-    //    消えているため、参照が宙に浮く。取り決めの中身だけを戻す。
-    await prisma.settlementSettings.createMany({
-      data: settlement.map((row) => ({
-        environment: row.environment,
-        refundWindowDays: row.refundWindowDays,
-        payoutOffsetMonths: row.payoutOffsetMonths,
-        minimumPayoutAmount: row.minimumPayoutAmount,
-        transferFeeBearer: row.transferFeeBearer,
-      })),
-    });
-  }
+  const rows = settlement.length > 0 ? settlement : SEEDED_SETTLEMENT_SETTINGS;
+  await prisma.settlementSettings.createMany({
+    data: rows.map((row) => ({
+      environment: row.environment,
+      refundWindowDays: row.refundWindowDays,
+      payoutOffsetMonths: row.payoutOffsetMonths,
+      minimumPayoutAmount: row.minimumPayoutAmount,
+      transferFeeBearer: row.transferFeeBearer,
+    })),
+  });
 }
+
+/**
+ * 取り決めが失われていたときに戻す値。
+ *
+ * ⚠️ **これは既定値の定義ではない。** 正はマイグレーション
+ * （`20260820100000_settlement_settings`）で、ここはその**写し**。
+ * 写しを置いているのは、前の実行が途中で落ちて表が空のまま残ったときに、
+ * 以降の試験がすべて「未設定の配備」を相手に緑になるのを避けるため。
+ *
+ * ⚠️ **写しがずれたら試験が落ちる。** `settlement.test.ts` の
+ * 「マイグレーションが staging と production の両方へ入れている」が、
+ * マイグレーションの入れた値を直接見ている。
+ */
+const SEEDED_SETTLEMENT_SETTINGS = [
+  {
+    environment: 'staging',
+    refundWindowDays: 14,
+    payoutOffsetMonths: 1,
+    minimumPayoutAmount: 1000,
+    transferFeeBearer: 'creator',
+  },
+  {
+    environment: 'production',
+    refundWindowDays: 14,
+    payoutOffsetMonths: 1,
+    minimumPayoutAmount: 1000,
+    transferFeeBearer: 'creator',
+  },
+] as const;
 
 /** PostgreSQL のエラーコードを取り出す（制約違反の種別を確かめるため）。 */
 export function pgErrorCode(error: unknown): string | undefined {

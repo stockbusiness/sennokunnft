@@ -50,6 +50,14 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   //    operator でも拒否になる（下の「オーナーの印」で別に確かめる）。
   'settlement.manage': { anonymous: false, buyer: false, operator: false, auditor: false },
   'order.note': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
+    ⚠️ **オーナーの印を要らない。** 問い合わせ対応の日常業務で、返金を
+       止めると「返してもらえない」時間が延びる。乗っ取られたときの被害も
+       `payment_credential.manage`（これからの売上の振込先が変わる）とは
+       違い、払った本人のカードへ戻るだけで攻撃者の利得にならない。
+    ⚠️ **`auditor` には渡さない。** お金が動く操作である。
+  */
+  'order.refund': { anonymous: false, buyer: false, operator: true, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },

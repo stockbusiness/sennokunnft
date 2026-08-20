@@ -412,3 +412,63 @@ const TIMELINE_DETAIL_LABELS: Readonly<Record<string, string>> = {
   // ⚠️ `body` と `authorAccountId` はここに載せない。
   //    対応メモは専用の見せ方（`notes`）で出す。
 };
+
+/**
+ * 返金の画面文言（`UD-104` / `UD-120`）。
+ *
+ * ⚠️ **「返金できません」で終わらせない。** 発行が進んだ注文は機械が
+ * 決めないだけで、判断のうえで返すことはある。断りの言葉にすると、
+ * 運営が「制度上できない」と誤って購入者に伝える。
+ */
+export const REFUND_COPY = {
+  heading: '返金',
+  /** ⚠️ 取り消せないことを、押す前に必ず書く。 */
+  warning: '返金は取り消せません',
+  hint: 'お戻しするのは、まだお返ししていない全額です。金額を指定しての一部返金は、この画面からは行いません。',
+
+  reasonLabel: '返金の理由',
+  reasonBuyerRequest: 'ご購入者さまからのお申し出',
+  reasonOurFault: '当方の不具合',
+  /** ⚠️ 期限の外でも受けることを、選ぶ前に伝える。 */
+  reasonOurFaultHint: '当方の不具合が原因の場合は、お受けする期間を過ぎていてもお戻しします。',
+
+  noteLabel: '対応の記録（任意）',
+  noteHint: '⚠️ ご購入者さまには表示されません。メールアドレスは書かないでください。',
+
+  confirmLabel: '確認のため、下の欄に「返金」と入力してください',
+  confirmWord: '返金',
+  confirmMismatch: '「返金」と入力されていないため、何もしていません。',
+
+  submit: 'この注文を返金する',
+  submitting: '返金しています…',
+
+  acknowledgeLabel: '発行が進んでいることを承知のうえで返金する',
+  acknowledgeHint:
+    'この作品はすでにお渡ししているか、お渡しの処理が進んでいます。お戻ししても作品はお手元に残ります。',
+
+  listHeading: 'これまでの返金',
+  listEmpty: 'まだ返金はありません',
+  initiatedByAdmin: '運営の操作',
+  initiatedByProvider: '決済事業者の画面から',
+  statusRequested: '依頼済み（未確定）',
+  statusSucceeded: '完了',
+  statusFailed: '失敗',
+
+  /** ⚠️ 取り消せなかった発行ジョブ。丸めずに伝える。 */
+  annotatedWarning: 'お渡しの処理を取り消せませんでした',
+  annotatedHint:
+    '外部へ送信済みの可能性があるため、取り消さずに記録だけ残しました。二重にお渡ししていないかをご確認ください。',
+  succeeded: '返金しました。',
+} as const;
+
+export function refundRecordStatusLabel(status: string): string {
+  if (status === 'succeeded') return REFUND_COPY.statusSucceeded;
+  if (status === 'failed') return REFUND_COPY.statusFailed;
+  return REFUND_COPY.statusRequested;
+}
+
+export function refundReasonLabel(reason: string): string {
+  if (reason === 'our_fault') return REFUND_COPY.reasonOurFault;
+  if (reason === 'provider_initiated') return REFUND_COPY.initiatedByProvider;
+  return REFUND_COPY.reasonBuyerRequest;
+}

@@ -15,6 +15,9 @@ import {
   adminOrderListQuerySchema,
   createOrderNoteRequestSchema,
   createOrderRequestSchema,
+  createRefundRequestSchema,
+  refundListResponseSchema,
+  refundResultSchema,
   type AdminOrderListResponse,
   type AdminOrderDetail,
   type AdminOrderNotesResponse,
@@ -22,6 +25,8 @@ import {
   type CheckoutSessionResponse,
   type OrderNoteView,
   type OrderView,
+  type RefundListResponse,
+  type RefundResult,
 } from '@sengoku/contracts';
 import { currentRequestId } from '@sengoku/observability';
 import type { Actor } from '@sengoku/auth';
@@ -30,6 +35,7 @@ import { parseOrThrow } from '../common/validation';
 import { OrderService } from './order.service';
 import { CheckoutService } from './checkout.service';
 import { OrderSupportService } from './order-support.service';
+import { RefundService } from './refund.service';
 
 /**
  * 購入者向けの注文。
@@ -108,6 +114,7 @@ export class AdminOrderController {
   constructor(
     private readonly orders: OrderService,
     private readonly support: OrderSupportService,
+    private readonly refunds: RefundService,
   ) {}
 
   /**
@@ -230,6 +237,67 @@ export class AdminOrderController {
       throw new NotFoundException();
     }
     return note;
+  }
+
+  /**
+   * その注文の返金の記録（`UD-120`）。
+   *
+   * ⚠️ **`auditor` にも開く**（`order.view_any`）。返金が見えないと監査に
+   * ならない。動かすこと（`order.refund`）とは別の力として分けてある。
+   */
+  @Get(':id/refunds')
+  @RequireAction('order.view_any')
+  async listRefunds(@Param('id') id: string): Promise<RefundListResponse> {
+    const items = await this.refunds.listByOrder(id);
+    return parseOrThrow(refundListResponseSchema, {
+      items: items.map((row) => ({
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+        settledAt: row.settledAt?.toISOString() ?? null,
+      })),
+    });
+  }
+
+  /**
+   * 返金する（`UD-104` / `UD-120`）。
+   *
+   * ⚠️ **金額を本文から読まない。** 返すのは常に残額の全部（一部返金は
+   * 自動処理しない決定）。額を受け取る口を作ると、桁を 1 つ多く打った
+   * 操作がそのまま通る。
+   *
+   * ⚠️ **成功しても「返金しました」で終わらせない。** 取り消せなかった
+   * 発行ジョブの数まで返す。丸めると、運営は片づいたと思って画面を閉じる。
+   */
+  @Post(':id/refund')
+  @RequireAction('order.refund')
+  @HttpCode(HttpStatus.CREATED)
+  async refund(
+    @CurrentActor() actor: Actor,
+    @Param('id') id: string,
+    @Body() rawBody: unknown,
+  ): Promise<RefundResult> {
+    const body = parseOrThrow(createRefundRequestSchema, rawBody);
+    const outcome = await this.refunds.refundByAdmin({
+      orderId: id,
+      reason: body.reason,
+      // ⚠️ 誰が返金したかはトークンから取る。本文からは受け取らない。
+      actorAccountId: requireAccountId(actor),
+      acknowledgeIssued: body.acknowledgeIssued ?? false,
+      note: body.note ?? null,
+    });
+    return parseOrThrow(refundResultSchema, {
+      refund: {
+        ...outcome.refund,
+        createdAt: outcome.refund.createdAt.toISOString(),
+        settledAt: outcome.refund.settledAt?.toISOString() ?? null,
+      },
+      refundStatus: outcome.settlement.refundStatus,
+      amountRefunded: outcome.settlement.amountRefunded,
+      revokedEntitlements: outcome.settlement.revokedEntitlements,
+      cancelledMintJobs: outcome.settlement.cancelledMintJobs,
+      annotatedMintJobs: outcome.settlement.annotatedMintJobs,
+      restoredSupply: outcome.settlement.restoredSupply,
+    });
   }
 }
 

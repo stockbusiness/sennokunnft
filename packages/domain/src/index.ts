@@ -568,6 +568,19 @@ export {
 export type { SettlementSettingsRepository } from './ports/settlement';
 
 export {
+  REFUND_RECORD_STATUSES,
+  REFUND_INITIATORS,
+  type RefundContext,
+  type RefundInitiator,
+  type RefundRecordStatus,
+  type RefundRecordView,
+  type RefundRepository,
+  type RefundSettlement,
+  type SettleRefundCommand,
+  type StartRefundCommand,
+} from './ports/refund';
+
+export {
   ORDER_NOTE_MAX_LENGTH,
   validateOrderNote,
   type OrderNoteDraft,
@@ -626,6 +639,8 @@ export type {
   PaymentGatewayPort,
   CreateCheckoutSessionInput,
   CheckoutSessionCreated,
+  RefundExecuted,
+  RefundPaymentInput,
 } from './ports/payment';
 
 export type {

@@ -113,6 +113,15 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   REFUND_NOT_ALLOWED: HttpStatus.CONFLICT,
   REFUND_WINDOW_CLOSED: HttpStatus.CONFLICT,
   REFUND_ALREADY_DONE: HttpStatus.CONFLICT,
+  // ⚠️ 409。「まだ決まっていない」であって、入力の誤りではない。
+  REFUND_NEEDS_REVIEW: HttpStatus.CONFLICT,
+  /*
+    ⚠️ 502。こちら側は正しく、相手に届かなかった。400 にすると運営が
+       入力を疑い、500 にすると「うちの不具合」に見える。どちらでもない。
+  */
+  REFUND_PROVIDER_ERROR: HttpStatus.BAD_GATEWAY,
+  // ⚠️ 409。鍵を取り込み直すまで、やり直しても同じ結果になる。
+  REFUND_CREDENTIAL_UNAVAILABLE: HttpStatus.CONFLICT,
   SETTLEMENT_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
   // --- 注文の検索と問い合わせ対応（`UD-121`）---
   ORDER_SEARCH_INVALID: HttpStatus.BAD_REQUEST,
@@ -229,6 +238,16 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   REFUND_WINDOW_CLOSED:
     '返金を承れる期間を過ぎています。当方の不具合が原因の場合は期間を問わず対応しますので、事情をご確認ください。',
   REFUND_ALREADY_DONE: 'このご注文はすでに全額を返金済みです。',
+  /*
+    ⚠️ **「できません」で終わらせない。** 回収できないだけで、判断のうえで
+       返すことはある。画面は確認のうえで進める導線を出す。
+  */
+  REFUND_NEEDS_REVIEW:
+    'このご注文は、発行が進んでいるため自動では返金しません。内容をご確認のうえ、あらためてお手続きください。',
+  REFUND_PROVIDER_ERROR:
+    '決済事業者へ返金の依頼が届きませんでした。記録は残っていますので、しばらくしてからもう一度お試しください。',
+  REFUND_CREDENTIAL_UNAVAILABLE:
+    'このご注文をお預かりした当時の決済用の鍵が見つからないため、返金できません。その世代の鍵を取り込み直してください。',
   SETTLEMENT_SETTINGS_INVALID:
     'この設定では保存できません。返金を受け付ける期間が、お支払いまでの猶予を超えていないかご確認ください。',
   ORDER_SEARCH_INVALID:
