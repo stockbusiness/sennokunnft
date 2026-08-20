@@ -184,6 +184,21 @@ export {
   type WebhookReceiptView,
   type AdminOrderPayments,
   type AdminOrderDetail,
+  // 問い合わせ対応（`UD-121`）
+  ORDER_TIMELINE_KIND_VALUES,
+  ORDER_NOTE_MAX_LENGTH,
+  adminOrderEmailLookupSchema,
+  orderTimelineEntrySchema,
+  adminOrderTimelineResponseSchema,
+  createOrderNoteRequestSchema,
+  orderNoteViewSchema,
+  adminOrderNotesResponseSchema,
+  type AdminOrderEmailLookup,
+  type OrderTimelineEntryView,
+  type AdminOrderTimelineResponse,
+  type CreateOrderNoteRequest,
+  type OrderNoteView,
+  type AdminOrderNotesResponse,
 } from './order';
 
 export {

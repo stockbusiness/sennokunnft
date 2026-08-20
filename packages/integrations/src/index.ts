@@ -101,3 +101,5 @@ export {
 } from './payment-config';
 export { ResolvingPaymentGateway } from './resolving-payment';
 export { probeStripeAccount } from './stripe-payment';
+
+export { HmacEmailHasher, normalizeEmail } from './email-hash';

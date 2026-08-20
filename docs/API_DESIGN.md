@@ -569,8 +569,12 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 | DELETE   | `/api/v1/admin/artworks/{id}`         | **完全削除**（`UD-113`）     |
 | POST     | `/api/v1/admin/listings`              | 出品作成                     |
 | PATCH    | `/api/v1/admin/listings/{id}`         | 出品更新（価格・状態）       |
-| GET      | `/api/v1/admin/orders`                | ✅ 注文一覧（絞り込み）      |
+| GET      | `/api/v1/admin/orders`                | ✅ 注文一覧・検索（`UD-121`）|
+| POST     | `/api/v1/admin/orders/search`         | ✅ メールから注文を辿る（`UD-121`）|
 | GET      | `/api/v1/admin/orders/{id}`           | ✅ 注文詳細（内訳・予約）    |
+| GET      | `/api/v1/admin/orders/{id}/timeline`  | ✅ 注文の経過（`UD-121`）    |
+| GET      | `/api/v1/admin/orders/{id}/notes`     | ✅ 対応メモの一覧（`UD-121`）|
+| POST     | `/api/v1/admin/orders/{id}/notes`     | ✅ 対応メモの追加（追記のみ）|
 | GET      | `/api/v1/admin/entitlements`          | 受取権一覧（受取・発行状況） |
 | DELETE   | `/api/v1/admin/artworks/{id}`         | 作品の削除（`UD-113`）       |
 | POST     | `/api/v1/admin/mint-jobs/{id}/retry`  | 発行ジョブの手動再試行       |
@@ -581,6 +585,33 @@ PENDING / DELIVERY_PENDING / DELIVERED / EXPIRED / REVOKED
 Webhook だけが行う（Phase P2）。
 ⚠️ **「運用で気をつける」で済ませない。** 一度作った口は、いつか
 「今回だけ」で使われる。作らなければ使えない。
+
+##### 問い合わせ対応（`UD-121`）
+
+⚠️ **対応メモに更新・削除の口は無い。** 追記のみ。あとから書き換えられる
+記録は、揉めたときに何の役にも立たない。訂正は新しいメモで行う。
+
+⚠️ **メールからの照合だけ `POST` である。** 問い合わせ文字列は
+アクセスログ・ブラウザ履歴・共有されたリンクに残る。平文で保持しないと
+決めた値（`UD-503`）を、保持しない代わりにログへ撒くことになる。
+一覧の絞り込みは `GET` のままでよい（メールアドレスを受け取らないため）。
+
+⚠️ **`order.lookup_buyer` は `order.view_any` と別の権限。** 一覧を見ることと、
+人に紐づけて注文の有無を答えられることは別の力。`auditor` には渡していない。
+
+| 符号                       | 状況                                     | HTTP |
+| -------------------------- | ---------------------------------------- | ---- |
+| `ORDER_SEARCH_INVALID`     | 期間や金額の範囲が逆、日付の形が違う等   | 400  |
+| `ORDER_NOTE_INVALID`       | 空・長すぎ・平文のメールアドレスを含む   | 400  |
+| `EMAIL_LOOKUP_UNAVAILABLE` | この配備には照合の鍵が無い               | 503  |
+
+⚠️ **`EMAIL_LOOKUP_UNAVAILABLE` を 404 や「0 件」にしない。** 鍵を入れ忘れた
+配備で問い合わせてきた方に「そのご注文はありません」と、事実でないことを
+答えることになる。直すのは配備の設定であって、探し直しても結果は変わらない。
+
+期間の絞り込みは **JST の日付**（`YYYY-MM-DD`）で受け取る。時刻は受け取らない。
+⚠️ 境界（その日の始まりと終わり）の解釈はドメインに 1 か所だけ置いてある。
+保存は UTC なので、UTC で区切ると JST の朝に届いた注文がその日の検索から漏れる。
 
 #### スタッフの管理（要 operator ロール **かつ** オーナーの印）
 

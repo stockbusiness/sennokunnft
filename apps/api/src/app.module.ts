@@ -13,6 +13,7 @@ import type {
   RateLimiterPort,
   IdempotencyStore,
   AuditLogPort,
+  EmailHashPort,
   ClockPort,
   IdGeneratorPort,
   ListingRepository,
@@ -26,6 +27,7 @@ import type {
   SecretCipherPort,
   AuditLogReadPort,
   OrderRepository,
+  OrderNoteRepository,
   PaymentRepository,
   PaymentGatewayPort,
   CommonUserLinkRepository,
@@ -78,6 +80,7 @@ import {
   CheckoutController,
 } from './order/order.controller';
 import { OrderService } from './order/order.service';
+import { OrderSupportService } from './order/order-support.service';
 import { CheckoutService } from './order/checkout.service';
 import { PaymentWebhookService } from './order/webhook.service';
 import { PaymentWebhookController } from './order/webhook.controller';
@@ -213,6 +216,8 @@ export interface AppDependencies {
    */
   readonly orders: {
     readonly repository: OrderRepository;
+    /** 問い合わせの対応メモ（`UD-121`）。⚠️ 追記のみ。 */
+    readonly notes: OrderNoteRepository;
     readonly commonUserLinks: CommonUserLinkRepository;
     readonly random: RandomPort;
     /** ⚠️ 呼び出しのたびに引く。管理画面で変えたら次の注文から効く。 */
@@ -247,6 +252,14 @@ export interface AppDependencies {
     readonly logger: Logger;
   };
   readonly tokenVerifier: TokenVerifierPort;
+  /**
+   * 照合用のメール値を作る口（`UD-121`）。
+   *
+   * ⚠️ **省略できない。** 「無ければ素のハッシュ」という逃げ道を作ると、
+   * 配備によって保護の強さが変わる。鍵の無い配備でも実装は渡し、
+   * その実装が `null` を返す形にしてある。
+   */
+  readonly emailHasher: EmailHashPort;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -393,6 +406,22 @@ export class AppModule implements NestModule {
               deps.generateStorageKey,
               deps.audit,
               deps.hashContent,
+            ),
+        },
+        {
+          // 注文の検索・経過・対応メモ（`UD-121`）。
+          // ⚠️ ここは読み取りと追記だけ。状態を変える処理を足さない。
+          provide: OrderSupportService,
+          useFactory: () =>
+            new OrderSupportService(
+              deps.orders.repository,
+              deps.orders.notes,
+              // ⚠️ 決済を繋いでいない配備では null。経過から決済の行が消えるだけ。
+              payments?.repository ?? null,
+              deps.emailHasher,
+              deps.clock,
+              deps.ids,
+              deps.audit,
             ),
         },
         {
@@ -615,7 +644,13 @@ export class AppModule implements NestModule {
           //    自動的に保護対象になる（宣言を忘れたら通らない向き）。
           provide: APP_GUARD,
           useFactory: (reflector: Reflector) =>
-            new AuthGuard(reflector, deps.tokenVerifier, deps.accounts, deps.clock),
+            new AuthGuard(
+              reflector,
+              deps.tokenVerifier,
+              deps.accounts,
+              deps.clock,
+              deps.emailHasher,
+            ),
           inject: [Reflector],
         },
       ],

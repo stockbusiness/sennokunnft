@@ -67,6 +67,14 @@ export interface AccountRecord {
   readonly status: 'active' | 'suspended';
   /** 人に権限を配れるか（`UD-803`）。正は DB。 */
   readonly isOwner: boolean;
+  /**
+   * 照合用のメール値（`UD-121`）。無い、または変換できない配備では `null`。
+   *
+   * ⚠️ **平文ではない。** 元へ戻せない値で、問い合わせのときに
+   * 「聞いたアドレスを同じ手順で変換して一致を探す」ためだけに持つ。
+   * ⚠️ **認可に使わない。** 誰であるかは `id` が決める。
+   */
+  readonly emailHash: string | null;
 }
 
 export interface AccountLookupPort {
@@ -74,6 +82,23 @@ export interface AccountLookupPort {
   /**
    * 初回アクセス時にアカウントを作る（Just-In-Time provisioning）。
    * **作成されるロールは常に `buyer`。** 昇格は運営操作でのみ行う。
+   *
+   * @param emailHash 照合用のメール値（`UD-121`）。変換できないなら `null`。
+   *   ⚠️ **平文を渡さない。** 呼び出し側で変換してから渡すこと。
    */
-  provision(provider: string, subject: string): Promise<AccountRecord>;
+  provision(
+    provider: string,
+    subject: string,
+    emailHash: string | null,
+  ): Promise<AccountRecord>;
+
+  /**
+   * 照合用のメール値を覚え直す（`UD-121`）。
+   *
+   * ⚠️ **値が変わったときだけ呼ぶこと。** 毎回書くと、読むだけの要求が
+   * すべて書き込みになる。
+   * ⚠️ **`null` で上書きしない。** 鍵の無い配備を一度通しただけで、
+   * 既に持っていた照合値が消える。実装は `null` を無視する。
+   */
+  rememberEmailHash(accountId: string, emailHash: string | null): Promise<void>;
 }

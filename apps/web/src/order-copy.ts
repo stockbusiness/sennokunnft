@@ -1,4 +1,4 @@
-import type { AdminOrderView, OrderView } from '@sengoku/contracts';
+import type { AdminOrderView, OrderTimelineEntryView, OrderView } from '@sengoku/contracts';
 
 /**
  * 注文まわりの文言。
@@ -157,6 +157,57 @@ export const ORDER_COPY = {
   idempotencyHint: '同じお申し込みが二重に届いていないかを確かめるための記号です。',
   reservationNone: 'お取り置きの記録はありません',
   backToOrders: '← 注文の一覧へ戻る',
+
+  // --- 検索と問い合わせ対応（`UD-121`）-------------------------------------
+  searchHeading: '注文をお探しする',
+  searchHint:
+    '分かっているものだけ入れてください。空の欄は絞り込みに使いません。「先週このくらいの金額で」からでも辿れます。',
+  searchOrderNumber: '注文番号',
+  searchOrderNumberHint: '末尾の8文字だけでも探せます。お電話ではそこだけ控えられることが多いためです。',
+  searchCreatedFrom: 'お申し込み日（から）',
+  searchCreatedTo: 'お申し込み日（まで）',
+  searchMinAmount: '金額（下限・円）',
+  searchMaxAmount: '金額（上限・円）',
+  searchArtworkTitle: '作品名（一部でも可）',
+  searchStatus: '注文の状態',
+  searchPaymentStatus: 'お支払いの状態',
+  searchAnyStatus: 'すべて',
+  searchSubmit: 'この条件でさがす',
+  searchClear: '条件をすべて消す',
+  searchNoHits: 'この条件に当てはまる注文はありませんでした',
+  searchNoHitsHint: '条件を減らしてお試しください。日付の範囲を広げると見つかることがあります。',
+
+  emailLookupHeading: 'メールアドレスからさがす',
+  /**
+   * ⚠️ **「保存していない」ことを、対応する人にきちんと伝える。**
+   * 伝えないと「検索できないのは不具合だ」と受け取られ、
+   * 保存する方向へ直そうとする人が現れる（`UD-503`）。
+   */
+  emailLookupHint:
+    'ご本人からうかがったメールアドレスを入れてください。当方ではメールアドレスそのものを保存していないため、その場で照合します。一覧には表示されません。',
+  emailLookupLabel: 'メールアドレス',
+  emailLookupSubmit: 'このアドレスでさがす',
+  emailLookupUnavailable: 'この環境ではメールアドレスからのお調べができません',
+  emailLookupUnavailableHint:
+    '照合用の設定が入っていません。注文番号・期間・金額でお探しください。',
+
+  timelineHeading: '経過',
+  timelineHint: '古い順に並んでいます。お問い合わせのとき、上から順にお読みください。',
+  timelineEmpty: '記録がまだありません',
+
+  notesHeading: '対応メモ',
+  /**
+   * ⚠️ **消せないことを先に伝える。** 書いてから知ると、
+   * 「消せないなら書かない」になり、記録が残らなくなる。
+   */
+  notesHint:
+    'どなたが、どのように対応したかを残します。あとから消したり直したりはできません。訂正は新しいメモでお願いします。',
+  notesEmailWarning: 'メールアドレスは書かないでください（保存しない決まりのため、保存できません）。',
+  notesEmpty: 'まだ対応メモはありません',
+  notesLabel: '対応の内容',
+  notesSubmit: 'メモを残す',
+  notesSubmitting: '保存しています…',
+  notesAuthorLabel: '記入者',
 } as const;
 
 const ORDER_STATUS_LABELS: Readonly<Record<OrderView['status'], string>> = {
@@ -303,3 +354,60 @@ export function webhookStatusLabel(status: string): string {
 export function payFailureHint(reservationExpired: boolean): string {
   return reservationExpired ? ORDER_COPY.payFailedExpiredHint : ORDER_COPY.payFailedRetryHint;
 }
+
+
+const TIMELINE_KIND_LABELS: Readonly<Record<OrderTimelineEntryView['kind'], string>> = {
+  order_created: 'お申し込みを受け付けました',
+  checkout_created: 'お支払いのご案内を作りました',
+  checkout_expires: 'お支払いのご案内の期限',
+  payment_succeeded: '決済会社でお支払いが成立しました',
+  order_paid: 'お支払い済みになりました',
+  webhook_received: '決済会社からの知らせが届きました',
+  webhook_processed: '決済会社からの知らせを処理しました',
+  reservation_consumed: 'お取り置きを確定しました',
+  reservation_released: 'お取り置きを解放しました',
+  reservation_expires: 'お取り置きの期限',
+  support_note: '対応メモ',
+};
+
+export function timelineKindLabel(kind: OrderTimelineEntryView['kind']): string {
+  return TIMELINE_KIND_LABELS[kind];
+}
+
+/**
+ * 経過の 1 行を、人が読める補足へ落とす。
+ *
+ * ⚠️ **識別子をそのまま並べない。** 運営が見るのは「何が起きたか」で、
+ * 内部の値は詳細の表にすでに出ている。ここへ全部写すと、
+ * 経過が読み物ではなくなる。
+ */
+export function timelineDetailText(entry: OrderTimelineEntryView): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(entry.detail)) {
+    if (value === null || value === '') continue;
+    const label = TIMELINE_DETAIL_LABELS[key];
+    if (label === undefined) continue;
+    parts.push(`${label}: ${String(value)}`);
+  }
+  return parts.join(' / ');
+}
+
+const TIMELINE_DETAIL_LABELS: Readonly<Record<string, string>> = {
+  orderNumber: '注文番号',
+  title: '作品',
+  totalAmount: '金額',
+  amount: '金額',
+  currency: '通貨',
+  quantity: '数量',
+  provider: '決済会社',
+  status: '状態',
+  eventType: '知らせの種類',
+  failureCode: '失敗の理由',
+  errorCode: '失敗の理由',
+  attemptCount: '受信回数',
+  sessionRef: '受付番号',
+  paymentRef: 'お支払い番号',
+  chargeRef: '請求番号',
+  // ⚠️ `body` と `authorAccountId` はここに載せない。
+  //    対応メモは専用の見せ方（`notes`）で出す。
+};

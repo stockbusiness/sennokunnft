@@ -15,7 +15,7 @@ import {
   type IdGeneratorPort,
   type ListingRepository,
   type OrderRepository,
-  type OrderStatus,
+  type OrderSearchCriteria,
   type OrderView,
   type PaymentRepository,
   type RandomPort,
@@ -287,10 +287,17 @@ export class OrderService {
     };
   }
 
+  /**
+   * 運営向けの一覧（`UD-121` で検索条件を受け取るようになった）。
+   *
+   * ⚠️ **返す項目を検索のために増やさない。** 探せることと、並べて
+   * 見えることは別（`ADMIN_OPERATIONS_GAP.md` §3-C）。購入者の情報を
+   * 一覧へ出したくなったら、まずそこを読み直すこと。
+   */
   async listForAdmin(query: {
     readonly limit: number;
     readonly cursor?: string | undefined;
-    readonly status?: OrderStatus | undefined;
+    readonly criteria?: OrderSearchCriteria | undefined;
   }): Promise<{ readonly items: readonly AdminOrderView[]; readonly nextCursor: string | null }> {
     const page = await this.orders.list(query);
     return { items: page.items.map(toAdminView), nextCursor: page.nextCursor };

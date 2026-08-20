@@ -12,6 +12,8 @@ function toAccount(row: AccountRow): AccountRecord {
     status: row.status,
     // ⚠️ 人事の印も DB の値（`UD-803`）。
     isOwner: row.isOwner,
+    // ⚠️ 照合用の値だけ（`UD-121`）。平文は列に無い（`UD-503`）。
+    emailHash: row.emailHash,
   };
 }
 
@@ -42,13 +44,44 @@ export class PrismaAccountRepository implements AccountLookupPort {
    * 同時に 2 リクエストが来ても 1 行しか作られないよう upsert を使う。
    * UNIQUE(authProvider, authSubject) が最終的な担保。
    */
-  async provision(provider: string, subject: string): Promise<AccountRecord> {
+  async provision(
+    provider: string,
+    subject: string,
+    emailHash: string | null,
+  ): Promise<AccountRecord> {
     const row = await this.prisma.account.upsert({
       where: { authProvider_authSubject: { authProvider: provider, authSubject: subject } },
-      create: { authProvider: provider, authSubject: subject, role: 'buyer', status: 'active' },
+      create: {
+        authProvider: provider,
+        authSubject: subject,
+        role: 'buyer',
+        status: 'active',
+        // ⚠️ 照合用の値のみ（`UD-121`）。平文を入れる列はそもそも無い。
+        emailHash,
+      },
       // 既に存在するなら何も変えない。ここで role を書き換えると昇格経路になる。
+      // ⚠️ 照合用の値もここでは触らない。作成と更新で書く条件を変えると、
+      //    どちらの経路で入った値なのか追えなくなる。更新は
+      //    `rememberEmailHash` が担う。
       update: {},
     });
     return toAccount(row);
+  }
+
+  /**
+   * 照合用のメール値を覚え直す（`UD-121`）。
+   *
+   * ⚠️ **`null` では消さない。** 鍵を持たない配備や、メールを載せない
+   * トークンで一度通っただけで、既にある照合値が失われる。
+   * 「引けなくなった」は、問い合わせの最中に初めて気付く類の壊れ方になる。
+   */
+  async rememberEmailHash(accountId: string, emailHash: string | null): Promise<void> {
+    if (emailHash === null) {
+      return;
+    }
+    await this.prisma.account.update({
+      where: { id: accountId },
+      data: { emailHash },
+    });
   }
 }
