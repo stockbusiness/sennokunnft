@@ -22,6 +22,8 @@ export {
 export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
+export { PrismaSettlementSettingsRepository } from './repositories/settlement.repository';
+
 export { PrismaOrderRepository, PrismaOrderNoteRepository } from './repositories/order.repository';
 export { PrismaPaymentRepository } from './repositories/payment.repository';
 

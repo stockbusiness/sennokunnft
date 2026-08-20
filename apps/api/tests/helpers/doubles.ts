@@ -56,6 +56,8 @@ import type {
   OrderNoteEntry,
   OrderNoteRepository,
   OrderSearchCriteria,
+  SettlementSettings,
+  SettlementSettingsRepository,
   OrderRepository,
   OrderView,
   RandomPort,
@@ -118,6 +120,7 @@ const silentLogger: Logger = {
   child: () => silentLogger,
 } as unknown as Logger;
 import type { AppDependencies } from '../../src/app.module';
+import { createRefundWindowResolver } from '../../src/settlement/refund-window';
 
 /**
  * API のテスト用の代替実装。
@@ -1293,6 +1296,39 @@ function byLatestThenFailureFirst(a: ConnectionCheckRecord, b: ConnectionCheckRe
  * ⚠️ 本番実装と同じく、更新と削除のメソッドを持たない。
  * 試験の都合で足すと、そのうち本番にも生える。
  */
+/**
+ * 返金・精算の設定の代替（`UD-104` / `UD-119`）。
+ *
+ * ⚠️ **既定は「決定した値」で入れてある。** 未設定を既定にすると、
+ * 返金の期限が付かない状態がすべての試験の前提になってしまい、
+ * 期限まわりの検査が素通りする。未設定の挙動は `clear()` で作る。
+ */
+export class InMemorySettlementSettings implements SettlementSettingsRepository {
+  private current: SettlementSettings | null = {
+    refundWindowDays: 14,
+    payoutOffsetMonths: 1,
+    minimumPayoutAmount: 1000,
+    transferFeeBearer: 'creator',
+  };
+
+  find(): Promise<SettlementSettings | null> {
+    return Promise.resolve(this.current);
+  }
+
+  save(
+    _environment: IntegrationEnvironment,
+    settings: SettlementSettings,
+  ): Promise<SettlementSettings> {
+    this.current = settings;
+    return Promise.resolve(settings);
+  }
+
+  /** 未設定の配備を作る。⚠️ 既定にしない（上の注記）。 */
+  clear(): void {
+    this.current = null;
+  }
+}
+
 export class InMemoryOrderNotes implements OrderNoteRepository {
   listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]> {
     return Promise.resolve(
@@ -1808,6 +1844,8 @@ export interface TestHarness extends AppDependencies {
   readonly legalRepository: InMemoryLegalDocuments;
   readonly legalConsents: InMemoryLegalConsents;
   readonly paymentCredentialRepository: InMemoryPaymentCredentials;
+  /** ⚠️ 未設定の配備を作るために、実体の型で持つ（`clear()`）。 */
+  readonly settlement: InMemorySettlementSettings;
 }
 
 /**
@@ -1984,6 +2022,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const artworks = new InMemoryArtworkRepository(listings);
   const orderRepository = new InMemoryOrderRepository(artworks, accounts);
   const orderNotes = new InMemoryOrderNotes();
+  const settlementSettings = new InMemorySettlementSettings();
   const commonUserLinks = new InMemoryCommonUserLinks();
   const paymentRepository = new InMemoryPaymentRepository(orderRepository);
   const paymentGateway = new FakePaymentGateway(
@@ -2007,6 +2046,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     probes: [],
     artworks,
     listings,
+    // 返金・精算の設定（`UD-104` / `UD-119`）。⚠️ 既定は決定した値。
+    settlement: settlementSettings,
     idempotency: new InMemoryIdempotencyStore(),
     accounts,
     staffMembers,
@@ -2072,6 +2113,12 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       // ⚠️ 試験は本番モードではない。livemode の食い違いを見る試験は
       //    この値を反転させて確かめる。
       expectLivemode: false,
+      /*
+        返金の期限（`UD-104`）。
+        ⚠️ **本番と同じ関数を通す。** 「設定が未登録なら期限を書き留めない」
+           という規則を試験でも本物で確かめるため、ここに写しを作らない。
+      */
+      resolveRefundableUntil: createRefundWindowResolver(settlementSettings, 'production'),
       logger: silentLogger,
     },
     orders: {

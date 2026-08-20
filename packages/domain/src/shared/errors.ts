@@ -161,6 +161,20 @@ export const DOMAIN_ERROR_CODES = [
   'PAYMENT_CREDENTIAL_NOT_ACTIVATABLE',
   /** まだ使われているので退役させられない。 */
   'PAYMENT_CREDENTIAL_IN_USE',
+  // --- 返金と精算（`UD-104` / `UD-119`。決定 2026-08-20）---
+  /**
+   * その注文は返金できない（未払い・記録が壊れている等）。
+   *
+   * ⚠️ **「期限切れ」と分けてある。** 直し方が違う。期限切れなら
+   * 運営の判断で `our_fault` として通す道があるが、未払いには無い。
+   */
+  'REFUND_NOT_ALLOWED',
+  /** 返金を受け付ける期限を過ぎている。 */
+  'REFUND_WINDOW_CLOSED',
+  /** すでに全額返している。⚠️ 二度目を通すと二重返金になる。 */
+  'REFUND_ALREADY_DONE',
+  /** 返金・精算の設定が受け付けられない値。 */
+  'SETTLEMENT_SETTINGS_INVALID',
   // --- 注文の検索と問い合わせ対応（`UD-121`）---
   /**
    * 検索条件が受け付けられない。

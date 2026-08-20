@@ -101,6 +101,7 @@ model Account {
   legalConsents                LegalConsent[]
   registeredPaymentCredentials PaymentCredential[]          @relation("PaymentCredentialRegistrar")
   activatedPaymentCredentials  PaymentCredential[]          @relation("PaymentCredentialActivator")
+  settlementSettings           SettlementSettings[]         @relation("SettlementSettingsEditor")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -543,6 +544,12 @@ model Order {
   /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
   reservedUntil      DateTime?   @map("reserved_until") @db.Timestamptz(6)
   paidAt             DateTime?   @map("paid_at") @db.Timestamptz(6)
+  /// 返金を受け付ける期限（`UD-104`）。
+  ///
+  /// ⚠️ **決済確定の時点で確定して書く。** 「決済日 + 設定値」を判定のたびに
+  /// 計算しない。計算すると、14 日 → 30 日に変えた瞬間、精算済みの注文が
+  /// 「まだ返金できる」に化ける。
+  refundableUntil    DateTime?   @map("refundable_until") @db.Timestamptz(6)
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -563,6 +570,8 @@ model Order {
   @@index([accountId, createdAt])
   @@index([creatorAccountId, createdAt(sort: Desc)])
   @@index([paymentStatus, createdAt(sort: Desc)])
+  /// 返金の窓が閉じた注文だけを精算するため（`UD-119`）。
+  @@index([refundableUntil])
   /// 問い合わせ対応の検索（`UD-121`）。期間と金額から辿る。
   /// ⚠️ 注文番号の末尾一致と作品名の部分一致には索引を張っていない。
   /// `LIKE '%...'` は B-Tree で絞れないため（マイグレーションの注記参照）。
@@ -1092,4 +1101,30 @@ model HmacNonce {
   @@unique([keyId, nonce])
   @@index([expiresAt])
   @@map("hmac_nonces")
+}
+
+/// 返金と精算の設定（`UD-104` / `UD-119`。決定 2026-08-20）。
+///
+/// ⚠️ **環境ごとに 1 行。** これは「いま何を使うか」であって、
+/// 過去の記録の説明ではない。使った値は注文・返金・精算へ焼き付ける。
+///
+/// ⚠️ **既定値をコードに書かない。** 初期値はマイグレーションで一度入れる。
+/// コードに `?? 14` を書くと、設定行が消えたことに誰も気づかないまま動く。
+model SettlementSettings {
+  /// `staging` / `production`。⚠️ CHECK で縛っている。
+  environment         String   @id
+  /// 返金を受け付ける日数。⚠️ 0 は「受け付けない」であって未設定ではない。
+  refundWindowDays    Int      @map("refund_window_days")
+  /// 締めから支払いまでの月数。1 = 月末締め・翌月末払い。
+  payoutOffsetMonths  Int      @map("payout_offset_months")
+  /// 最低支払額（円）。未満は翌月へ繰り越す。
+  minimumPayoutAmount Int      @map("minimum_payout_amount")
+  /// `creator` / `platform`。⚠️ CHECK で縛っている。
+  transferFeeBearer   String   @map("transfer_fee_bearer")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedByAccountId  String?  @map("updated_by_account_id") @db.Uuid
+
+  updatedBy Account? @relation("SettlementSettingsEditor", fields: [updatedByAccountId], references: [id], onDelete: SetNull)
+
+  @@map("settlement_settings")
 }

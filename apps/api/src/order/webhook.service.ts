@@ -17,6 +17,14 @@ export interface WebhookServiceConfig {
   readonly provider: string;
   /** この配備が本番の決済を扱うか。⚠️ 事業者の `livemode` と突き合わせる。 */
   readonly expectLivemode: boolean;
+  /**
+   * 返金を受け付ける期限を決める（`UD-104`）。
+   *
+   * ⚠️ **決済確定のたびに引く。** 引いた値は注文へ焼き付けられるので、
+   * あとから設定を変えても**過去の注文は動かない**。
+   * ⚠️ 設定が無い配備では `null` を返す。既定値を作らない。
+   */
+  readonly resolveRefundableUntil: (paidAt: Date) => Promise<Date | null>;
 }
 
 /**
@@ -227,6 +235,8 @@ export class PaymentWebhookService {
       amount: fact.amount ?? order.totalAmount,
       currency: order.currency,
       paidAt: fact.occurredAt,
+      // ⚠️ ここで確定して焼き付ける（`UD-104`）。判定のたびに計算しない。
+      refundableUntil: await this.config.resolveRefundableUntil(fact.occurredAt),
       outboxEventId: this.ids.generate(),
       now,
     });

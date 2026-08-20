@@ -244,6 +244,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
           status: 'paid',
           paymentStatus: 'succeeded',
           paidAt: command.paidAt,
+          // ⚠️ 返金の期限をここで焼き付ける（`UD-104`）。あとから設定を
+          //    変えても、この注文の期限は動かない。
+          refundableUntil: command.refundableUntil,
           updatedAt: command.now,
         },
       });

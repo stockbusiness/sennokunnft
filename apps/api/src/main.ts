@@ -35,6 +35,7 @@ import {
   PrismaIdempotencyStore,
   PrismaOrderRepository,
   PrismaOrderNoteRepository,
+  PrismaSettlementSettingsRepository,
   PrismaPaymentRepository,
   PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
@@ -68,6 +69,7 @@ import {
 } from '@sengoku/integrations';
 import { acceptingGeneration, CREDENTIAL_VERIFICATION_LIMIT } from '@sengoku/domain';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
+import { createRefundWindowResolver } from './settlement/refund-window';
 import type { PaymentGatewayPort } from '@sengoku/domain';
 import { AppModule, type AppDependencies } from './app.module';
 import { DomainErrorFilter } from './common/domain-error.filter';
@@ -534,6 +536,21 @@ async function bootstrap(): Promise<void> {
     ⚠️ **注文のたびに引く。** 引いた値は注文へスナップショットされるので、
        あとから率を変えても**過去の注文は動かない**。
   */
+  /*
+    返金・精算の設定（`UD-104` / `UD-119`）。
+
+    ⚠️ **決済確定のたびに引き、注文へ焼き付ける。** 判定のたびに引き直すと、
+       設定を変えた瞬間に過去の注文の期限が動く。
+    ⚠️ **設定が無ければ `null`。既定値を作らない。** 期限の付かない注文は
+       購入者都合の返金が通らなくなるが、**勝手に期限を決めるより良い**。
+  */
+  const settlementSettings = new PrismaSettlementSettingsRepository(prisma);
+  const settlementEnvironment = env.APP_ENV === 'production' ? 'production' : 'staging';
+  const resolveRefundableUntil = createRefundWindowResolver(
+    settlementSettings,
+    settlementEnvironment,
+  );
+
   const resolvePlatformFeeRateBps = createPlatformFeeRateResolver({
     /*
       ⚠️ **暗号鍵に依存させない。** 率は秘密ではないので、復号の仕組みを
@@ -605,6 +622,7 @@ async function bootstrap(): Promise<void> {
               repository: paymentRepository,
               provider: env.PAYMENT_PROVIDER,
               expectLivemode: env.APP_ENV === 'production',
+              resolveRefundableUntil,
               logger,
             },
       orders: {
@@ -634,6 +652,7 @@ async function bootstrap(): Promise<void> {
        * ⚠️ 鍵が無ければ照合値は付かない。素のハッシュへは落とさない。
        */
       emailHasher: new HmacEmailHasher(env.EMAIL_LOOKUP_PEPPER ?? null),
+      settlement: settlementSettings,
       clock: new SystemClock(),
       ids: new UuidGenerator(),
       storage,

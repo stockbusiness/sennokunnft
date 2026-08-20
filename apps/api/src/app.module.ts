@@ -28,6 +28,7 @@ import type {
   AuditLogReadPort,
   OrderRepository,
   OrderNoteRepository,
+  SettlementSettingsRepository,
   PaymentRepository,
   PaymentGatewayPort,
   CommonUserLinkRepository,
@@ -81,6 +82,11 @@ import {
 } from './order/order.controller';
 import { OrderService } from './order/order.service';
 import { OrderSupportService } from './order/order-support.service';
+import {
+  AdminSettlementController,
+  SETTLEMENT_CONFIG,
+  type SettlementConfig,
+} from './settlement/settlement.controller';
 import { CheckoutService } from './order/checkout.service';
 import { PaymentWebhookService } from './order/webhook.service';
 import { PaymentWebhookController } from './order/webhook.controller';
@@ -249,6 +255,13 @@ export interface AppDependencies {
     readonly provider: string;
     /** この配備が本番の決済を扱うか。⚠️ 事業者の `livemode` と突き合わせる。 */
     readonly expectLivemode: boolean;
+    /**
+     * 返金を受け付ける期限を決める（`UD-104`）。
+     *
+     * ⚠️ **決済確定のたびに引く。** 引いた値は注文へ焼き付けられるので、
+     * あとから設定を変えても過去の注文は動かない。
+     */
+    readonly resolveRefundableUntil: (paidAt: Date) => Promise<Date | null>;
     readonly logger: Logger;
   };
   readonly tokenVerifier: TokenVerifierPort;
@@ -260,6 +273,13 @@ export interface AppDependencies {
    * その実装が `null` を返す形にしてある。
    */
   readonly emailHasher: EmailHashPort;
+  /**
+   * 返金と精算の設定（`UD-104` / `UD-119`）。
+   *
+   * ⚠️ **省略できない。** 無いと返金の期限が付かず、購入者都合の返金が
+   * 一切通らなくなる。それに気づくのは問い合わせが来たとき。
+   */
+  readonly settlement: SettlementSettingsRepository;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -355,6 +375,8 @@ export class AppModule implements NestModule {
         StaffInvitationAcceptController,
         OrderController,
         AdminOrderController,
+        // 返金と精算の設定（`UD-104` / `UD-119`）。⚠️ 変更はオーナー限定。
+        AdminSettlementController,
         ...(internalJobToken === undefined || internalJobToken === ''
           ? []
           : [InternalJobsController]),
@@ -407,6 +429,18 @@ export class AppModule implements NestModule {
               deps.audit,
               deps.hashContent,
             ),
+        },
+        {
+          // 返金と精算の設定（`UD-104` / `UD-119`）。
+          // ⚠️ 変えられるのは「これから」だけ。過去の記録は焼き付けてある。
+          provide: SETTLEMENT_CONFIG,
+          useFactory: (): SettlementConfig => ({
+            repository: deps.settlement,
+            // ⚠️ 環境はプロセスに固定する。要求から受け取れるようにすると、
+            //    本番から staging を書き換えられる。
+            appEnvironment: deps.integrations?.appEnvironment ?? 'staging',
+            audit: deps.audit,
+          }),
         },
         {
           // 注文の検索・経過・対応メモ（`UD-121`）。
@@ -502,7 +536,11 @@ export class AppModule implements NestModule {
                     deps.ids,
                     deps.audit,
                     payments.logger,
-                    { provider: payments.provider, expectLivemode: payments.expectLivemode },
+                    {
+                      provider: payments.provider,
+                      expectLivemode: payments.expectLivemode,
+                      resolveRefundableUntil: payments.resolveRefundableUntil,
+                    },
                   ),
               },
             ]),
