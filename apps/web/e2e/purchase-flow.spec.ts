@@ -286,7 +286,7 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
     expect(unsigned.status()).toBe(400);
 
     // ⚠️ ブラウザで戻ってきただけでも確定しない。
-    await page.goto(`/orders/${orderId}`);
+    await page.goto(`/account/orders/${orderId}`);
     await expect(page.getByText('ご購入ありがとうございます')).toHaveCount(0);
 
     // --- 5. 署名のある通知で確定する ----------------------------------------
@@ -311,7 +311,7 @@ test.describe(withApi ? '購入手続き' : '購入手続き（DB 未設定の�
     expect(accepted.status()).toBe(200);
 
     // --- 6. 画面が「作品を準備しています」に変わる --------------------------
-    await page.goto(`/orders/${orderId}`);
+    await page.goto(`/account/orders/${orderId}`);
     await expect(page.getByRole('heading', { name: 'ご購入ありがとうございます' })).toBeVisible();
     // ⚠️ 受取権はまだ発行していない（Phase P3）。
     await expect(page.getByText('受け取りました')).toHaveCount(0);

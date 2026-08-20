@@ -34,5 +34,5 @@ export async function createOrderAction(
   }
 
   // ⚠️ redirect は例外を投げて処理を抜ける。try の中へ入れない。
-  redirect(`/orders/${result.data.id}`);
+  redirect(`/account/orders/${result.data.id}`);
 }

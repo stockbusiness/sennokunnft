@@ -1,8 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { createCheckoutSession, orderErrorMessage } from '../../../src/order-client';
-import { ORDER_COPY } from '../../../src/order-copy';
+import { createCheckoutSession, orderErrorMessage } from '../../../../src/order-client';
+import { ORDER_COPY } from '../../../../src/order-copy';
 
 /**
  * お支払いのページへ送る。

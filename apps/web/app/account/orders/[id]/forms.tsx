@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Notice } from '@sengoku/ui';
 import { startPaymentAction, type PayActionState } from './actions';
-import { ORDER_COPY } from '../../../src/order-copy';
+import { ORDER_COPY } from '../../../../src/order-copy';
 
 const INITIAL: PayActionState = {};
 

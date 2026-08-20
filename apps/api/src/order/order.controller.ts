@@ -13,6 +13,7 @@ import {
 import {
   adminOrderEmailLookupSchema,
   adminOrderListQuerySchema,
+  buyerOrderListQuerySchema,
   createOrderNoteRequestSchema,
   createOrderRequestSchema,
   createRefundRequestSchema,
@@ -22,6 +23,7 @@ import {
   type AdminOrderDetail,
   type AdminOrderNotesResponse,
   type AdminOrderTimelineResponse,
+  type BuyerOrderListResponse,
   type CheckoutSessionResponse,
   type OrderNoteView,
   type OrderView,
@@ -62,6 +64,32 @@ export class OrderController {
       listingId: body.listingId,
       idempotencyKey: body.idempotencyKey,
     });
+  }
+
+  /**
+   * ご自分のご注文の一覧（P0-3）。
+   *
+   * ⚠️ **誰の分かをトークンからだけ取る。** 問い合わせ文字列で渡せる形に
+   * すると、そこが他人の注文を覗く道になる。
+   *
+   * ⚠️ **`:id` より前に置く。** 後ろに置くと `/orders` が `:id = ''` として
+   * 詳細のほうへ吸われる。
+   */
+  @Get()
+  @RequireAction('order.view')
+  async list(
+    @CurrentActor() actor: Actor,
+    @Query() rawQuery: unknown,
+  ): Promise<BuyerOrderListResponse> {
+    const query = parseOrThrow(buyerOrderListQuerySchema, rawQuery);
+    const accountId = requireAccountId(actor);
+    const page = await this.orders.listForBuyer({
+      accountId,
+      limit: query.limit,
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    // ⚠️ 契約どおりの形に整えてから返す（`readonly` を持ち出さない）。
+    return { items: [...page.items], nextCursor: page.nextCursor };
   }
 
   @Get(':id')
