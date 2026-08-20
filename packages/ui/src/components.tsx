@@ -219,6 +219,13 @@ export interface ArtworkCardProps {
   readonly purchasable: boolean;
   /** 買えないときの言い回し。判定はサーバーが持つので、ここは言葉を受け取るだけ。 */
   readonly statusLabel?: string;
+  /**
+   * 出品された方のお名前。
+   *
+   * ⚠️ **未登録なら出さない。** 「未登録」と書くと、作品の欄が
+   * 空欄の並びになる。名乗っていないことは買う人の関心事ではない。
+   */
+  readonly creatorName?: string | null;
 }
 
 /**
@@ -238,6 +245,7 @@ export function ArtworkCard({
   maxSupply,
   purchasable,
   statusLabel,
+  creatorName,
 }: ArtworkCardProps): ReactNode {
   return (
     <article className="sengoku-artwork-card">
@@ -251,6 +259,13 @@ export function ArtworkCard({
         <h2 className="sengoku-artwork-card__title">{title}</h2>
       </a>
       <div className="sengoku-artwork-card__body">
+        {/*
+          ⚠️ **リンクの外に置く。** 中に入れると、作品名と作者名で
+             同じ行き先のリンクが 2 回読み上げられる。
+        */}
+        {creatorName === null || creatorName === undefined || creatorName === '' ? null : (
+          <p className="sengoku-artwork-card__creator">{creatorName}</p>
+        )}
         {price === null ? (
           <StatusBadge label="準備中" tone="neutral" />
         ) : purchasable ? (

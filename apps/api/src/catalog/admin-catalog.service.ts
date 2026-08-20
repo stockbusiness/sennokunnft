@@ -346,6 +346,7 @@ export class AdminCatalogService {
     return {
       id: artwork.id,
       creatorAccountId: artwork.creatorAccountId,
+      creatorDisplayName: artwork.creatorDisplayName,
       slug: artwork.slug,
       title: artwork.title,
       description: artwork.description,

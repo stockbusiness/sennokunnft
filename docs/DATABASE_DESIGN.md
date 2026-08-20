@@ -55,12 +55,32 @@
 | `auth_provider`             | TEXT        | NOT NULL                    | 認証プロバイダ識別子（例: `supabase`）                                                                                                                                                                                 |
 | `auth_subject`              | TEXT        | NOT NULL                    | プロバイダ側のユーザーID（Supabase の `sub`）                                                                                                                                                                          |
 | `email_hash`                | TEXT        | NULL                        | 照合用のメール値。**平文メールは保持しない**（🟡 `UD-503`）。⚠️ **素のハッシュではなく鍵付き HMAC**（`EMAIL_LOOKUP_PEPPER`）。素だと、よくあるアドレスを並べた表で元に戻せる。鍵の無い配備では NULL のまま（`UD-121`） |
-| `display_name`              | TEXT        | NULL                        | 表示名                                                                                                                                                                                                                 |
+| `display_name`              | TEXT        | NULL                        | **作品ページに出すお名前**（決定 2026-08-20）。屋号・ペンネーム可。本名は求めない。⚠️ **表示は打たれたまま**（正規化した形を出さない）                                                                                 |
+| `display_name_key`          | TEXT        | NULL                        | 重複判定の鍵。`NFKC` 正規化 → 小文字化 → 空白除去。⚠️ **生成はアプリ側**（`domain` の `displayNameKey`）。DB の `lower()` は NFKC 正規化をしないので、DB 側で作り直すとアプリと結果がずれる                            |
 | `role`                      | TEXT        | NOT NULL DEFAULT `'buyer'`  | `buyer` / `operator` / `auditor`                                                                                                                                                                                       |
 | `status`                    | TEXT        | NOT NULL DEFAULT `'active'` | `active` / `suspended`                                                                                                                                                                                                 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                    |                                                                                                                                                                                                                        |
 
 - `UNIQUE (auth_provider, auth_subject)`
+- 部分 UNIQUE `accounts_display_name_key_unique` … `display_name_key` が NULL でない行のみ
+- CHECK `accounts_display_name_paired` … `display_name` と `display_name_key` は必ず対で入る
+
+#### 表示名の重複（決定 2026-08-20「屋号・ペンネームを許す／重複を許さない」）
+
+⚠️ **UNIQUE を張るのは生の `display_name` ではなく `display_name_key`。**
+生の文字列で張ると、全角と半角（`Ａ工房` / `A工房`）、大文字と小文字
+（`Taro` / `TARO`）、空白の有無（`戦国 太郎` / `戦国太郎`）を変えるだけで、
+**同じに見える別の名前**を名乗れる。買う人には見分けが付かないので、
+実質のなりすましになる。
+
+⚠️ **そろえすぎない。** カタカナとひらがな、漢字の異体字はまとめない。
+まとめると別人が「使われています」で弾かれ、**弾かれた側は自分では直せない**。
+
+⚠️ **部分索引にする。** 買う人のほとんどは表示名を持たない。
+
+⚠️ **運営に他人の表示名を書き換える口を作らない。** なりすましへの対応は、
+名前の差し替えではなく**アカウントの停止**（`status`）で行う。書き換えの口を
+作ると、そこが乗っ取りの的になる。
 
 🟡 **仮決定:** 認証情報の正は Supabase Auth 側に置き、本テーブルは**参照と業務属性のみ**を持つ。
 パスワードハッシュ等の資格情報は一切保持しない。
@@ -220,6 +240,7 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 | `listing_id`             | UUID        | NOT NULL, FK → `listings.id` | 参照用                 |
 | `artwork_id`             | UUID        | NOT NULL, FK → `artworks.id` | 参照用                 |
 | `artwork_title_snapshot` | TEXT        | NOT NULL                     | **注文時点の作品名**   |
+| `creator_name_snapshot`  | TEXT        | NULL                         | **注文時点の出品者名** |
 | `unit_price_amount`      | INTEGER     | NOT NULL                     | **注文時点の単価**     |
 | `unit_price_currency`    | CHAR(3)     | NOT NULL                     |                        |
 | `creator_account_id`     | UUID        | NOT NULL, FK → `accounts.id` | **注文時点の出品者**   |
@@ -228,6 +249,14 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 | `created_at`             | TIMESTAMPTZ | NOT NULL                     |                        |
 
 - `UNIQUE (order_id)` — `order_lines_single_item_per_order`
+
+⚠️ **`creator_name_snapshot` は NULL を許す。** 列を足す前の注文と、
+表示名を登録していない方から買った注文があるため。**推測で埋めない** ——
+埋めると、当時の画面に出ていなかった名前を「出ていた」ことにしてしまう。
+画面は NULL の行を、出品者名の行ごと出さないことで扱う。
+
+⚠️ **マスタ（`accounts.display_name`）を引き直して表示しない。** 出品者が
+改名しても、お買い上げの記録は当時の表示のまま残す（スナップショット原則）。
 
 ⚠️ **MVP は 1 注文 1 明細**（指示書 §5.2）。`order_id` だけの UNIQUE が
 「明細は 1 本まで」を DB に守らせる。複数クリエイターのカートを作らせない

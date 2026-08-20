@@ -106,6 +106,17 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           <>
             <dt>{ORDER_COPY.checkoutItemHeading}</dt>
             <dd>{order.item.titleSnapshot}</dd>
+            {/*
+              ⚠️ **注文時点のお名前を出す。** マスタを引き直さない。
+                 出品者が改名しても、お買い上げの記録は動かさない。
+              ⚠️ 未登録の方から買った注文は行ごと出さない。
+            */}
+            {order.item.creatorNameSnapshot === null ? null : (
+              <>
+                <dt>{ORDER_COPY.creatorNameLabel}</dt>
+                <dd>{order.item.creatorNameSnapshot}</dd>
+              </>
+            )}
           </>
         )}
         <dt>{ORDER_COPY.checkoutPriceLabel}</dt>

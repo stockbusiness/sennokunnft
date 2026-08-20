@@ -104,6 +104,8 @@ function command(seeded: Seeded, overrides: Partial<CreateOrderCommand> = {}): C
       artworkId: seeded.artworkId,
       creatorAccountId: seeded.creatorAccountId,
       titleSnapshot: '天下布武の陣羽織',
+      // ⚠️ 注文時点の出品者のお名前。あとで引き直さない。
+      creatorNameSnapshot: '戦国工房',
       unitPriceAmount: 3000,
       unitPriceCurrency: 'JPY',
       quantity: 1,

@@ -26,6 +26,11 @@ export const SITE_COPY = {
   purchaseComingSoon: 'お申し込み機能は準備中です。',
   purchaseCta: '購入手続きへ進む',
   catalogTitle: '作品一覧',
+  /*
+    ⚠️ **「作家」と書かない。** ご自身を作家と呼ばない方も出品される。
+       「出品者」なら、どなたにも当てはまる。
+  */
+  creatorLabel: '出品者',
   supplyLabel: 'お求めいただける数',
   priceLabel: '価格',
   perOrderLabel: 'お一人あたり',

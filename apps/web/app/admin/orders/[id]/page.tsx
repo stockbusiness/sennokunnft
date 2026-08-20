@@ -108,6 +108,12 @@ export default async function AdminOrderDetailPage({
           <dt>作品</dt>
           {/* ⚠️ 注文時点の名前。マスタを引き直して表示しない。 */}
           <dd>{order.item.titleSnapshot}</dd>
+          <dt>{ORDER_COPY.creatorNameLabel}</dt>
+          {/*
+            ⚠️ **注文時点のお名前。** いま改名されていても、この注文は
+               当時の表示のまま残る。問い合わせの照合はこちらを見る。
+          */}
+          <dd>{order.item.creatorNameSnapshot ?? '—'}</dd>
           <dt>単価</dt>
           <dd>
             <PriceTag

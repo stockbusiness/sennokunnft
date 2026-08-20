@@ -130,6 +130,11 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PAYOUT_WINDOW_OPEN: HttpStatus.CONFLICT,
   PAYOUT_NOT_EDITABLE: HttpStatus.CONFLICT,
   PAYOUT_NOT_FOUND: HttpStatus.NOT_FOUND,
+  // --- 作家さまの表示名（決定 2026-08-20）---
+  DISPLAY_NAME_INVALID: HttpStatus.BAD_REQUEST,
+  // ⚠️ 409。書き方は正しいが、その名前はもう使われている。
+  DISPLAY_NAME_TAKEN: HttpStatus.CONFLICT,
+  DISPLAY_NAME_RESERVED: HttpStatus.BAD_REQUEST,
   // --- 注文の検索と問い合わせ対応（`UD-121`）---
   ORDER_SEARCH_INVALID: HttpStatus.BAD_REQUEST,
   ORDER_NOTE_INVALID: HttpStatus.BAD_REQUEST,
@@ -267,6 +272,14 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     '返金をお受けする期間が終わっていないご注文が残っています。期間が過ぎてから確定してください。',
   PAYOUT_NOT_EDITABLE: 'この精算はすでに確定しているため、変更できません。',
   PAYOUT_NOT_FOUND: 'その精算は見つかりませんでした。',
+  DISPLAY_NAME_INVALID: 'お名前は 1〜40 文字でご入力ください。目に見えない文字は使えません。',
+  /*
+    ⚠️ **「使えません」で終わらせない。** 別の名前を考えれば済む話だと
+       伝わらないと、同じ名前を何度も試すことになる。
+  */
+  DISPLAY_NAME_TAKEN: 'そのお名前は、すでに他の方がお使いです。別のお名前をご検討ください。',
+  DISPLAY_NAME_RESERVED:
+    '運営とまぎらわしいお名前はお使いいただけません。「運営」「公式」「事務局」などを含まないお名前をご検討ください。',
   ORDER_SEARCH_INVALID:
     '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
   ORDER_NOTE_INVALID:

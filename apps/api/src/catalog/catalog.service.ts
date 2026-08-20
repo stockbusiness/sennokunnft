@@ -103,6 +103,11 @@ export class CatalogService {
       id: artwork.id,
       slug: artwork.slug,
       title: artwork.title,
+      /*
+        ⚠️ **アカウントIDは出さない。** 買う人に必要なのは名前だけで、
+           内部の識別子を公開ページへ出す理由が無い。
+      */
+      creatorDisplayName: artwork.creatorDisplayName,
       imageKey: artwork.imageKey,
       imageUrl: artwork.imageKey === null ? null : this.storage.publicUrl(artwork.imageKey),
       availableSupply: availableSupply(artwork),

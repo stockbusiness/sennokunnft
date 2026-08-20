@@ -565,6 +565,16 @@ export {
   type TransferFeeBearer,
 } from './settlement/settings';
 
+export {
+  DISPLAY_NAME_MAX_LENGTH,
+  DISPLAY_NAME_MIN_LENGTH,
+  displayNameKey,
+  validateDisplayName,
+  type ValidatedDisplayName,
+} from './account/display-name';
+
+export type { CreatorProfile, CreatorProfileRepository } from './ports/profile';
+
 export type { SettlementSettingsRepository } from './ports/settlement';
 
 export {

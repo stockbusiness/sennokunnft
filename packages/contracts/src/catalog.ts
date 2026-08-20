@@ -36,6 +36,15 @@ export const artworkSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
   title: z.string(),
+  /**
+   * 出品者の表示名（決定 2026-08-20）。
+   *
+   * ⚠️ **まだ登録していなければ `null`。** 代わりの文言をサーバーが作らない。
+   * 「（お名前の登録前）」のような言い方は画面が決める。
+   * ⚠️ **アカウントIDは出さない。** 買う人に必要なのは名前だけで、
+   * 内部の識別子を公開ページへ出す理由が無い。
+   */
+  creatorDisplayName: z.string().nullable(),
   imageKey: z.string().nullable(),
   /**
    * 表示用の画像URL。
@@ -133,6 +142,8 @@ export const adminArtworkSchema = z.object({
   id: z.string(),
   /** 登録した人（`UD-102` 決定変更 2026-08-18）。 */
   creatorAccountId: z.string(),
+  /** 出品者の表示名。⚠️ 未登録なら `null`。 */
+  creatorDisplayName: z.string().nullable(),
   slug: z.string(),
   title: z.string(),
   description: z.string(),

@@ -158,6 +158,8 @@ export class OrderService {
         artworkId: item.artworkId,
         creatorAccountId: item.creatorAccountId,
         titleSnapshot: item.titleSnapshot,
+        // ⚠️ そのときの表示名。あとで引き直さない（スナップショット原則）。
+        creatorNameSnapshot: item.creatorNameSnapshot,
         unitPriceAmount: item.unitPrice.amountMinor,
         unitPriceCurrency: item.unitPrice.currency,
         quantity: item.quantity,
@@ -353,6 +355,7 @@ function toBuyerView(order: OrderView): OrderViewResponse {
             artworkId: order.item.artworkId,
             listingId: order.item.listingId,
             titleSnapshot: order.item.titleSnapshot,
+            creatorNameSnapshot: order.item.creatorNameSnapshot,
             unitPriceAmount: order.item.unitPriceAmount,
             currency: order.item.unitPriceCurrency,
             quantity: order.item.quantity,

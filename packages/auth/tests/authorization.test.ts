@@ -66,6 +66,12 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
        ここ（印を持たない actor の表）では operator でも拒否になる。
   */
   'payout.mark_paid': { anonymous: false, buyer: false, operator: false, auditor: false },
+  /*
+    ⚠️ **会員なら誰でも持つ。** 出品する前に名前を決めたい方がいる。
+       「作品を 1 つ作らないと名乗れない」という順序を強いない。
+    ⚠️ `auditor` には要らない。名乗る場ではない。
+  */
+  'profile.manage_own': { anonymous: false, buyer: true, operator: true, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },

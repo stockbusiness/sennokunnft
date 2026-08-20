@@ -48,6 +48,13 @@ model Account {
   /// `20260820090000_order_support` の手書きマイグレーションにある。
   emailHash    String?       @map("email_hash")
   displayName  String?       @map("display_name")
+  /// 重複判定の鍵（決定 2026-08-20）。⚠️ **生成はアプリ側**（domain の
+  /// `displayNameKey`）。PostgreSQL の `lower()` は NFKC 正規化をしないので、
+  /// DB の関数で作るとアプリ側と結果がずれる。
+  /// ⚠️ 部分 UNIQUE 索引 `accounts_display_name_key_unique`
+  /// （`WHERE display_name_key IS NOT NULL`）が重複を止める。Prisma では
+  /// 条件付き索引を書けないため、**手書きのマイグレーション側にだけ存在する**。
+  displayNameKey String?      @map("display_name_key")
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
   role         AccountRole   @default(buyer)
   status       AccountStatus @default(active)
@@ -599,6 +606,11 @@ model OrderLine {
   /// ⚠️ 出品者。注文時点のものを持つ。作品の持ち主が変わっても動かさない。
   creatorAccountId     String   @map("creator_account_id") @db.Uuid
   artworkTitleSnapshot String   @map("artwork_title_snapshot")
+  /// 注文時点の作家さまの表示名（決定 2026-08-20）。
+  /// ⚠️ **マスタを引き直さない。** 改名しても過去のご注文の表示は変わらない
+  /// （作品名・価格・手数料率と同じスナップショット原則）。
+  /// ⚠️ この列より前の注文があるため NULL を許す。**推測で埋めない。**
+  creatorNameSnapshot  String?  @map("creator_name_snapshot")
   unitPriceAmount      Int      @map("unit_price_amount")
   unitPriceCurrency    String   @map("unit_price_currency") @db.Char(3)
   quantity             Int

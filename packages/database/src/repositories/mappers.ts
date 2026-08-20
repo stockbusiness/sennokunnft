@@ -9,10 +9,17 @@ import type { Artwork as ArtworkRow, Listing as ListingRow } from '../../generat
  * 直接渡すと、列名の変更や ORM の乗り換えがドメインまで波及する。
  */
 
-export function toArtwork(row: ArtworkRow): Artwork {
+/**
+ * 作品の行をドメインの型へ移す。
+ *
+ * ⚠️ **表示名は行に無い（別テーブル）。** 引いてきた場合だけ渡す。
+ * ここで既定の文言（「（未登録）」など）を作らない——文言は画面が決める。
+ */
+export function toArtwork(row: ArtworkRow, creatorDisplayName: string | null = null): Artwork {
   return {
     id: row.id,
     creatorAccountId: row.creatorAccountId,
+    creatorDisplayName,
     slug: row.slug,
     title: row.title,
     description: row.description,
@@ -141,6 +148,8 @@ export function toOrderView(row: OrderRowWithRelations): OrderView {
             artworkId: line.artworkId,
             creatorAccountId: line.creatorAccountId,
             titleSnapshot: line.artworkTitleSnapshot,
+            // ⚠️ 注文時点の表示名。この列より前の注文では `null`。
+            creatorNameSnapshot: line.creatorNameSnapshot,
             unitPriceAmount: line.unitPriceAmount,
             unitPriceCurrency: line.unitPriceCurrency.trim(),
             quantity: line.quantity,
