@@ -297,6 +297,8 @@ suite('返金の反映', () => {
         artworkId: seeded.artworkId,
         accountId: seeded.accountId,
         serialNo: 1,
+        // 1 明細 1 枚の下地なので 0 枚目。
+        unitIndex: 0,
         claimTokenHash: `hash-${randomUUID()}`,
         status: 'claimed',
         // ⚠️ `claimed` には受け取った人と時刻が要る（既存の CHECK）。
@@ -340,6 +342,8 @@ suite('返金の反映', () => {
         artworkId: seeded.artworkId,
         accountId: seeded.accountId,
         serialNo: 1,
+        // 1 明細 1 枚の下地なので 0 枚目。
+        unitIndex: 0,
         claimTokenHash: `hash-${randomUUID()}`,
         status: 'claimed',
         // ⚠️ `claimed` には受け取った人と時刻が要る（既存の CHECK）。
@@ -422,6 +426,9 @@ suite('返金の判定に要る値', () => {
           artworkId: seeded.artworkId,
           accountId: seeded.accountId,
           serialNo,
+          // ⚠️ 同じ明細に 2 枚作るので、枚数目もずらす。
+          //    `UNIQUE(order_line_id, unit_index)` が同じ番号を許さない。
+          unitIndex: serialNo - 1,
           claimTokenHash: `hash-${randomUUID()}`,
           status,
           // ⚠️ `claimed` には受け取った人と時刻が要る（既存の CHECK）。

@@ -85,11 +85,23 @@ import {
   canManuallyResend,
   domainError,
   err,
+  isIssuanceDue,
   ok,
+  planIssuance,
+  reconcileSupply,
   refundStatusAfter,
   reserveSupply,
+  scheduleIssuanceRetry,
   PAYMENT_API_ENDPOINT,
   TOKUSHOHO_FIELD_KEYS,
+} from '@sengoku/domain';
+import type {
+  EntitlementIssuanceRepository,
+  IssuanceCandidate,
+  IssuanceOutcome,
+  IssuanceRetry,
+  SupplyCounters,
+  SupplyReconciliation,
 } from '@sengoku/domain';
 import type {
   CreatorProfile,
@@ -2309,6 +2321,7 @@ export interface TestHarness extends AppDependencies {
   /** ⚠️ 精算の対象を差し替えるため、実体の型で持つ。 */
   readonly payouts: InMemoryPayouts;
   readonly profiles: InMemoryCreatorProfiles;
+  readonly issuance: InMemoryEntitlementIssuance;
 }
 
 /**
@@ -2506,6 +2519,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
        `harness.legalRepository.removeAll('tokushoho')` で未公開へ戻す。**
   */
   legalRepository.seed(publishedTokushoho());
+  const issuance = new InMemoryEntitlementIssuance();
   const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
     version: '0.1.0',
@@ -2516,6 +2530,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     settlement: settlementSettings,
     // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
     refunds,
+    // 受取権の発行（P0-1）。⚠️ 対象の注文は試験ごとに `seedOrder` で置く。
+    issuance,
     // 精算（`UD-119`）。⚠️ 対象の注文は試験ごとに差し替える。
     payouts,
     // 作家さまの表示名（決定 2026-08-20）。
@@ -2656,4 +2672,202 @@ export function sampleListing(overrides: Partial<Listing> = {}): Listing {
     displayOrder: 0,
     ...overrides,
   };
+}
+
+/**
+ * 受取権の発行（P0-1）の代替実装。
+ *
+ * ⚠️ **判定は本物と同じドメイン関数（`planIssuance`）を通す。** ここだけ
+ * 別の数え方にすると、代替実装では通るのに本番では落ちる（あるいはその逆）
+ * 試験ができあがる。二重体が肩代わりしてよいのは**保存**だけで、**判定**は
+ * 肩代わりさせない。
+ */
+export class InMemoryEntitlementIssuance implements EntitlementIssuanceRepository {
+  private readonly orders = new Map<
+    string,
+    {
+      orderNumber: string;
+      accountId: string;
+      paymentStatus: string;
+      fulfillmentStatus: string;
+      attemptCount: number;
+      nextAttemptAt: Date | null;
+      lastError: string | null;
+      lines: { id: string; artworkId: string; quantity: number }[];
+    }
+  >();
+
+  private readonly artworks = new Map<string, SupplyCounters>();
+
+  /** 作った受取権。⚠️ 実物を数えるので、件数の正はここ。 */
+  readonly entitlements: {
+    id: string;
+    orderLineId: string;
+    unitIndex: number;
+    serialNo: number;
+  }[] = [];
+
+  /** 次に `issueForOrder` を呼んだとき 1 度だけ落とす（途中失敗の再現）。 */
+  failNext: string | null = null;
+
+  private nextId = 1;
+
+  seedOrder(input: {
+    readonly orderId: string;
+    readonly orderNumber?: string;
+    readonly accountId?: string;
+    readonly artworkId: string;
+    readonly quantity: number;
+    readonly maxSupply?: number;
+    readonly paymentStatus?: string;
+  }): void {
+    const quantity = input.quantity;
+    this.orders.set(input.orderId, {
+      orderNumber: input.orderNumber ?? `SNK-${input.orderId}`,
+      accountId: input.accountId ?? `account-${input.orderId}`,
+      paymentStatus: input.paymentStatus ?? 'succeeded',
+      fulfillmentStatus: 'not_started',
+      attemptCount: 0,
+      nextAttemptAt: null,
+      lastError: null,
+      lines: [{ id: `line-${input.orderId}`, artworkId: input.artworkId, quantity }],
+    });
+    const existing = this.artworks.get(input.artworkId);
+    this.artworks.set(input.artworkId, {
+      maxSupply: input.maxSupply ?? existing?.maxSupply ?? 10,
+      // 決済が済んだ枠は押さえたまま（決定 A）。
+      reservedCount: (existing?.reservedCount ?? 0) + quantity,
+      issuedCount: existing?.issuedCount ?? 0,
+    });
+  }
+
+  counters(artworkId: string): SupplyCounters | undefined {
+    return this.artworks.get(artworkId);
+  }
+
+  attemptsOf(orderId: string): number {
+    return this.orders.get(orderId)?.attemptCount ?? 0;
+  }
+
+  lastErrorOf(orderId: string): string | null {
+    return this.orders.get(orderId)?.lastError ?? null;
+  }
+
+  fulfillmentOf(orderId: string): string | undefined {
+    return this.orders.get(orderId)?.fulfillmentStatus;
+  }
+
+  countFor(orderId: string): number {
+    const order = this.orders.get(orderId);
+    if (order === undefined) return 0;
+    const lineIds = new Set(order.lines.map((line) => line.id));
+    return this.entitlements.filter((row) => lineIds.has(row.orderLineId)).length;
+  }
+
+  listPending(limit: number, now: Date): Promise<IssuanceCandidate[]> {
+    const rows: IssuanceCandidate[] = [];
+    for (const [orderId, order] of this.orders) {
+      if (order.paymentStatus !== 'succeeded' || order.fulfillmentStatus === 'fulfilled') continue;
+      if (
+        !isIssuanceDue(
+          { nextAttemptAt: order.nextAttemptAt, attemptCount: order.attemptCount },
+          now,
+        )
+      )
+        continue;
+      rows.push({ orderId, orderNumber: order.orderNumber });
+      if (rows.length >= limit) break;
+    }
+    return Promise.resolve(rows);
+  }
+
+  issueForOrder(orderId: string, now: Date): Promise<Result<IssuanceOutcome, DomainError>> {
+    if (this.failNext !== null) {
+      const message = this.failNext;
+      this.failNext = null;
+      // ⚠️ 途中失敗の再現。投げた側は何も書き換えていない。
+      return Promise.reject(new Error(message));
+    }
+
+    const order = this.orders.get(orderId);
+    if (order === undefined) {
+      return Promise.resolve(err(domainError('ENTITLEMENT_ORDER_NOT_FOUND', 'missing')));
+    }
+    if (order.paymentStatus !== 'succeeded') {
+      return Promise.resolve(err(domainError('ENTITLEMENT_ORDER_NOT_PAID', 'unpaid')));
+    }
+
+    const entitlementIds: string[] = [];
+    let issued = 0;
+
+    for (const line of order.lines) {
+      const counters = this.artworks.get(line.artworkId);
+      if (counters === undefined) {
+        return Promise.resolve(err(domainError('ENTITLEMENT_SUPPLY_MISMATCH', 'no counters')));
+      }
+      const alreadyIssued = this.entitlements.filter((row) => row.orderLineId === line.id).length;
+      const plan = planIssuance({ quantity: line.quantity, alreadyIssued, counters });
+      if (!plan.ok) {
+        return Promise.resolve(plan);
+      }
+      if (plan.value.missing === 0) continue;
+
+      this.artworks.set(line.artworkId, plan.value.counters);
+      for (const unit of plan.value.units) {
+        const id = `ent-${String(this.nextId)}`;
+        this.nextId += 1;
+        this.entitlements.push({
+          id,
+          orderLineId: line.id,
+          unitIndex: unit.unitIndex,
+          serialNo: unit.serialNo,
+        });
+        entitlementIds.push(id);
+        issued += 1;
+      }
+    }
+
+    order.fulfillmentStatus = 'fulfilled';
+    order.attemptCount = 0;
+    order.nextAttemptAt = null;
+    order.lastError = null;
+    void now;
+
+    return Promise.resolve(ok({ orderId, orderNumber: order.orderNumber, issued, entitlementIds }));
+  }
+
+  recordFailure(input: {
+    readonly orderId: string;
+    readonly code: string;
+    readonly now: Date;
+  }): Promise<IssuanceRetry> {
+    const order = this.orders.get(input.orderId);
+    const previous = order?.attemptCount ?? 0;
+    const retry = scheduleIssuanceRetry(previous, input.now);
+    if (order !== undefined) {
+      order.attemptCount = retry.attemptCount;
+      order.nextAttemptAt = retry.nextAttemptAt;
+      order.lastError = input.code;
+    }
+    return Promise.resolve(retry);
+  }
+
+  reconcile(): Promise<SupplyReconciliation[]> {
+    const counts = new Map<string, number>();
+    for (const [, order] of this.orders) {
+      for (const line of order.lines) {
+        const made = this.entitlements.filter((row) => row.orderLineId === line.id).length;
+        counts.set(line.artworkId, (counts.get(line.artworkId) ?? 0) + made);
+      }
+    }
+    return Promise.resolve(
+      reconcileSupply(
+        [...this.artworks].map(([artworkId, counters]) => ({
+          artworkId,
+          issuedCount: counters.issuedCount,
+          entitlementCount: counts.get(artworkId) ?? 0,
+        })),
+      ),
+    );
+  }
 }

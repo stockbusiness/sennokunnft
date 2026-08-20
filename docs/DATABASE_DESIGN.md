@@ -177,28 +177,31 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 
 ### 3.4 `orders` — 注文
 
-| 列                          | 型          | 制約                         | 説明                                                                          |
-| --------------------------- | ----------- | ---------------------------- | ----------------------------------------------------------------------------- |
-| `id`                        | UUID        | PK                           |                                                                               |
-| `order_number`              | TEXT        | NOT NULL, UNIQUE             | 人が読み上げる番号。**参照の正は `id`**                                       |
-| `account_id`                | UUID        | NOT NULL, FK → `accounts.id` | 購入者                                                                        |
-| `common_user_id`            | TEXT        | NULL                         | 共通顧客ID。解決できていない購入者があるため NULL 可                          |
-| `creator_account_id`        | UUID        | NOT NULL, FK → `accounts.id` | 出品者。**1 注文 1 クリエイター**                                             |
-| `status`                    | TEXT        | NOT NULL                     | `pending` / `checkout_created` / `paid` / `expired` / `cancelled`             |
-| `payment_status`            | TEXT        | NOT NULL                     | `not_started` / `pending` / `succeeded` / `failed` / `cancelled` / `refunded` |
-| `fulfillment_status`        | TEXT        | NOT NULL                     | `not_started` / `processing` / `fulfilled` / `failed`                         |
-| `refund_status`             | TEXT        | NOT NULL                     | `none` / `pending` / `partially_refunded` / `refunded` / `failed`             |
-| `subtotal_amount`           | INTEGER     | NOT NULL, CHECK `>= 0`       | 単価 × 数量                                                                   |
-| `discount_amount`           | INTEGER     | NOT NULL DEFAULT 0           | 今回は常に 0。列と計算だけ先に用意                                            |
-| `total_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`       | `subtotal - discount` と一致（CHECK）                                         |
-| `total_currency`            | CHAR(3)     | NOT NULL                     |                                                                               |
-| `platform_fee_rate_bps`     | INTEGER     | NOT NULL DEFAULT 0           | 注文時点の手数料率。**bps の整数**（0〜10000）                                |
-| `platform_fee_amount`       | INTEGER     | NOT NULL DEFAULT 0           |                                                                               |
-| `creator_amount`            | INTEGER     | NOT NULL                     | `total - platform_fee` と一致（CHECK）                                        |
-| `idempotency_key`           | TEXT        | NOT NULL                     | 注文作成の冪等キー                                                            |
-| `reserved_until`            | TIMESTAMPTZ | NULL                         | 仮引当の期限                                                                  |
-| `paid_at`                   | TIMESTAMPTZ | NULL                         |                                                                               |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                     |                                                                               |
+| 列                          | 型          | 制約                             | 説明                                                                          |
+| --------------------------- | ----------- | -------------------------------- | ----------------------------------------------------------------------------- |
+| `id`                        | UUID        | PK                               |                                                                               |
+| `order_number`              | TEXT        | NOT NULL, UNIQUE                 | 人が読み上げる番号。**参照の正は `id`**                                       |
+| `account_id`                | UUID        | NOT NULL, FK → `accounts.id`     | 購入者                                                                        |
+| `common_user_id`            | TEXT        | NULL                             | 共通顧客ID。解決できていない購入者があるため NULL 可                          |
+| `creator_account_id`        | UUID        | NOT NULL, FK → `accounts.id`     | 出品者。**1 注文 1 クリエイター**                                             |
+| `status`                    | TEXT        | NOT NULL                         | `pending` / `checkout_created` / `paid` / `expired` / `cancelled`             |
+| `payment_status`            | TEXT        | NOT NULL                         | `not_started` / `pending` / `succeeded` / `failed` / `cancelled` / `refunded` |
+| `fulfillment_status`        | TEXT        | NOT NULL                         | `not_started` / `processing` / `fulfilled` / `failed`                         |
+| `refund_status`             | TEXT        | NOT NULL                         | `none` / `pending` / `partially_refunded` / `refunded` / `failed`             |
+| `subtotal_amount`           | INTEGER     | NOT NULL, CHECK `>= 0`           | 単価 × 数量                                                                   |
+| `discount_amount`           | INTEGER     | NOT NULL DEFAULT 0               | 今回は常に 0。列と計算だけ先に用意                                            |
+| `total_amount`              | INTEGER     | NOT NULL, CHECK `>= 0`           | `subtotal - discount` と一致（CHECK）                                         |
+| `total_currency`            | CHAR(3)     | NOT NULL                         |                                                                               |
+| `platform_fee_rate_bps`     | INTEGER     | NOT NULL DEFAULT 0               | 注文時点の手数料率。**bps の整数**（0〜10000）                                |
+| `platform_fee_amount`       | INTEGER     | NOT NULL DEFAULT 0               |                                                                               |
+| `creator_amount`            | INTEGER     | NOT NULL                         | `total - platform_fee` と一致（CHECK）                                        |
+| `idempotency_key`           | TEXT        | NOT NULL                         | 注文作成の冪等キー                                                            |
+| `reserved_until`            | TIMESTAMPTZ | NULL                             | 仮引当の期限                                                                  |
+| `paid_at`                   | TIMESTAMPTZ | NULL                             |                                                                               |
+| `issuance_attempt_count`    | INTEGER     | NOT NULL DEFAULT 0, CHECK `>= 0` | 受取権の発行を試した回数（P0-1）                                              |
+| `issuance_next_attempt_at`  | TIMESTAMPTZ | NULL                             | 次に試してよい時刻。`NULL` は「まだ一度も失敗していない」                     |
+| `issuance_last_error`       | TEXT        | NULL                             | ⚠️ **応答本文を入れない。** こちらで決めた短い符号だけ                        |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                         |                                                                               |
 
 - `UNIQUE (account_id, idempotency_key)` — 同一利用者の二重注文を防ぐ
 - `UNIQUE (order_number)`
@@ -208,6 +211,13 @@ UNIQUE にすると**正しい解決結果が保存できずに落ちる。**
 - INDEX `(status, reserved_until)` — 期限切れ回収ワーカー用
 - INDEX `(account_id, created_at DESC)` / `(creator_account_id, created_at DESC)`
 - INDEX `(payment_status, created_at DESC)`
+- 部分 INDEX `(issuance_next_attempt_at, paid_at) WHERE payment_status = 'succeeded' AND fulfillment_status <> 'fulfilled'` — 受取権の発行の掃き出し用
+
+⚠️ **`issuance_*` は「何回試したか」だけで、「何をすべきか」ではない**（P0-1）。
+作るべき受取権の枚数は、注文明細の数量と `entitlements` の実物から導く。
+**これらの列が消えても、作るべき枚数は変わらない。** 待ち行列の表を別に作って
+いないのは、行を足す方式だと「入れ忘れ」「行だけ残る」という実物と食い違う
+壊れ方が増えるため。
 
 ⚠️ **状態を 4 本に分けてある（決済 Phase P0・指示書 §7）。**
 1 本に詰めると「決済は成功したが付与に失敗した」を表せない。
@@ -415,6 +425,7 @@ Webhook の宛先は URL だけで決まるので、試験用の送信先を本�
 | `artwork_id`                | UUID        | NOT NULL, FK → `artworks.id`    |                                              |
 | `account_id`                | UUID        | NOT NULL, FK → `accounts.id`    | **購入者**（Claim照合の基準）                |
 | `serial_no`                 | INTEGER     | NOT NULL, CHECK `>= 1`          | 作品内の連番                                 |
+| `unit_index`                | INTEGER     | NOT NULL, CHECK `>= 0`          | **注文明細の中での連番**（0 始まり）         |
 | `claim_token_hash`          | TEXT        | NOT NULL                        | Claimトークンのハッシュ                      |
 | `status`                    | TEXT        | NOT NULL DEFAULT `'issued'`     | `issued` / `claimed` / `expired` / `revoked` |
 | `expires_at`                | TIMESTAMPTZ | NULL                            | Claim 期限                                   |
@@ -423,10 +434,27 @@ Webhook の宛先は URL だけで決まるので、試験用の送信先を本�
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                        |                                              |
 
 - **`UNIQUE (artwork_id, serial_no)`** — 同一作品内でシリアル重複なし
+- **`UNIQUE (order_line_id, unit_index)`** — `entitlements_line_unit_unique`
 - **`UNIQUE (claim_token_hash)`** — トークン衝突を検出
 - INDEX `(account_id, status)`, `(order_id)`, `(status, expires_at)`
 
 ✅ **事実:** 数量Nの注文に対し、本テーブルに**N行**作成する。
+
+#### 発行の冪等（P0-1・2026-08-20）
+
+⚠️ **`UNIQUE (order_line_id, unit_index)` が二重発行の最終防壁。** 決済事業者は
+同じ知らせを何度でも送る。アプリ側の「もう作ったか」の判定だけに頼ると、
+**同時に 2 本走ったときに両方が「まだ」と読んで両方作る**——判定と作成のあいだに
+隙間があるため。
+
+⚠️ **`serial_no` では代われない。** あちらは作品の中の通し番号で、「この注文明細の
+何枚目か」を表さない。**途中で落ちた発行を再開するとき、何枚目まで作れているかを
+数えられるのは `unit_index` のほう**である。
+
+⚠️ **発行の待ち行列を別の表にしていない。** 「決済が済んでいるのに受取権が足りない
+注文」は、注文と受取権から必ず導ける。行を足す方式にすると「行の入れ忘れ」
+「行だけ残る」という実物と食い違う壊れ方が新しく増える。試行回数だけを
+`orders.issuance_*` に置いてある（下記）。
 
 **INV-E1 の実装:** Claim は次の1文で行う。
 

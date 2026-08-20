@@ -29,6 +29,7 @@ import type {
   OrderRepository,
   OrderNoteRepository,
   SettlementSettingsRepository,
+  EntitlementIssuanceRepository,
   RefundRepository,
   PayoutRepository,
   CreatorProfileRepository,
@@ -102,6 +103,11 @@ import {
 } from './order/order.controller';
 import { OrderService } from './order/order.service';
 import { OrderSupportService } from './order/order-support.service';
+import {
+  EntitlementIssuanceService,
+  ISSUANCE_CONFIG,
+  type IssuanceConfig,
+} from './order/issuance.service';
 import { RefundService } from './order/refund.service';
 import {
   AdminSettlementController,
@@ -316,6 +322,13 @@ export interface AppDependencies {
    */
   readonly refunds: RefundRepository;
   /**
+   * 受取権の発行（P0-1）。
+   *
+   * ⚠️ **省略できない。** 無いと、決済が済んだ注文から受取権が生まれず、
+   * Claim も Wallet 配送も一度も動かない。
+   */
+  readonly issuance: EntitlementIssuanceRepository;
+  /**
    * 作家さまへの精算（`UD-119`）。
    *
    * ⚠️ **省略できない。** 無いと締めも確定もできず、作家さまへの
@@ -517,6 +530,21 @@ export class AppModule implements NestModule {
         PayoutService,
         {
           /*
+            受取権の発行（P0-1）。
+
+            ⚠️ **決済を繋いでいない配備でも配る。** 掃き出しの口と、
+               受取権の件数と在庫カウンタの突き合わせは、決済に依らず要る。
+          */
+          provide: ISSUANCE_CONFIG,
+          useValue: {
+            repository: deps.issuance,
+            audit: deps.audit,
+            clock: deps.clock,
+          } satisfies IssuanceConfig,
+        },
+        EntitlementIssuanceService,
+        {
+          /*
             返金の実行（`UD-104` / `UD-120`）。
             ⚠️ **決済を繋いでいない配備でも配る。** 返金の記録を読む口
                （`GET :id/refunds`）は決済に依らず要る。投げる先が無い
@@ -623,8 +651,11 @@ export class AppModule implements NestModule {
               },
               {
                 provide: PaymentWebhookService,
-                inject: [RefundService],
-                useFactory: (refundService: RefundService) =>
+                inject: [RefundService, EntitlementIssuanceService],
+                useFactory: (
+                  refundService: RefundService,
+                  issuanceService: EntitlementIssuanceService,
+                ) =>
                   new PaymentWebhookService(
                     payments.gateway,
                     payments.repository,
@@ -640,6 +671,8 @@ export class AppModule implements NestModule {
                     },
                     // ⚠️ 事業者の画面からの返金に追随する（`UD-120`）。
                     refundService,
+                    // ⚠️ 決済確定の直後に受取権を作る（P0-1）。
+                    issuanceService,
                   ),
               },
             ]),

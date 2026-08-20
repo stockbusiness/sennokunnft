@@ -24,6 +24,7 @@ export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
 export { PrismaSettlementSettingsRepository } from './repositories/settlement.repository';
 export { PrismaRefundRepository } from './repositories/refund.repository';
+export { PrismaEntitlementIssuanceRepository } from './repositories/issuance.repository';
 export { PrismaCreatorProfileRepository } from './repositories/profile.repository';
 export { PrismaPayoutRepository, PayoutNotEditableError } from './repositories/payout.repository';
 

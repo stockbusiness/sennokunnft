@@ -172,6 +172,8 @@ export {
   type AdminOrderView,
   type AdminOrderListResponse,
   type AdminOrderListQuery,
+  issueEntitlementsResponseSchema,
+  type IssueEntitlementsResponse,
   type ReleaseExpiredResponse,
   PAYMENT_ATTEMPT_STATUS_VALUES,
   checkoutSessionResponseSchema,

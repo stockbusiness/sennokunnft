@@ -201,6 +201,22 @@ export const releaseExpiredResponseSchema = z.object({
 });
 export type ReleaseExpiredResponse = z.infer<typeof releaseExpiredResponseSchema>;
 
+/**
+ * 受取権の発行ジョブの結果（P0-1）。
+ *
+ * ⚠️ **注文番号も購入者も返さない。** これは時計が叩く口で、応答は監視の
+ * 数値として読まれる。人の情報を混ぜると、監視の記録が名簿になる。
+ */
+export const issueEntitlementsResponseSchema = z.object({
+  /** 拾った注文の数。 */
+  pickedCount: z.number().int().nonnegative(),
+  /** このとき作った受取権の枚数。 */
+  issuedCount: z.number().int().nonnegative(),
+  /** 失敗した注文の数。⚠️ 0 でないなら、次の掃き出しが拾い直す。 */
+  failedCount: z.number().int().nonnegative(),
+});
+export type IssueEntitlementsResponse = z.infer<typeof issueEntitlementsResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // 決済（決済 Phase P2）
 // ---------------------------------------------------------------------------

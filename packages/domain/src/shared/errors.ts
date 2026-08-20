@@ -20,6 +20,24 @@ export const DOMAIN_ERROR_CODES = [
   'INVALID_STATE_TRANSITION',
   'ENTITLEMENT_NOT_CLAIMABLE',
   'ENTITLEMENT_OWNER_MISMATCH',
+  /*
+    受取権の発行（P0-1）。
+
+    ⚠️ **2 つを分けてある。** 「売った数より受取権が多い」は二重発行で、
+       「押さえた枠が足りない」は在庫の記録の壊れ。原因も直し方も違う
+       ので、同じ符号にすると調べるときに区別できない。
+  */
+  'ENTITLEMENT_OVER_ISSUED',
+  'ENTITLEMENT_SUPPLY_MISMATCH',
+  /** 発行しようとした注文が見つからない。 */
+  'ENTITLEMENT_ORDER_NOT_FOUND',
+  /**
+   * 決済が済んでいない注文に受取権を作ろうとした。
+   *
+   * ⚠️ **緩めない。** ここを通すと、失敗した決済や期限切れの注文からも
+   * 権利が生まれる。
+   */
+  'ENTITLEMENT_ORDER_NOT_PAID',
   'CLAIM_TOKEN_INVALID',
   // Claim API（API_DESIGN.md §3-2）で確定した符号。
   // ⚠️ 相手システムと合わせた契約なので、**綴りを変えない**。

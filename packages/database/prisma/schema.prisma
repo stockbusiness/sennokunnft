@@ -37,37 +37,37 @@ enum AccountStatus {
 /// 認証の正は Supabase Auth 側にあり、本テーブルは参照と業務属性のみを持つ。
 /// パスワードや資格情報は一切保持しない。
 model Account {
-  id           String        @id @default(uuid()) @db.Uuid
-  authProvider String        @map("auth_provider")
-  authSubject  String        @map("auth_subject")
+  id             String        @id @default(uuid()) @db.Uuid
+  authProvider   String        @map("auth_provider")
+  authSubject    String        @map("auth_subject")
   /// 照合用のハッシュ。平文のメールアドレスは保持しない（UD-503）。
   /// 照合用のメールハッシュ。⚠️ 平文は持たない（`UD-503`）。
   /// ⚠️ 素のハッシュではなく鍵付き（`EMAIL_LOOKUP_PEPPER`）。理由は
   /// ドメインの `EmailHashPort` を参照。
   /// ⚠️ 索引は**部分索引**なので、Prisma では表せない。
   /// `20260820090000_order_support` の手書きマイグレーションにある。
-  emailHash    String?       @map("email_hash")
-  displayName  String?       @map("display_name")
+  emailHash      String?       @map("email_hash")
+  displayName    String?       @map("display_name")
   /// 重複判定の鍵（決定 2026-08-20）。⚠️ **生成はアプリ側**（domain の
   /// `displayNameKey`）。PostgreSQL の `lower()` は NFKC 正規化をしないので、
   /// DB の関数で作るとアプリ側と結果がずれる。
   /// ⚠️ 部分 UNIQUE 索引 `accounts_display_name_key_unique`
   /// （`WHERE display_name_key IS NOT NULL`）が重複を止める。Prisma では
   /// 条件付き索引を書けないため、**手書きのマイグレーション側にだけ存在する**。
-  displayNameKey String?      @map("display_name_key")
+  displayNameKey String?       @map("display_name_key")
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
-  role         AccountRole   @default(buyer)
-  status       AccountStatus @default(active)
+  role           AccountRole   @default(buyer)
+  status         AccountStatus @default(active)
   /// 人に権限を配れるか（UD-803 決定 2026-08-18）。
   /// ⚠️ 役割とは別の軸。役割は「作品や注文に何ができるか」、
   /// こちらは「人事を触れるか」。4 つ目の役割にすると、operator に許した
   /// 操作をすべて写す必要が生まれ、写し忘れが静かに残る。
   /// ⚠️ CHECK で operator に限っている（accounts_owner_is_operator）。
-  isOwner      Boolean       @default(false) @map("is_owner")
+  isOwner        Boolean       @default(false) @map("is_owner")
   /// 運営スタッフの業務用アドレス。**購入者の行には入らない**（CHECK で縛る）。
   /// ⚠️ UD-503（購入者のメールを平文で持たない）は維持したまま、
   /// オーナーが自分で入力したスタッフの連絡先だけを持つ。
-  staffEmail   String?       @map("staff_email")
+  staffEmail     String?       @map("staff_email")
 
   /// 共通顧客ID。**発行元は代理店システムのみ**で、本システムは受け取るだけ。
   /// ⚠️ 主キーにしない。外部が発行した値を主キーにすると、
@@ -513,55 +513,66 @@ enum OrderSource {
 }
 
 model Order {
-  id                 String      @id @default(uuid()) @db.Uuid
+  id                    String      @id @default(uuid()) @db.Uuid
   /// 人が読み上げ、問い合わせで使う番号。⚠️ 参照の正は `id` のまま。
-  orderNumber        String      @unique @map("order_number")
-  accountId          String      @map("account_id") @db.Uuid
+  orderNumber           String      @unique @map("order_number")
+  accountId             String      @map("account_id") @db.Uuid
   /// 共通顧客ID。まだ解決できていない購入者があるため NULL を許す。
-  commonUserId       String?     @map("common_user_id")
+  commonUserId          String?     @map("common_user_id")
   /// ⚠️ 1 注文 1 クリエイター（指示書 §3-4）。明細と必ず一致させる。
-  creatorAccountId   String      @map("creator_account_id") @db.Uuid
-  status             OrderStatus @default(pending)
+  creatorAccountId      String      @map("creator_account_id") @db.Uuid
+  status                OrderStatus @default(pending)
   /// 出自。既定は購入。Fixture だけが `STAGING_FIXTURE` を入れる。
-  source             OrderSource @default(PURCHASE)
+  source                OrderSource @default(PURCHASE)
   /// 商品の税込価格（単価 × 数量）。
-  subtotalAmount     Int         @map("subtotal_amount")
+  subtotalAmount        Int         @map("subtotal_amount")
   /// 値引額。⚠️ 今回は常に 0。列と計算だけ先に用意してある。
-  discountAmount     Int         @default(0) @map("discount_amount")
+  discountAmount        Int         @default(0) @map("discount_amount")
   /// 購入者が支払う額。`subtotal - discount` と CHECK 制約で一致させる。
-  totalAmount        Int         @map("total_amount")
-  totalCurrency      String      @map("total_currency") @db.Char(3)
+  totalAmount           Int         @map("total_amount")
+  totalCurrency         String      @map("total_currency") @db.Char(3)
   /// 注文時点の手数料率。⚠️ **bps（1/100 %）の整数**。
   /// 率を小数で持つと、金額に掛けた瞬間に誤差が入る。
-  platformFeeRateBps Int         @default(0) @map("platform_fee_rate_bps")
-  platformFeeAmount  Int         @default(0) @map("platform_fee_amount")
+  platformFeeRateBps    Int         @default(0) @map("platform_fee_rate_bps")
+  platformFeeAmount     Int         @default(0) @map("platform_fee_amount")
   /// クリエイター配分額。`total - platformFee` と CHECK 制約で一致させる。
-  creatorAmount      Int         @map("creator_amount")
+  creatorAmount         Int         @map("creator_amount")
   /// ⚠️ 4 つの状態を 1 本に詰め込まない（指示書 §7）。
   /// 「決済は成功したが付与に失敗した」を表せなくなる。
-  paymentStatus      String      @default("not_started") @map("payment_status")
-  fulfillmentStatus  String      @default("not_started") @map("fulfillment_status")
-  refundStatus       String      @default("none") @map("refund_status")
+  paymentStatus         String      @default("not_started") @map("payment_status")
+  fulfillmentStatus     String      @default("not_started") @map("fulfillment_status")
+  refundStatus          String      @default("none") @map("refund_status")
   /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
-  idempotencyKey     String      @map("idempotency_key")
+  idempotencyKey        String      @map("idempotency_key")
   /// 注文時点で施行されていた利用規約の版（`UD-126`）。
   /// ⚠️ **同意の記録ではない。** 「何が表示されていたか」の記録で、
   /// 価格・手数料率と同じスナップショット原則。改定しても過去の注文は動かない。
   /// ⚠️ 規約を公開していない時期の注文があるため NULL を許す。
   /// 無いことを、無いまま残す。
-  termsVersionId     String?     @map("terms_version_id") @db.Uuid
-  termsVersion       Int?        @map("terms_version")
+  termsVersionId        String?     @map("terms_version_id") @db.Uuid
+  termsVersion          Int?        @map("terms_version")
   /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
-  reservedUntil      DateTime?   @map("reserved_until") @db.Timestamptz(6)
-  paidAt             DateTime?   @map("paid_at") @db.Timestamptz(6)
+  reservedUntil         DateTime?   @map("reserved_until") @db.Timestamptz(6)
+  paidAt                DateTime?   @map("paid_at") @db.Timestamptz(6)
   /// 返金を受け付ける期限（`UD-104`）。
   ///
   /// ⚠️ **決済確定の時点で確定して書く。** 「決済日 + 設定値」を判定のたびに
   /// 計算しない。計算すると、14 日 → 30 日に変えた瞬間、精算済みの注文が
   /// 「まだ返金できる」に化ける。
-  refundableUntil    DateTime?   @map("refundable_until") @db.Timestamptz(6)
-  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refundableUntil       DateTime?   @map("refundable_until") @db.Timestamptz(6)
+  /// 受取権の発行の再試行（P0-1）。
+  ///
+  /// ⚠️ **ここに置くのは「何回試したか」だけで、「何をすべきか」ではない。**
+  /// 作るべき受取権の数は、注文明細の数量と `entitlements` の実物から
+  /// 導く。列が消えても、作るべき枚数は変わらない。
+  /// ⚠️ 待ち行列の表を別に作っていないのは、行を足す方式だと
+  /// 「入れ忘れ」「行だけ残る」という実物と食い違う壊れ方が増えるため。
+  issuanceAttemptCount  Int         @default(0) @map("issuance_attempt_count")
+  issuanceNextAttemptAt DateTime?   @map("issuance_next_attempt_at") @db.Timestamptz(6)
+  /// ⚠️ **応答本文をそのまま入れない。** こちらで決めた短い符号だけ。
+  issuanceLastError     String?     @map("issuance_last_error")
+  createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   account       Account                @relation(fields: [accountId], references: [id])
   creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
@@ -692,9 +703,9 @@ model Payout {
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  creator  Account      @relation("PayoutCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
-  paidBy   Account?     @relation("PayoutPayer", fields: [paidByAccountId], references: [id], onDelete: SetNull)
-  lines    PayoutLine[]
+  creator Account      @relation("PayoutCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  paidBy  Account?     @relation("PayoutPayer", fields: [paidByAccountId], references: [id], onDelete: SetNull)
+  lines   PayoutLine[]
 
   /// ⚠️ 1 作家さま × 1 締め期間 = 1 行。2 つできると、どちらが正か分からない。
   @@unique([creatorAccountId, periodKey], map: "payouts_creator_period_key")
@@ -963,6 +974,12 @@ model Entitlement {
   /// 購入者。Claim の本人照合はこの値と認証アカウントの一致で行う。
   accountId             String            @map("account_id") @db.Uuid
   serialNo              Int               @map("serial_no")
+  /// 注文明細の中での通し番号（0 始まり）。
+  /// ⚠️ **二重発行を止める鍵。** `UNIQUE(order_line_id, unit_index)` で、
+  ///    同じ Webhook が何度届いても 2 枚目を DB が弾く。
+  /// ⚠️ `serial_no`（作品の中の通し番号）では代われない。あちらは
+  ///    「この注文明細の何枚目か」を表さないため、再開時に数えられない。
+  unitIndex             Int               @map("unit_index")
   /// Claim トークンのハッシュ。**平文は保存しない。**
   claimTokenHash        String            @map("claim_token_hash")
   status                EntitlementStatus @default(issued)
@@ -993,6 +1010,8 @@ model Entitlement {
 
   /// 同一作品内でシリアル番号が重複しないことを物理的に担保する。
   @@unique([artworkId, serialNo])
+  /// 同じ注文明細の同じ枚数目を 2 度作らせない（P0-1 の冪等の鍵）。
+  @@unique([orderLineId, unitIndex], map: "entitlements_line_unit_unique")
   /// トークンの衝突を検出する。
   @@unique([claimTokenHash])
   @@index([accountId, status])
