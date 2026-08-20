@@ -28,7 +28,8 @@
     "db:migrate:dev": "pnpm --filter @sengoku/database exec prisma migrate dev",
     "db:seed": "pnpm --filter @sengoku/database run seed",
     "staging:create-test-entitlement": "pnpm --filter @sengoku/worker run staging:create-test-entitlement",
-    "wallet:resend": "pnpm --filter @sengoku/worker run wallet:resend"
+    "wallet:resend": "pnpm --filter @sengoku/worker run wallet:resend",
+    "wallet:revocation-backfill": "pnpm --filter @sengoku/worker run wallet:revocation-backfill"
   },
   "devDependencies": {
     "@types/node": "22.20.0",

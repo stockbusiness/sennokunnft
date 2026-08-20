@@ -32,15 +32,42 @@ export const TARGET_SITE_KEY = 'ovew-wallet';
  *
  * ⚠️ **ヘッダ `X-Event-Version` と本文 `event_version` は必ず同じ値**（§14）。
  * 片方だけ上げると、相手はヘッダで分岐して本文を読み違える。
- * 同じ定数から両方を組み立て、食い違いを作れないようにする。
+ * 送信アダプタは本文の `event_version` を読んでヘッダを埋めるので、
+ * ここが 1 か所であるかぎり食い違いようがない。
+ *
+ * ⚠️ **種別ごとに分けてある。1 本にまとめない。**
+ * まとめると、取消の版を上げた瞬間に付与の版まで黙って上がる。
+ * 相手はヘッダで分岐するため、**触っていないはずの付与が別の版として届く**。
  */
-export const WALLET_EVENT_VERSION = '1.0';
+export const WALLET_GRANTED_EVENT_VERSION = '1.0';
+
+/**
+ * 取消イベントの版。
+ *
+ * `1.1` は `reason_code` を加えた版（2026-08-20 決定）。
+ * ⚠️ **`entitlement.revoked` はこれまで 1 件も送信していない**ため、
+ * 既存の受信側の期待を壊さない。逆に言えば、**相手が 1.1 を受け取れることを
+ * 契約テストで確かめるまで配送を有効にしない**。
+ */
+export const WALLET_REVOKED_EVENT_VERSION = '1.1';
 
 /** Blockchain 未発行であることの明示。オフチェーン先行の MVP では常にこれ。 */
 export const BLOCKCHAIN_STATUS_NOT_MINTED = 'NOT_MINTED';
 
 /** 受取物の種別。現状はデジタル収蔵品のみ。 */
 export const ENTITLEMENT_TYPE_DIGITAL_COLLECTIBLE = 'DIGITAL_COLLECTIBLE';
+
+/**
+ * 取消の理由（`1.1` で追加）。
+ *
+ * ⚠️ **自由記述の口を作らない。** 相手はこの値で表示を分ける。
+ * 文字列を自由に入れられるようにすると、綴りの揺れがそのまま
+ * 「相手が知らない理由コード」になり、表示が既定へ落ちる。
+ *
+ * ⚠️ 増やすときは Wallet 側と語彙を合わせてから。片側だけ増やさない。
+ */
+export const REVOCATION_REASON_CODES = ['full_refund'] as const;
+export type RevocationReasonCode = (typeof REVOCATION_REASON_CODES)[number];
 
 /** 内容ハッシュの形式（`sha256:` + 64桁hex）。DB の CHECK 制約と同じ規則。 */
 const CONTENT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -169,13 +196,16 @@ export interface WalletGrantedEvent {
 }
 
 /**
- * `entitlement.revoked` の本文。
+ * `entitlement.revoked` の本文（版 `1.1`）。
  *
- * ❓ **未決定（UD-1010）:** 取り消しイベントの本文は Wallet 側と未合意。
- * ここでは封筒と `data` のみを送り、表示情報（`metadata`）は載せていない。
- * 取り消しに必要なのは「どの受取権が無効になったか」だけであり、
- * 表示情報を再送すると、相手がそれで Holding を書き換える余地が生まれる。
- * 先方の契約確定後に見直す。
+ * ⚠️ **表示情報（`metadata`）を載せない。** 取り消しに必要なのは
+ * 「どの受取権が無効になったか」だけである。表示情報を再送すると、
+ * 相手がそれで Holding を書き換える余地が生まれる。
+ *
+ * ⚠️ **金額を載せない。** 返金額も報酬額も、相手の表示には要らない。
+ * イベントは相手のログ・再送記録・障害調査を経由する。
+ *
+ * 相手は履歴を消さず「返金により取消・利用不可」として残す（2026-08-20 合意）。
  */
 export interface WalletRevokedEvent {
   readonly event_id: string;
@@ -186,6 +216,8 @@ export interface WalletRevokedEvent {
   readonly target_site_key: string;
   readonly correlation_id: string;
   readonly common_user_id: string;
+  /** なぜ取り消したか。⚠️ 固定コードのみ（自由記述を入れない）。 */
+  readonly reason_code: RevocationReasonCode;
   readonly data: WalletEventData;
 }
 
@@ -193,6 +225,16 @@ export type WalletDeliveryEvent = WalletGrantedEvent | WalletRevokedEvent;
 
 /** 相関ID の字種。受信側（`X-Correlation-Id`）と同じ規則にそろえる。 */
 const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
+
+/**
+ * 相関ID として送れる形か。
+ *
+ * ⚠️ **DB の CHECK 制約と同じ規則にそろえてある。** 別々に書くと、
+ * 片方だけを直したときに「保存はできるが送れない」行ができる。
+ */
+export function isWalletCorrelationId(value: string): boolean {
+  return CORRELATION_ID_PATTERN.test(value);
+}
 
 export interface WalletEventEnvelopeInput {
   readonly eventId: string;
@@ -244,7 +286,7 @@ export function buildGrantedEvent(
   }
 
   return ok({
-    ...baseEnvelope(input),
+    ...baseEnvelope(input, WALLET_GRANTED_EVENT_VERSION),
     event_type: 'entitlement.granted',
     data: eventData(input),
     metadata: {
@@ -265,17 +307,28 @@ export function buildGrantedEvent(
   });
 }
 
-/** `entitlement.revoked` を組み立てる。 */
+export interface WalletRevokedEventInput extends WalletEventEnvelopeInput {
+  readonly reasonCode: RevocationReasonCode;
+}
+
+/**
+ * `entitlement.revoked` を組み立てる。
+ *
+ * ⚠️ **`occurredAt` に「いまの時刻」を渡さない。** 呼び出し側は返金の
+ * `settled_at` を渡すこと。時刻が呼び出しごとに変わると、同じ受取権の
+ * 取消でも本文が変わり、**正常な重複が「本文の食い違い」として検知される**。
+ */
 export function buildRevokedEvent(
-  input: WalletEventEnvelopeInput,
+  input: WalletRevokedEventInput,
 ): Result<WalletRevokedEvent, DomainError> {
   const envelope = validateEnvelope(input);
   if (!envelope.ok) {
     return envelope;
   }
   return ok({
-    ...baseEnvelope(input),
+    ...baseEnvelope(input, WALLET_REVOKED_EVENT_VERSION),
     event_type: 'entitlement.revoked',
+    reason_code: input.reasonCode,
     data: eventData(input),
   });
 }
@@ -298,7 +351,10 @@ function validateEnvelope(input: WalletEventEnvelopeInput): Result<true, DomainE
   return ok(true);
 }
 
-function baseEnvelope(input: WalletEventEnvelopeInput): {
+function baseEnvelope(
+  input: WalletEventEnvelopeInput,
+  eventVersion: string,
+): {
   event_id: string;
   event_version: string;
   occurred_at: string;
@@ -309,7 +365,7 @@ function baseEnvelope(input: WalletEventEnvelopeInput): {
 } {
   return {
     event_id: input.eventId,
-    event_version: WALLET_EVENT_VERSION,
+    event_version: eventVersion,
     occurred_at: input.occurredAt.toISOString(),
     source_system_key: SOURCE_SYSTEM_KEY,
     target_site_key: TARGET_SITE_KEY,

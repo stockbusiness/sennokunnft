@@ -3,6 +3,7 @@ import {
   assertPhaseOneIntegrationLimits,
   assertProductionSafety,
   assertWalletDeliveryConfig,
+  assertWalletRevocationConfig,
   loadEnv,
   UnsafeEnvironmentError,
   workerEnvSchema,
@@ -57,6 +58,8 @@ async function bootstrap(): Promise<void> {
     // 起動すると配送だけが全件失敗して溜まり、利用者の画面は
     // 「お届け中」のままなので誰も異常に気づけない。
     assertWalletDeliveryConfig(env);
+    // ⚠️ 取消だけ配送を有効にしても 1 件も送られない。黙って起動させない。
+    assertWalletRevocationConfig(env);
   } catch (error) {
     if (error instanceof UnsafeEnvironmentError) {
       logger.fatal({ reasons: error.reasons }, '環境設定が安全でないため起動を中止しました');
@@ -135,6 +138,17 @@ async function bootstrap(): Promise<void> {
         batchSize: env.WALLET_DELIVERY_BATCH_SIZE,
         outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
         clock,
+        /*
+          送ってよい種別（M3a）。
+          ⚠️ **付与は常に送る。** ここに到達している時点で
+             `WALLET_DELIVERY_ENABLED` は有効であり、それは付与の配送を
+             意味する。取消の配送だけを別のフラグで足す。
+          ⚠️ 取消を止めても付与は止めない。段階導入の途中で付与まで
+             止まると、受け取った方の画面が「お届け中」のまま進まない。
+        */
+        eventTypes: env.WALLET_REVOCATION_EVENT_DELIVERY_ENABLED
+          ? ['entitlement.granted', 'entitlement.revoked']
+          : ['entitlement.granted'],
         /*
           ⚠️ **接続先と鍵は 1 巡ごとに解決する（要決定 03）。**
              起動時に 1 個作って使い回すと、管理画面で鍵を交換しても

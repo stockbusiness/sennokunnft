@@ -70,6 +70,13 @@ export const ACTIONS = [
   'integration.manage',
   'integration.manage_secret',
   'wallet_delivery.retry',
+  // --- 運用確認キュー（M3a）---
+  // ⚠️ **閲覧は閲覧者にも開く。** 「機械が決められなかったこと」が
+  //    何件残っているかは、監査の対象そのものである。
+  // ⚠️ **対応済みにできるのは運営だけ。** 状態を動かす操作であり、
+  //    「誰が確認したか」が記録に残る。
+  'operations_review.view',
+  'operations_review.resolve',
   // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
   // ⚠️ 下書きは運営スタッフが書ける。**公開はオーナーだけ**（下の
   //    `OWNER_ONLY_ACTIONS`）。公開した版は取り消せず、そこに書いた
@@ -231,6 +238,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     // ⚠️ 再送はオーナーの印を要らない。運営の日常業務であり、
     //    送る内容は Outbox に確定済みで、新しく何かを決める操作ではない。
     'wallet_delivery.retry',
+    // ⚠️ オーナーの印は要らない。金額も権利も動かさず、
+    //    「確認した」という印を付けるだけの操作である。
+    'operations_review.view',
+    'operations_review.resolve',
     'legal.view',
     'legal.edit',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
@@ -259,6 +270,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'audit_log.view',
     // 状態と履歴は見られるが、変更も再送もできない（指示書 §8）。
     'integration.view',
+    // ⚠️ 見るだけ。対応済みにはできない。
+    'operations_review.view',
     // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
     //    確かめるのは、まさに監査の仕事。
     'legal.view',

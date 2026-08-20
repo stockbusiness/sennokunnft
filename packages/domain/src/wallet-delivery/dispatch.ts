@@ -19,6 +19,16 @@ export const WALLET_DELIVERY_OUTBOX_STATUSES = [
   'DELIVERED',
   'FAILED',
   'DEAD',
+  /**
+   * 取消に追い越されたため、もう送らない付与イベント。
+   *
+   * ⚠️ **終端。ここから戻る道は無い。** 全額返金で取り消した受取権について、
+   * まだ送っていない `entitlement.granted` を残したまま自動配送させると、
+   * 取り消したはずの作品が**あとから相手側に現れる**。
+   *
+   * ⚠️ **行は消さない。** 「送ろうとしていた」という事実は残す。
+   */
+  'SUPERSEDED',
 ] as const;
 export type WalletDeliveryOutboxStatus = (typeof WALLET_DELIVERY_OUTBOX_STATUSES)[number];
 
@@ -131,6 +141,10 @@ export const WALLET_DELIVERY_MAX_ATTEMPTS = RETRY_MAX_ATTEMPTS;
  * 相手の冪等性だけが最後の砦になる。
  *
  * ⚠️ **`DELIVERED` も対象にしない。** 届いたものを送り直す理由がない。
+ *
+ * ⚠️ **`SUPERSEDED` も対象にしない。** 取消に追い越された付与を送り直すと、
+ * 取り消したはずの作品が相手側に現れる。**再送してよい状態を列挙**にして
+ * あるので、状態を足しても既定で再送対象にはならない。
  */
 export function canManuallyResend(status: WalletDeliveryOutboxStatus): boolean {
   return status === 'FAILED' || status === 'DEAD';

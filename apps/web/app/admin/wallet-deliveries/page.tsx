@@ -26,6 +26,8 @@ const STATUS_CHOICES = [
   { value: 'PENDING', label: 'お届けを待っているもの' },
   { value: 'PROCESSING', label: 'お届けしているもの' },
   { value: 'DELIVERED', label: 'お届けできたもの' },
+  // ⚠️ 再送の対象にならない。返金で取り消したため、届ける必要が無くなったもの。
+  { value: 'SUPERSEDED', label: '取り消しにより送信が不要になったもの' },
 ] as const;
 
 export default async function AdminWalletDeliveriesPage({

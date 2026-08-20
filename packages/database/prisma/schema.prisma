@@ -112,6 +112,7 @@ model Account {
   refunds                      Refund[]                     @relation("RefundActor")
   payouts                      Payout[]                     @relation("PayoutCreator")
   paidPayouts                  Payout[]                     @relation("PayoutPayer")
+  resolvedOperationsReviews    OperationsReview[]           @relation("OperationsReviewResolver")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -1137,6 +1138,15 @@ enum WalletDeliveryOutboxStatus {
   DELIVERED
   FAILED
   DEAD
+  /// 取消に追い越されたため、もう送らない付与イベント。**終端。**
+  ///
+  /// ⚠️ 全額返金で取り消した受取権について、まだ送っていない
+  ///    entitlement.granted を残したまま自動配送させると、取り消したはずの
+  ///    作品があとから相手側に現れる。
+  /// ⚠️ 行は消さない。「送ろうとしていた」事実は残す。
+  /// ⚠️ claimBatch（PENDING のみ）にも requeue（FAILED / DEAD のみ）にも
+  ///    拾われない。手動再送の対象にもならない。
+  SUPERSEDED
 }
 
 /// OVEW Wallet への配送待ち行列（PR-NW04 §10）。
@@ -1296,4 +1306,46 @@ model SettlementSettings {
   updatedBy Account? @relation("SettlementSettingsEditor", fields: [updatedByAccountId], references: [id], onDelete: SetNull)
 
   @@map("settlement_settings")
+}
+
+/// 運用確認キュー（M3a）。「機械では決められなかったこと」を残す。
+///
+/// ⚠️ **ログ出力で済ませない。** ログは流れて消える。人が確認するべき事柄は、
+/// 未対応か対応済みかを持った行として残らないと、忙しい日にそのまま埋もれる。
+///
+/// ⚠️ **業務処理を止めない。** ここへ積むのは「返金は成立したが、付随する
+/// 判断が残っている」という状況である。積めなかったからといって返金は
+/// 巻き戻さない。積む処理は例外を投げてはならない。
+///
+/// ⚠️ **同じ対象・同じ理由を 2 行にしない。** 返金の Webhook は同じものが
+/// 何度も届く。そのたびに確認事項が増えると「いま何件残っているか」が
+/// 意味を失い、誰も見なくなる。
+/// UNIQUE `operations_reviews_subject_reason_unique` が止める。
+model OperationsReview {
+  id                  String    @id @default(uuid()) @db.Uuid
+  /// `order` / `entitlement`。⚠️ CHECK で縛っている。
+  subjectType         String    @map("subject_type")
+  subjectId           String    @map("subject_id") @db.Uuid
+  /// 辿るための注文。⚠️ **外部キーを張っていない。** 確認事項は業務データより
+  /// 長生きしてよく、注文側の削除制約に引きずられたくない。
+  orderId             String?   @map("order_id") @db.Uuid
+  /// なぜ確認が要るか。⚠️ 固定コードのみ。CHECK で語彙を縛っている。
+  reasonCode          String    @map("reason_code")
+  /// 機械が判断できなかった理由。⚠️ 個人情報・秘密値を入れない。
+  detail              String
+  /// `open` / `resolved`。⚠️ CHECK で縛っている。
+  status              String    @default("open")
+  resolvedByAccountId String?   @map("resolved_by_account_id") @db.Uuid
+  resolvedAt          DateTime? @map("resolved_at") @db.Timestamptz(6)
+  /// 対応の記録。⚠️ 個人情報を入れない。
+  resolutionNote      String?   @map("resolution_note")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resolvedBy Account? @relation("OperationsReviewResolver", fields: [resolvedByAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([subjectType, subjectId, reasonCode], map: "operations_reviews_subject_reason_unique")
+  @@index([status, createdAt])
+  @@index([orderId])
+  @@map("operations_reviews")
 }

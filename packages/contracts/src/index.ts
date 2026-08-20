@@ -174,7 +174,9 @@ export {
   type AdminOrderListQuery,
   deliverEntitlementsResponseSchema,
   issueEntitlementsResponseSchema,
+  reconcileRevocationsResponseSchema,
   type DeliverEntitlementsResponse,
+  type ReconcileRevocationsResponse,
   type IssueEntitlementsResponse,
   type ReleaseExpiredResponse,
   PAYMENT_ATTEMPT_STATUS_VALUES,
@@ -294,3 +296,14 @@ export {
   type CreatorProfileView,
   type UpdateCreatorProfileRequest,
 } from './profile';
+
+export {
+  OPERATIONS_REVIEW_REASON_VALUES,
+  OPERATIONS_REVIEW_STATUS_VALUES,
+  operationsReviewSchema,
+  operationsReviewListResponseSchema,
+  resolveOperationsReviewRequestSchema,
+  type OperationsReviewListResponse,
+  type OperationsReviewView,
+  type ResolveOperationsReviewRequest,
+} from './operations-review';

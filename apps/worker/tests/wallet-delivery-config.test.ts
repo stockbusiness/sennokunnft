@@ -199,6 +199,7 @@ describe('解決できないときの巡回', () => {
       },
       logger,
       batchSize: 10,
+      eventTypes: ['entitlement.granted'],
     });
 
     expect(await job.runOnce()).toBe(0);
@@ -218,6 +219,7 @@ describe('解決できないときの巡回', () => {
       },
       logger,
       batchSize: 10,
+      eventTypes: ['entitlement.granted'],
     });
 
     await job.runOnce();

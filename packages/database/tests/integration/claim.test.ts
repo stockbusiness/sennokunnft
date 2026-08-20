@@ -305,8 +305,18 @@ suite('Claim の CHECK 制約', () => {
     await expect(
       prisma.entitlement.update({
         where: { id: entitlementId },
-        // 受取者だけ先に消し、配送状態を残す。反応してよい制約を 1 つに絞る。
-        data: { status: 'issued', claimedByCommonUserId: null },
+        /*
+          受取の記録だけ先に消し、配送状態を残す。反応してよい制約を 1 つに絞る。
+          ⚠️ `claimed_at` / `claimed_by_account_id` も一緒に消す。残すと
+             `entitlements_claim_fields_require_claim_or_revoked`（M3a で新設）が
+             先に反応し、どの規則を確かめているのか分からなくなる。
+        */
+        data: {
+          status: 'issued',
+          claimedByCommonUserId: null,
+          claimedAt: null,
+          claimedByAccountId: null,
+        },
       }),
     ).rejects.toSatisfy((error) =>
       violatesConstraint(error, 'entitlements_delivery_requires_claim'),
@@ -319,7 +329,13 @@ suite('Claim の CHECK 制約', () => {
     await expect(
       prisma.entitlement.update({
         where: { id: entitlementId },
-        data: { status: 'issued', walletDeliveryStatus: 'not_started' },
+        // ⚠️ 同上。反応してよい制約を「受取者が残っている」1 つに絞る。
+        data: {
+          status: 'issued',
+          walletDeliveryStatus: 'not_started',
+          claimedAt: null,
+          claimedByAccountId: null,
+        },
       }),
     ).rejects.toSatisfy((error) =>
       violatesConstraint(error, 'entitlements_claimer_requires_claim'),

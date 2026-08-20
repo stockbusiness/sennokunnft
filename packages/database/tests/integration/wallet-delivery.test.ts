@@ -28,6 +28,9 @@ let prisma: PrismaClient;
 let outbox: PrismaWalletDeliveryOutboxRepository;
 let claims: PrismaClaimRepository;
 
+/** 種別で絞る前の既定。⚠️ **本物の既定ではない**（本物は「送らない」）。 */
+const ALL_EVENT_TYPES = ['entitlement.granted', 'entitlement.revoked'] as const;
+
 const NOW = new Date('2026-08-14T00:00:00.000Z');
 const PURCHASER_CU = 'cu_0123456789abcdef0123456789abcdef';
 const CORRELATION_ID = 'corr_0123456789';
@@ -321,8 +324,8 @@ suite('ワーカーによる排他取得（§24）', () => {
     }
 
     const [left, right] = await Promise.all([
-      outbox.claimBatch({ limit: 4, now: NOW }),
-      outbox.claimBatch({ limit: 4, now: NOW }),
+      outbox.claimBatch({ limit: 4, now: NOW, eventTypes: ALL_EVENT_TYPES }),
+      outbox.claimBatch({ limit: 4, now: NOW, eventTypes: ALL_EVENT_TYPES }),
     ]);
 
     const ids = [...left, ...right].map((row) => row.id);
@@ -334,7 +337,7 @@ suite('ワーカーによる排他取得（§24）', () => {
     const { entitlementId } = await seedEntitlement();
     await outbox.enqueue(enqueueInput(entitlementId));
 
-    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW });
+    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     expect(claimed?.attemptCount).toBe(1);
     expect(claimed?.status).toBe('PROCESSING');
   });
@@ -342,7 +345,7 @@ suite('ワーカーによる排他取得（§24）', () => {
   it('再試行時刻が先の行は掴まない', async () => {
     const { entitlementId } = await seedEntitlement();
     const row = await outbox.enqueue(enqueueInput(entitlementId));
-    await outbox.claimBatch({ limit: 1, now: NOW });
+    await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     await outbox.recordFailure({
       id: row.id,
       status: 'PENDING',
@@ -352,9 +355,15 @@ suite('ワーカーによる排他取得（§24）', () => {
       now: NOW,
     });
 
-    expect(await outbox.claimBatch({ limit: 1, now: NOW })).toHaveLength(0);
     expect(
-      await outbox.claimBatch({ limit: 1, now: new Date(NOW.getTime() + 60_000) }),
+      await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES }),
+    ).toHaveLength(0);
+    expect(
+      await outbox.claimBatch({
+        limit: 1,
+        now: new Date(NOW.getTime() + 60_000),
+        eventTypes: ALL_EVENT_TYPES,
+      }),
     ).toHaveLength(1);
   });
 
@@ -363,7 +372,7 @@ suite('ワーカーによる排他取得（§24）', () => {
     //    エラーひとつ出さずに止まったまま残る。
     const { entitlementId } = await seedEntitlement();
     await outbox.enqueue(enqueueInput(entitlementId));
-    await outbox.claimBatch({ limit: 1, now: NOW });
+    await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
 
     const later = new Date(NOW.getTime() + 30 * 60_000);
     const reclaimed = await outbox.reclaimStale({
@@ -372,7 +381,7 @@ suite('ワーカーによる排他取得（§24）', () => {
     });
 
     expect(reclaimed).toBe(1);
-    const [again] = await outbox.claimBatch({ limit: 1, now: later });
+    const [again] = await outbox.claimBatch({ limit: 1, now: later, eventTypes: ALL_EVENT_TYPES });
     // 試行回数は戻さない。その 1 回は実際に送ろうとしたため。
     expect(again?.attemptCount).toBe(2);
   });
@@ -396,7 +405,7 @@ suite('配送の成否の記録（§19・§22）', () => {
         correlationId: CORRELATION_ID,
       },
     });
-    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW });
+    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     if (claimed === undefined) throw new Error('claim failed');
 
     expect(await outbox.markDelivered({ id: claimed.id, now: NOW })).toBe(true);
@@ -425,7 +434,7 @@ suite('配送の成否の記録（§19・§22）', () => {
         correlationId: CORRELATION_ID,
       },
     });
-    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW });
+    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     if (claimed === undefined) throw new Error('claim failed');
 
     await outbox.recordFailure({
@@ -448,7 +457,7 @@ suite('配送の成否の記録（§19・§22）', () => {
     // 「取り消しを伝えられた」ことと「受け取れた」ことは別の事実。
     const { entitlementId } = await seedEntitlement();
     await outbox.enqueue(enqueueInput(entitlementId, { eventType: 'entitlement.revoked' }));
-    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW });
+    const [claimed] = await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     if (claimed === undefined) throw new Error('claim failed');
 
     expect(await outbox.markDelivered({ id: claimed.id, now: NOW })).toBe(true);
@@ -471,7 +480,7 @@ suite('手動再送（§20）', () => {
     const { entitlementId } = await seedEntitlement();
     const input = enqueueInput(entitlementId, { eventId: 'evt_manual' });
     const row = await outbox.enqueue(input);
-    await outbox.claimBatch({ limit: 1, now: NOW });
+    await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     await outbox.recordFailure({
       id: row.id,
       status: 'DEAD',
@@ -492,7 +501,7 @@ suite('手動再送（§20）', () => {
   it('PROCESSING は戻さない（届いたか分からないため）', async () => {
     const { entitlementId } = await seedEntitlement();
     const row = await outbox.enqueue(enqueueInput(entitlementId));
-    await outbox.claimBatch({ limit: 1, now: NOW });
+    await outbox.claimBatch({ limit: 1, now: NOW, eventTypes: ALL_EVENT_TYPES });
     expect(await outbox.requeue({ id: row.id, now: NOW })).toBe(false);
   });
 });

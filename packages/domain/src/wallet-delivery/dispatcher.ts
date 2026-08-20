@@ -1,6 +1,7 @@
 import type { ClockPort } from '../ports/index';
 import type { WalletDeliveryOutboxPort, WalletDeliveryRecord } from '../ports/wallet-delivery';
 import { decideDelivery, type DeliveryDecision } from './dispatch';
+import type { WalletDeliveryEventType } from './event';
 import type { WalletDeliverySenderPort } from '../ports/wallet-delivery';
 
 /**
@@ -36,9 +37,21 @@ export interface WalletDeliveryOutcome {
  */
 export const STALE_PROCESSING_MS = 15 * 60_000;
 
+/**
+ * 1 巡ぶん処理する。
+ *
+ * `eventTypes` は配送してよい種別。⚠️ **空なら 1 件も送らない。**
+ * 種別ごとにフラグを分けてあるので、「指定が無い＝全部」にすると
+ * 読み落とし 1 つで全種別の配送が始まる。安全側は「送らない」。
+ *
+ * ⚠️ **取り残しの回収（`reclaimStale`）は種別で絞らない。** `PROCESSING` の
+ * まま止まった行は、種別に関係なく戻さないと永久に誰も拾わない。
+ * 戻したうえで、送るかどうかを `claimBatch` の絞り込みが決める。
+ */
 export async function sweepWalletDeliveries(
   deps: WalletDeliveryDependencies,
   limit: number,
+  eventTypes: readonly WalletDeliveryEventType[],
 ): Promise<WalletDeliveryOutcome[]> {
   const startedAt = deps.clock.now();
   // 送信中にプロセスが落ちた行を先に戻す。放っておくと誰も拾わない。
@@ -47,7 +60,11 @@ export async function sweepWalletDeliveries(
     now: startedAt,
   });
 
-  const claimed = await deps.outbox.claimBatch({ limit, now: deps.clock.now() });
+  if (eventTypes.length === 0) {
+    return [];
+  }
+
+  const claimed = await deps.outbox.claimBatch({ limit, now: deps.clock.now(), eventTypes });
   const outcomes: WalletDeliveryOutcome[] = [];
 
   for (const record of claimed) {

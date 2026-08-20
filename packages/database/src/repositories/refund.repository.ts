@@ -1,5 +1,8 @@
 import {
+  TARGET_SITE_KEY,
+  decideRevocation,
   refundStatusAfter,
+  revocableEntitlementStatuses,
   type EntitlementStatus,
   type MintJobStatus,
   type RefundContext,
@@ -9,10 +12,21 @@ import {
   type RefundRecordView,
   type RefundRepository,
   type RefundSettlement,
+  type RevocationPayloadConflict,
+  type RevocationReviewItem,
   type SettleRefundCommand,
   type StartRefundCommand,
 } from '@sengoku/domain';
+import { Prisma } from '../../generated/client';
 import type { PrismaClient } from '../../generated/client';
+import { openOperationsReview } from './operations-review.repository';
+import {
+  enqueueWalletDeliveryIdempotent,
+  supersedePendingGrantedEvents,
+} from './wallet-delivery.repository';
+
+/** トランザクションの中で使う Prisma。⚠️ 外の `prisma` を混ぜない。 */
+type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 /**
  * 返金リポジトリの Prisma 実装（`UD-104` / `UD-120`）。
@@ -154,6 +168,11 @@ export class PrismaRefundRepository implements RefundRepository {
           cancelledMintJobs: 0,
           annotatedMintJobs: 0,
           restoredSupply: 0,
+          revocationEventsCreated: 0,
+          revocationEventsDuplicate: 0,
+          supersededGrantedEvents: 0,
+          revocationsNeedingReview: [],
+          revocationPayloadConflicts: [],
         };
       }
 
@@ -164,7 +183,7 @@ export class PrismaRefundRepository implements RefundRepository {
       */
       const refund = await tx.refund.findUniqueOrThrow({
         where: { id: command.refundId },
-        select: { paymentId: true },
+        select: { paymentId: true, settledAt: true },
       });
       if (refund.paymentId !== null) {
         await tx.payment.update({
@@ -181,19 +200,17 @@ export class PrismaRefundRepository implements RefundRepository {
       });
 
       /*
-        4. 受取権。
-        ⚠️ **受取り済み（`claimed`）は取り消さない。** 受け取った事実は
-           起きたことで、記録から消すものではない（`decideRefund` の判断を
-           そのまま運んでいる）。
+        4. 受取権と、相手への取消の知らせ。
+
+        ⚠️ **受け取った事実は消さない。** `claimed_at` / `claimed_by_*` /
+           配送記録はそのまま残し、`status` だけを `revoked` へ進める
+           （`UD-104` 追補・2026-08-20 決定）。
+
+        ⚠️ **`revoked` へ進めるだけでは足りない。** 相手が知っている受取権は、
+           取消を伝えないと**返金したのに作品が残ったまま**になる。
+           知らせの作成も**このトランザクションの中で**行う。
       */
-      let revokedEntitlements = 0;
-      if (command.revokeEntitlement) {
-        const revoked = await tx.entitlement.updateMany({
-          where: { orderId: command.orderId, status: 'issued' },
-          data: { status: 'revoked', updatedAt: command.now },
-        });
-        revokedEntitlements = revoked.count;
-      }
+      const revocation = await revokeEntitlements(tx, command, refund.settledAt ?? command.now);
 
       /*
         5. 発行ジョブ。
@@ -253,10 +270,15 @@ export class PrismaRefundRepository implements RefundRepository {
         alreadySettled: false,
         refundStatus,
         amountRefunded: command.amountRefundedTotal,
-        revokedEntitlements,
+        revokedEntitlements: revocation.revoked,
         cancelledMintJobs,
         annotatedMintJobs,
         restoredSupply,
+        revocationEventsCreated: revocation.created,
+        revocationEventsDuplicate: revocation.duplicate,
+        supersededGrantedEvents: revocation.superseded,
+        revocationsNeedingReview: revocation.needsReview,
+        revocationPayloadConflicts: revocation.conflicts,
       };
     });
   }
@@ -276,6 +298,229 @@ export class PrismaRefundRepository implements RefundRepository {
   async findByProviderRef(providerRefundRef: string): Promise<RefundRecordView | null> {
     const row = await this.prisma.refund.findFirst({ where: { providerRefundRef } });
     return row === null ? null : toView(row);
+  }
+}
+
+/** 取消の 1 巡ぶんの結果。⚠️ 本文や個人情報を含めない（監査へ出るため）。 */
+interface RevocationSummary {
+  readonly revoked: number;
+  readonly created: number;
+  readonly duplicate: number;
+  readonly superseded: number;
+  readonly needsReview: readonly RevocationReviewItem[];
+  readonly conflicts: readonly RevocationPayloadConflict[];
+}
+
+const NO_REVOCATION: RevocationSummary = {
+  revoked: 0,
+  created: 0,
+  duplicate: 0,
+  superseded: 0,
+  needsReview: [],
+  conflicts: [],
+};
+
+interface RevocableRow {
+  readonly id: string;
+  readonly status: string;
+  readonly order_line_id: string;
+  readonly artwork_id: string;
+  readonly claimed_by_common_user_id: string | null;
+}
+
+/**
+ * 受取権を取り消し、相手が知っているものへ取消の知らせを積む。
+ *
+ * ⚠️ **すべて 1 つのトランザクションで行う。** 取り消してから別呼び出しで
+ * 知らせを作ると、そのあいだに落ちた分が「取り消したのに相手へ永遠に
+ * 伝わらない」まま、誰にも気づかれず残る。
+ *
+ * ⚠️ **例外で返金を巻き戻さない。** 知らせが作れなかった・宛先が決まらない
+ * といった事情で投げると、決済事業者へ届いている返金の記録だけが消える。
+ * 判断できないことは**運用確認へ積んで先へ進む**。
+ *
+ * @param occurredAt 返金の `settled_at`。⚠️ **現在時刻を渡さない**——
+ *   呼び出しのたびに変わると本文が変わり、正常な重複が
+ *   「本文の食い違い」として検知される。
+ */
+async function revokeEntitlements(
+  tx: TransactionClient,
+  command: SettleRefundCommand,
+  occurredAt: Date,
+): Promise<RevocationSummary> {
+  if (!command.revokeEntitlement) {
+    return NO_REVOCATION;
+  }
+
+  const statuses = revocableEntitlementStatuses(command.revokeClaimedEntitlements);
+  /*
+    ⚠️ **件数だけ数える `updateMany` にしない。** どの受取権を取り消したのかが
+       分からないと、相手へ何を伝えればよいのかも分からない。
+    ⚠️ **`FOR UPDATE` で掴む。** 掴まずに読むと、同じ注文への並行した返金が
+       両方とも「取り消せる」と判断しうる。
+    ⚠️ `status` は enum 型なので、文字列の引数と比べるために `::text` を挟む。
+  */
+  const targets = await tx.$queryRaw<readonly RevocableRow[]>(Prisma.sql`
+    SELECT "id", "status"::text AS "status", "order_line_id", "artwork_id",
+           "claimed_by_common_user_id"
+      FROM "entitlements"
+     WHERE "order_id" = ${command.orderId}::uuid
+       AND "status"::text IN (${Prisma.join([...statuses])})
+     ORDER BY "serial_no"
+       FOR UPDATE
+  `);
+
+  let revoked = 0;
+  let created = 0;
+  let duplicate = 0;
+  let superseded = 0;
+  const needsReview: RevocationReviewItem[] = [];
+  const conflicts: RevocationPayloadConflict[] = [];
+
+  for (const row of targets) {
+    // ⚠️ 条件付き更新。掴んではいるが、状態を確かめてから進める。
+    const updated = await tx.entitlement.updateMany({
+      where: { id: row.id, status: row.status as EntitlementStatus },
+      data: { status: 'revoked', updatedAt: command.now },
+    });
+    if (updated.count !== 1) {
+      continue;
+    }
+    revoked += 1;
+
+    /*
+      ⚠️ **知らせを作らない設定なら、付与イベントにも触らない。**
+         付与を止めたのに取消も作らないと、相手はこの受取権を
+         永遠に知らないまま、こちらの記録とも突き合わせられなくなる。
+         生成を有効にしたあと、補完（reconciliation）が両方まとめて行う。
+    */
+    const plan = command.planRevocation;
+    if (plan === null) {
+      continue;
+    }
+
+    /*
+      相手が知っているか。⚠️ **配送済みかどうかでは判定しない。**
+      送信待ち・失敗・打ち切りのいずれでも、相手は現在または将来この
+      受取権を知りうる。知る側にだけ取消が届かない状態を作らない。
+    */
+    const granted = await tx.walletDeliveryOutbox.findFirst({
+      where: { entitlementId: row.id, eventType: 'entitlement.granted' },
+      orderBy: [{ createdAt: 'asc' }],
+      select: { payload: true, correlationId: true },
+    });
+
+    const decision = decideRevocation({
+      entitlementId: row.id,
+      orderId: command.orderId,
+      hasGrantedEvent: granted !== null,
+      // ⚠️ **相手へ実際に伝えた値**を正とする。列を先に見ると、万一
+      //    食い違っていた場合に別人の Holding を消しにいく。
+      grantedCommonUserId: granted === null ? null : commonUserIdOf(granted.payload),
+      claimedCommonUserId: row.claimed_by_common_user_id,
+      grantedCorrelationId: granted?.correlationId ?? null,
+    });
+
+    if (decision.kind === 'revoke_only') {
+      continue;
+    }
+
+    if (decision.kind === 'needs_review') {
+      needsReview.push({ entitlementId: row.id, reason: decision.reason });
+      await openOperationsReview(tx, {
+        subjectType: 'entitlement',
+        subjectId: row.id,
+        orderId: command.orderId,
+        reasonCode: 'wallet_revocation_recipient_unresolved',
+        // ⚠️ 個人情報を入れない。識別子と、決められなかった理由まで。
+        detail: `付与は送っているが宛先の共通顧客IDを特定できないため、取消を送っていません（refundId=${command.refundId}）。`,
+        now: command.now,
+      });
+      superseded += await supersedePendingGrantedEvents(tx, {
+        entitlementId: row.id,
+        now: command.now,
+      });
+      continue;
+    }
+
+    const built = plan({
+      entitlementId: row.id,
+      orderId: command.orderId,
+      orderLineId: row.order_line_id,
+      artworkId: row.artwork_id,
+      eventId: decision.eventId,
+      commonUserId: decision.commonUserId,
+      correlationId: decision.correlationId,
+      occurredAt,
+    });
+
+    const outcome = await enqueueWalletDeliveryIdempotent(tx, {
+      eventId: built.eventId,
+      eventType: 'entitlement.revoked',
+      entitlementId: row.id,
+      targetSiteKey: TARGET_SITE_KEY,
+      payload: built.payload,
+      payloadHash: built.payloadHash,
+      correlationId: built.correlationId,
+      now: command.now,
+    });
+
+    if (outcome.kind === 'created') {
+      created += 1;
+    } else if (outcome.kind === 'duplicate') {
+      duplicate += 1;
+    } else {
+      /*
+        ⚠️ **無言で成功にしない。** 冪等キーが同じで中身が違う以上、
+           どちらが相手に保存されたのか、こちらからは分からない。
+        ⚠️ **例外にもしない。** 返金済みの事実を巻き戻さない。
+      */
+      conflicts.push({
+        entitlementId: row.id,
+        eventId: outcome.eventId,
+        expectedPayloadHash: outcome.expectedPayloadHash,
+        actualPayloadHash: outcome.actualPayloadHash,
+      });
+      await openOperationsReview(tx, {
+        subjectType: 'entitlement',
+        subjectId: row.id,
+        orderId: command.orderId,
+        reasonCode: 'wallet_revocation_payload_conflict',
+        detail: `同じイベントID（${outcome.eventId}）で本文が食い違いました（期待 ${outcome.expectedPayloadHash} / 実際 ${outcome.actualPayloadHash}）。`,
+        now: command.now,
+      });
+    }
+
+    /*
+      まだ送っていない付与イベントを止める。
+      ⚠️ **これをしないと、取り消したはずの作品があとから相手側に現れる。**
+      ⚠️ `PROCESSING` と `DELIVERED` は触らない（相手の Tombstone に委ねる）。
+    */
+    superseded += await supersedePendingGrantedEvents(tx, {
+      entitlementId: row.id,
+      now: command.now,
+    });
+  }
+
+  return { revoked, created, duplicate, superseded, needsReview, conflicts };
+}
+
+/**
+ * 付与イベントの本文から共通顧客IDを取り出す。
+ *
+ * ⚠️ **読めなければ `null`。投げない。** 本文が壊れていることを理由に
+ * 返金を巻き戻さない。宛先が決まらないことは呼び出し元が扱う。
+ */
+function commonUserIdOf(payload: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const value = (parsed as { common_user_id?: unknown }).common_user_id;
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
   }
 }
 

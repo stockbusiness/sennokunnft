@@ -12,7 +12,8 @@ import {
   SOURCE_SYSTEM_KEY,
   TARGET_SITE_KEY,
   WALLET_DELIVERY_MAX_ATTEMPTS,
-  WALLET_EVENT_VERSION,
+  WALLET_GRANTED_EVENT_VERSION,
+  WALLET_REVOKED_EVENT_VERSION,
   type WalletGrantedEventInput,
 } from '../src/index';
 
@@ -97,7 +98,7 @@ describe('entitlement.granted の組み立て（§13）', () => {
     if (!result.ok) return;
 
     expect(result.value.event_type).toBe('entitlement.granted');
-    expect(result.value.event_version).toBe(WALLET_EVENT_VERSION);
+    expect(result.value.event_version).toBe(WALLET_GRANTED_EVENT_VERSION);
     expect(result.value.source_system_key).toBe(SOURCE_SYSTEM_KEY);
     expect(result.value.target_site_key).toBe(TARGET_SITE_KEY);
     // 旧 `sengoku-market` を新規送信で使わない。
@@ -146,13 +147,65 @@ describe('entitlement.granted の組み立て（§13）', () => {
   });
 });
 
-describe('entitlement.revoked の組み立て（§11）', () => {
+describe('entitlement.revoked の組み立て（§11・M3a）', () => {
+  function revokedInput() {
+    return { ...grantedInput(), reasonCode: 'full_refund' as const };
+  }
+
   it('封筒と data のみを送る（表示情報は載せない）', () => {
-    const result = buildRevokedEvent(grantedInput());
+    /*
+      ⚠️ **作品名や画像を再送しない。** 相手がそれで Holding を
+         書き換える余地を作らない。取消に要るのは「どれが無効になったか」だけ。
+    */
+    const result = buildRevokedEvent(revokedInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.event_type).toBe('entitlement.revoked');
     expect('metadata' in result.value).toBe(false);
+  });
+
+  it('取り消しの理由を固定コードで載せる', () => {
+    const result = buildRevokedEvent(revokedInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.reason_code).toBe('full_refund');
+  });
+
+  it('版は 1.1（付与の 1.0 とは分けて持つ）', () => {
+    /*
+      ⚠️ **定数を 1 本にまとめない。** まとめると、取消の版を上げた瞬間に
+         付与の版まで黙って上がる。相手はヘッダで分岐するため、
+         触っていないはずの付与が別の版として届く。
+    */
+    const revoked = buildRevokedEvent(revokedInput());
+    const granted = buildGrantedEvent(grantedInput());
+    expect(revoked.ok && granted.ok).toBe(true);
+    if (!revoked.ok || !granted.ok) return;
+    expect(revoked.value.event_version).toBe(WALLET_REVOKED_EVENT_VERSION);
+    expect(revoked.value.event_version).toBe('1.1');
+    expect(granted.value.event_version).toBe('1.0');
+  });
+
+  it('金額も氏名もメールも含まない', () => {
+    const result = buildRevokedEvent(revokedInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const payload = JSON.stringify(result.value);
+    for (const forbidden of ['amount', 'email', 'name', 'address', 'refund_amount']) {
+      expect(payload).not.toContain(forbidden);
+    }
+  });
+
+  it('同じ入力なら本文はいつも同じ（再実行で変わらない）', () => {
+    /*
+      ⚠️ **時計を読まない。** 呼び出しのたびに `occurred_at` が変わると
+         本文が変わり、**正常な重複が「本文の食い違い」として検知される**。
+    */
+    const first = buildRevokedEvent(revokedInput());
+    const second = buildRevokedEvent(revokedInput());
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(JSON.stringify(first.value)).toBe(JSON.stringify(second.value));
   });
 });
 

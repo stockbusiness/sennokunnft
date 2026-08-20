@@ -18,6 +18,8 @@ export const WALLET_DELIVERY_STATUS_VALUES = [
   'DELIVERED',
   'FAILED',
   'DEAD',
+  /** 取消に追い越されたため、もう送らない付与イベント。⚠️ 再送できない。 */
+  'SUPERSEDED',
 ] as const;
 
 export const walletDeliverySchema = z.object({

@@ -282,6 +282,13 @@ export const DOMAIN_ERROR_CODES = [
    * 利用者への応答ではなく運用ログとアラートへ出す。
    */
   'WALLET_EVENT_INVALID',
+  /**
+   * 運用確認の行が、すでに対応済みだった（M3a）。
+   *
+   * ⚠️ **「対応済みにできない」ではなく「もう対応済み」。** 上書きを許すと、
+   * 最初に確認した人の記録が、あとから押した人で置き換わる。
+   */
+  'OPERATIONS_REVIEW_NOT_OPEN',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

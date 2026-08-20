@@ -1,5 +1,6 @@
 import type { RefundReason } from '../order/refund';
 import type { RefundStatus } from '../order/order-status';
+import type { RevocationReviewReason } from '../entitlement/revocation';
 import type { EntitlementStatus, MintJobStatus } from '../state/machines';
 
 /**
@@ -107,8 +108,59 @@ export interface SettleRefundCommand {
    * 可能性があり、多重発行は回復できない。
    */
   readonly mintNote: string | null;
+  /**
+   * 受取済み（`claimed`）の受取権も取り消すか（`UD-104` 追補）。
+   *
+   * ⚠️ **段階導入のためのフラグ。** 偽のあいだは従来どおり `issued` だけを
+   * 取り消す。真にすると `claimed` も対象になり、`claimed_at` などの
+   * 受取記録は**残したまま** `revoked` へ進む。
+   */
+  readonly revokeClaimedEntitlements: boolean;
+  /**
+   * 取消イベントの本文を組み立てる純粋な処理。⚠️ **`null` なら作らない**
+   * （イベント生成フラグが無効）。
+   *
+   * ⚠️ **トランザクションの中から呼ぶ。** 外で組み立てて渡すと、
+   * 組み立てと更新のあいだに状態が変わりうる。また `occurred_at` を
+   * 返金の `settled_at` にそろえるには、その値が確定する場所で作るしかない。
+   */
+  readonly planRevocation: RevocationPlanner | null;
   readonly now: Date;
 }
+
+/** 取消イベントを組み立てるときの材料。すべて記録から取る。 */
+export interface RevocationPlanInput {
+  readonly entitlementId: string;
+  readonly orderId: string;
+  readonly orderLineId: string;
+  readonly artworkId: string;
+  readonly eventId: string;
+  readonly commonUserId: string;
+  readonly correlationId: string;
+  /**
+   * イベントの発生時刻。
+   *
+   * ⚠️ **現在時刻ではなく返金の `settled_at` を渡す。** 呼び出しのたびに
+   * 変わると本文が変わり、正常な重複が「本文の食い違い」として検知される。
+   */
+  readonly occurredAt: Date;
+}
+
+/** 組み立てた本文。⚠️ 保存・署名・送信はこの同じ文字列を使う。 */
+export interface RevocationPlan {
+  readonly eventId: string;
+  readonly payload: string;
+  readonly payloadHash: string;
+  readonly correlationId: string;
+}
+
+/**
+ * 取消イベントの組み立て。
+ *
+ * ⚠️ **時計・DB・外部への通信を持たない純粋な処理にする。** トランザクションの
+ * 中から呼ばれるため、ここで待つと注文の行ロックを握ったまま待つことになる。
+ */
+export type RevocationPlanner = (input: RevocationPlanInput) => RevocationPlan;
 
 /** 返金を反映した結果。⚠️ 何が起きたかを 1 件ずつ返す。 */
 export interface RefundSettlement {
@@ -125,6 +177,36 @@ export interface RefundSettlement {
   readonly annotatedMintJobs: number;
   /** 在庫へ戻した数。⚠️ 取り消した受取権のぶんだけ。 */
   readonly restoredSupply: number;
+  /** Wallet へ送る取消イベントを新しく作った数。 */
+  readonly revocationEventsCreated: number;
+  /** すでに同じ本文の取消イベントがあった数（冪等成功）。 */
+  readonly revocationEventsDuplicate: number;
+  /** 「取消に追い越された」として送らないことにした付与イベントの数。 */
+  readonly supersededGrantedEvents: number;
+  /**
+   * 宛先が決められず、人の確認へ回した受取権。
+   *
+   * ⚠️ **ここに載っても返金は成立している。** 取消イベントだけが保留になる。
+   */
+  readonly revocationsNeedingReview: readonly RevocationReviewItem[];
+  /**
+   * 同じイベントIDで本文が食い違った件。
+   *
+   * ⚠️ **無言で成功にしない。** 呼び出し元が監視へ出す。
+   */
+  readonly revocationPayloadConflicts: readonly RevocationPayloadConflict[];
+}
+
+export interface RevocationReviewItem {
+  readonly entitlementId: string;
+  readonly reason: RevocationReviewReason;
+}
+
+export interface RevocationPayloadConflict {
+  readonly entitlementId: string;
+  readonly eventId: string;
+  readonly expectedPayloadHash: string;
+  readonly actualPayloadHash: string;
 }
 
 /** 返金の判定に要る、注文の「いまの姿」を DB から集めたもの。 */
@@ -189,6 +271,17 @@ export interface RefundRepository {
    * 4. 受取権を取り消す（指示があるときだけ）
    * 5. 発行ジョブを取り消す（`queued` のときだけ）／`processing` には注記
    * 6. 取り消した受取権のぶんだけ在庫を戻す
+   * 7. 取り消した受取権のうち、相手が知っているものへ取消イベントを積む
+   * 8. まだ送っていない付与イベントを「取消に追い越された」状態にする
+   * 9. 判断できなかったことを運用確認へ積む
+   *
+   * ⚠️ **7〜9 も同じトランザクションで行う。** 別呼び出しにすると、
+   * そのあいだに落ちた分が「取り消したのに相手へ永遠に伝わらない」まま、
+   * 誰にも気づかれず残る。
+   *
+   * ⚠️ **7 で UNIQUE 違反の例外を起こさせない。** 例外はトランザクション
+   * 全体を巻き戻す。返金はもう決済事業者へ届いているのに、こちらの記録
+   * だけが消える。冪等な追加（`ON CONFLICT DO NOTHING` 相当）を使う。
    *
    * ⚠️ **`processing` の発行ジョブを `cancelled` にしない**（`INV-M4`）。
    *

@@ -1,0 +1,16 @@
+-- 未配送の付与イベントを「取消に追い越された」ものとして残すための状態。
+--
+-- 全額返金で取り消した受取権について、まだ送っていない entitlement.granted を
+-- そのままにしておくと、取り消したはずの作品が**あとから相手側に現れる**。
+-- かといって行を消すと「送ろうとしていた」事実まで消える。状態で表す。
+--
+-- ⚠️ このファイルには ALTER TYPE だけを置く。
+--
+--    PostgreSQL は、追加した enum 値を**同じトランザクション内で使えない**
+--    （`55P04 unsafe use of new value`）。Prisma の migrate deploy は
+--    マイグレーションファイル 1 本を 1 トランザクションで実行するため、
+--    追加と使用を同じファイルへ入れると必ず失敗する。
+--    本リポジトリの PostgreSQL 16.13 / Prisma 6.19.3 で実際に確認した。
+--
+--    使用するのは実行時のコードだけなので、ここは追加のみで完結する。
+ALTER TYPE "WalletDeliveryOutboxStatus" ADD VALUE IF NOT EXISTS 'SUPERSEDED';

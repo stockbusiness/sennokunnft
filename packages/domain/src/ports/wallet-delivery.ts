@@ -40,6 +40,36 @@ export interface WalletDeliveryEnqueueInput {
   readonly now: Date;
 }
 
+/**
+ * 冪等な追加の結果。
+ *
+ * ⚠️ **UNIQUE 違反の例外で返さない。** 呼び出し元は返金のトランザクションの
+ * 中にいる。例外を投げると**返金そのものが巻き戻る**——返金はもう決済事業者へ
+ * 届いているのに、こちらの記録だけが消える。いちばん見つけにくい食い違いになる。
+ */
+export type WalletDeliveryEnqueueOutcome =
+  /** 新しく作った。 */
+  | { readonly kind: 'created'; readonly record: WalletDeliveryRecord }
+  /**
+   * すでに同じ本文の行があった。**冪等成功として扱う。**
+   * 重複した Webhook・並行実行はここへ来る。
+   */
+  | { readonly kind: 'duplicate'; readonly record: WalletDeliveryRecord }
+  /**
+   * 同じイベントIDで、**本文が違う**行があった。
+   *
+   * ⚠️ **無言で成功にしない。** 冪等キーが同じなのに中身が違う以上、
+   * どちらが相手に保存されたのかこちらからは分からない。
+   * ⚠️ **かといって例外にもしない。** 返金済みの事実を巻き戻さない。
+   * 呼び出し元が運用確認へ回す。
+   */
+  | {
+      readonly kind: 'payload_conflict';
+      readonly eventId: string;
+      readonly expectedPayloadHash: string;
+      readonly actualPayloadHash: string;
+    };
+
 /** 失敗を記録するときの入力。 */
 export interface WalletDeliveryFailureInput {
   readonly id: string;
@@ -67,18 +97,55 @@ export interface WalletDeliveryFailureInput {
  * `FOR UPDATE SKIP LOCKED` で掴み、掴めた行だけを返すこと。
  */
 export interface WalletDeliveryOutboxPort {
-  /** 配送待ちの行を作る。 */
+  /**
+   * 配送待ちの行を作る。
+   *
+   * ⚠️ **重複したら例外になる。** 呼び出し元が「1 回しか呼ばれない」ことを
+   * 保証できる経路（受取確定など）でだけ使う。返金のように同じ知らせが
+   * 何度も届く経路では `enqueueIdempotent` を使う。
+   */
   enqueue(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryRecord>;
+
+  /**
+   * 配送待ちの行を**冪等に**作る。
+   *
+   * ⚠️ **素の INSERT で UNIQUE 違反を起こさせない。** 例外はトランザクション
+   * 全体を巻き戻す。返金の中から呼ばれるため、重複した Webhook 1 通で
+   * **返金の記録が消える**ことになる。
+   *
+   * 通常の生成と取りこぼしの補完で**同じものを使う**。2 つ書くと、
+   * 片方だけが冪等という状態が生まれる。
+   */
+  enqueueIdempotent(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryEnqueueOutcome>;
+
+  /**
+   * まだ送っていない付与イベントを「取消に追い越された」状態にする。
+   *
+   * ⚠️ **`PROCESSING` を触らない。** 送信中で、届いたかどうか分からない。
+   * 相手の Tombstone 処理に委ねる。
+   * ⚠️ **`DELIVERED` も触らない。** すでに届いており、取消イベントで打ち消す。
+   *
+   * @returns 追い越した件数
+   */
+  supersedePendingGranted(input: {
+    readonly entitlementId: string;
+    readonly now: Date;
+  }): Promise<number>;
 
   /**
    * 送る対象を排他的に取得し、`PROCESSING` へ進めて試行回数を加算する。
    *
    * 取得と状態遷移を分けない。分けると、掴んだあと遷移する前に落ちた行が
    * `PENDING` のまま残り、別のワーカーが同じものを送る。
+   *
+   * `eventTypes` は配送してよい種別。⚠️ **空配列なら 1 件も返さない。**
+   * 「指定が無い＝全部」にすると、フラグの読み落としがそのまま全種別の
+   * 配送開始になる。安全側は「送らない」。
    */
   claimBatch(input: {
     readonly limit: number;
     readonly now: Date;
+    readonly eventTypes: readonly WalletDeliveryEventType[];
   }): Promise<WalletDeliveryRecord[]>;
 
   /**

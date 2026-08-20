@@ -85,6 +85,8 @@ export function deliveryStatusLabel(status: WalletDeliveryView['status']): strin
       return 'お届けできず';
     case 'DEAD':
       return '打ち切り';
+    case 'SUPERSEDED':
+      return '取消により送信不要';
   }
 }
 
@@ -101,6 +103,10 @@ export function deliveryStatusDescription(status: WalletDeliveryView['status']):
       return 'お届けできませんでした';
     case 'DEAD':
       return '何度試してもお届けできませんでした';
+    case 'SUPERSEDED':
+      // ⚠️ 「失敗」と読ませない。返金にともなって取り消したため、
+      //    もう届ける必要が無くなったもの。記録としては残している。
+      return 'ご返金にともない取り消されたため、お届けの必要がなくなりました';
   }
 }
 
@@ -123,6 +129,9 @@ export function deliveryStatusTone(status: WalletDeliveryView['status']): Status
     case 'FAILED':
     case 'DEAD':
       return 'warning';
+    case 'SUPERSEDED':
+      // ⚠️ 警告にしない。異常ではなく、取り消しの結果として正しい状態。
+      return 'neutral';
   }
 }
 

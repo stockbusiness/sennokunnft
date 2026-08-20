@@ -89,7 +89,22 @@ import {
   ok,
   planIssuance,
   reconcileSupply,
+  decideRevocation,
   refundStatusAfter,
+  type MissingRevocation,
+  type RevocationReconcileRepository,
+  type WalletDeliveryEnqueueInput,
+  type WalletDeliveryEnqueueOutcome,
+  type WalletDeliveryEventType,
+  type WalletDeliveryOutboxPort,
+  type WalletDeliveryRecord,
+  type OpenOperationsReviewCommand,
+  type OperationsReviewOpenCounts,
+  type OperationsReviewPage,
+  type OperationsReviewQuery,
+  type OperationsReviewRecord,
+  type OperationsReviewRepository,
+  revocableEntitlementStatuses,
   reserveSupply,
   scheduleIssuanceRetry,
   PAYMENT_API_ENDPOINT,
@@ -877,7 +892,14 @@ export class InMemoryWalletDeliveries implements WalletDeliveryAdminPort {
   }
 
   countByStatus(): Promise<WalletDeliveryStatusCounts> {
-    const counts = { PENDING: 0, PROCESSING: 0, DELIVERED: 0, FAILED: 0, DEAD: 0 };
+    const counts = {
+      PENDING: 0,
+      PROCESSING: 0,
+      DELIVERED: 0,
+      FAILED: 0,
+      DEAD: 0,
+      SUPERSEDED: 0,
+    };
     for (const row of this.rows.values()) {
       counts[row.status] += 1;
     }
@@ -908,6 +930,134 @@ export class InMemoryWalletDeliveries implements WalletDeliveryAdminPort {
       updatedAt: input.now,
     });
     return Promise.resolve(true);
+  }
+}
+
+/**
+ * 配送待ち行列（試験用・全部の口）。
+ *
+ * ⚠️ **本物と同じところで冪等にする。** `enqueueIdempotent` を素通しに
+ * すると、重複した Webhook で取消が 2 通送られる不具合を試験が見逃す。
+ */
+export class InMemoryWalletDeliveryOutbox implements WalletDeliveryOutboxPort {
+  readonly rows = new Map<string, WalletDeliveryRecord & { grantedStatus?: string }>();
+
+  /** 付与イベントを積んだことにする（＝相手が知っている状態）。 */
+  seedGranted(entitlementId: string, commonUserId: string | null, correlationId: string): void {
+    const payload = JSON.stringify({
+      event_type: 'entitlement.granted',
+      ...(commonUserId === null ? {} : { common_user_id: commonUserId }),
+    });
+    const eventId = `evt_granted_${entitlementId}`;
+    this.rows.set(eventId, {
+      id: eventId,
+      eventId,
+      eventType: 'entitlement.granted',
+      entitlementId,
+      targetSiteKey: 'ovew-wallet',
+      payload,
+      payloadHash: `sha256:${'0'.repeat(64)}`,
+      status: 'PENDING',
+      attemptCount: 0,
+      maxAttempts: 5,
+      correlationId,
+    });
+  }
+
+  enqueue(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryRecord> {
+    const record: WalletDeliveryRecord = {
+      id: input.eventId,
+      eventId: input.eventId,
+      eventType: input.eventType,
+      entitlementId: input.entitlementId,
+      targetSiteKey: input.targetSiteKey,
+      payload: input.payload,
+      payloadHash: input.payloadHash,
+      status: 'PENDING',
+      attemptCount: 0,
+      maxAttempts: 5,
+      correlationId: input.correlationId,
+    };
+    this.rows.set(input.eventId, record);
+    return Promise.resolve(record);
+  }
+
+  enqueueIdempotent(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryEnqueueOutcome> {
+    const existing = this.rows.get(input.eventId);
+    if (existing === undefined) {
+      return this.enqueue(input).then((record) => ({ kind: 'created' as const, record }));
+    }
+    if (existing.payloadHash === input.payloadHash) {
+      return Promise.resolve({ kind: 'duplicate', record: existing });
+    }
+    return Promise.resolve({
+      kind: 'payload_conflict',
+      eventId: input.eventId,
+      expectedPayloadHash: input.payloadHash,
+      actualPayloadHash: existing.payloadHash,
+    });
+  }
+
+  supersedePendingGranted(input: { entitlementId: string; now: Date }): Promise<number> {
+    let count = 0;
+    for (const [key, row] of this.rows) {
+      if (row.entitlementId !== input.entitlementId) continue;
+      if (row.eventType !== 'entitlement.granted') continue;
+      // ⚠️ PROCESSING と DELIVERED は触らない（届いたか分からない／もう届いた）。
+      if (row.status !== 'PENDING' && row.status !== 'FAILED' && row.status !== 'DEAD') continue;
+      this.rows.set(key, { ...row, status: 'SUPERSEDED' });
+      count += 1;
+    }
+    return Promise.resolve(count);
+  }
+
+  claimBatch(input: {
+    limit: number;
+    now: Date;
+    eventTypes: readonly WalletDeliveryEventType[];
+  }): Promise<WalletDeliveryRecord[]> {
+    const claimed: WalletDeliveryRecord[] = [];
+    for (const row of this.rows.values()) {
+      if (claimed.length >= input.limit) break;
+      if (row.status !== 'PENDING') continue;
+      if (!input.eventTypes.includes(row.eventType)) continue;
+      claimed.push(row);
+    }
+    return Promise.resolve(claimed);
+  }
+
+  markDelivered(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  recordFailure(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  requeue(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  reclaimStale(): Promise<number> {
+    return Promise.resolve(0);
+  }
+
+  findByEventId(eventId: string): Promise<WalletDeliveryRecord | null> {
+    return Promise.resolve(this.rows.get(eventId) ?? null);
+  }
+}
+
+/**
+ * 取消の取りこぼしの読み取り（試験用）。
+ *
+ * ⚠️ **試験から並べたものをそのまま返す。** 本物の SQL は結合テストの側で
+ * 確かめる。ここで確かめたいのは「補完がフラグに従うか」「冪等か」。
+ */
+export class InMemoryRevocationReconcile implements RevocationReconcileRepository {
+  public missing: MissingRevocation[] = [];
+
+  listMissing(limit: number): Promise<readonly MissingRevocation[]> {
+    return Promise.resolve(this.missing.slice(0, limit));
   }
 }
 
@@ -1385,6 +1535,32 @@ export class InMemoryRefunds implements RefundRepository {
   ) {}
 
   /**
+   * 相手が知っている受取権（付与イベントを送った／送る予定のもの）。
+   *
+   * ⚠️ **「配送済みか」ではなく「行があるか」で持つ。** 本物の判定と
+   * そろえておかないと、試験だけが通る経路ができる。
+   */
+  public grantedEntitlements = new Map<
+    string,
+    { readonly commonUserId: string | null; readonly correlationId: string }
+  >();
+
+  /** 取り消す対象の受取権。⚠️ 状態は `entitlementStatus` と別に持つ。 */
+  public revocableEntitlements: {
+    readonly id: string;
+    readonly status: EntitlementStatus;
+    readonly orderLineId: string;
+    readonly artworkId: string;
+    readonly claimedCommonUserId: string | null;
+  }[] = [];
+
+  /** 積んだ取消イベント。⚠️ `eventId` をキーにして冪等を再現する。 */
+  public readonly revocationEvents = new Map<string, string>();
+
+  /** 送らないことにした付与イベントの受取権。 */
+  public readonly superseded = new Set<string>();
+
+  /**
    * 事業者側の決済識別子を差し替える。
    *
    * ⚠️ **`null` にすると、擬似ゲートウェイが本物と同じ所で断る。**
@@ -1475,6 +1651,11 @@ export class InMemoryRefunds implements RefundRepository {
         cancelledMintJobs: 0,
         annotatedMintJobs: 0,
         restoredSupply: 0,
+        revocationEventsCreated: 0,
+        revocationEventsDuplicate: 0,
+        supersededGrantedEvents: 0,
+        revocationsNeedingReview: [],
+        revocationPayloadConflicts: [],
       };
     }
 
@@ -1490,9 +1671,83 @@ export class InMemoryRefunds implements RefundRepository {
     this.orders.setRefundStatus(command.orderId, refundStatus);
 
     let revokedEntitlements = 0;
-    if (command.revokeEntitlement && this.entitlementStatus === 'issued') {
-      this.entitlementStatus = 'revoked';
-      revokedEntitlements = 1;
+    const revocableStatuses = revocableEntitlementStatuses(command.revokeClaimedEntitlements);
+    if (command.revokeEntitlement && this.entitlementStatus !== null) {
+      if (revocableStatuses.includes(this.entitlementStatus)) {
+        this.entitlementStatus = 'revoked';
+        revokedEntitlements = 1;
+      }
+    }
+
+    /*
+      取消の知らせ（M3a）。
+      ⚠️ **本物と同じ判定にする。** 「代替実装だから素通し」を作ると、
+         手元では通るのに本番で落ちる経路ができる。判定はドメインの
+         `decideRevocation` をそのまま呼び、冪等も `eventId` で再現する。
+    */
+    let revocationEventsCreated = 0;
+    let revocationEventsDuplicate = 0;
+    let supersededGrantedEvents = 0;
+    const revocationsNeedingReview: { entitlementId: string; reason: 'recipient_unresolved' }[] =
+      [];
+    const revocationPayloadConflicts: {
+      entitlementId: string;
+      eventId: string;
+      expectedPayloadHash: string;
+      actualPayloadHash: string;
+    }[] = [];
+
+    if (command.revokeEntitlement && command.planRevocation !== null) {
+      for (const target of this.revocableEntitlements) {
+        if (!revocableStatuses.includes(target.status)) {
+          continue;
+        }
+        const granted = this.grantedEntitlements.get(target.id);
+        const decision = decideRevocation({
+          entitlementId: target.id,
+          orderId: command.orderId,
+          hasGrantedEvent: granted !== undefined,
+          grantedCommonUserId: granted?.commonUserId ?? null,
+          claimedCommonUserId: target.claimedCommonUserId,
+          grantedCorrelationId: granted?.correlationId ?? null,
+        });
+        if (decision.kind === 'revoke_only') {
+          continue;
+        }
+        if (decision.kind === 'needs_review') {
+          revocationsNeedingReview.push({ entitlementId: target.id, reason: decision.reason });
+          continue;
+        }
+        const built = command.planRevocation({
+          entitlementId: target.id,
+          orderId: command.orderId,
+          orderLineId: target.orderLineId,
+          artworkId: target.artworkId,
+          eventId: decision.eventId,
+          commonUserId: decision.commonUserId,
+          correlationId: decision.correlationId,
+          // ⚠️ 現在時刻ではなく、返金が成立した時刻。
+          occurredAt: command.now,
+        });
+        const existing = this.revocationEvents.get(built.eventId);
+        if (existing === undefined) {
+          this.revocationEvents.set(built.eventId, built.payloadHash);
+          revocationEventsCreated += 1;
+        } else if (existing === built.payloadHash) {
+          revocationEventsDuplicate += 1;
+        } else {
+          revocationPayloadConflicts.push({
+            entitlementId: target.id,
+            eventId: built.eventId,
+            expectedPayloadHash: built.payloadHash,
+            actualPayloadHash: existing,
+          });
+        }
+        if (!this.superseded.has(target.id)) {
+          this.superseded.add(target.id);
+          supersededGrantedEvents += 1;
+        }
+      }
     }
 
     let cancelledMintJobs = 0;
@@ -1515,6 +1770,11 @@ export class InMemoryRefunds implements RefundRepository {
       cancelledMintJobs,
       annotatedMintJobs,
       restoredSupply: revokedEntitlements,
+      revocationEventsCreated,
+      revocationEventsDuplicate,
+      supersededGrantedEvents,
+      revocationsNeedingReview,
+      revocationPayloadConflicts,
     };
   }
 
@@ -1532,6 +1792,94 @@ export class InMemoryRefunds implements RefundRepository {
     return Promise.resolve(
       this.rows.find((row) => row.providerRefundRef === providerRefundRef) ?? null,
     );
+  }
+}
+
+/**
+ * 運用確認キュー（M3a）。
+ *
+ * ⚠️ **本物と同じところで冪等にする。** 同じ対象・同じ理由は 1 行に
+ * まとめる。ここを素通しにすると、重複した Webhook で確認事項が増える
+ * という不具合を、試験が見逃す。
+ */
+export class InMemoryOperationsReviews implements OperationsReviewRepository {
+  private readonly rows: (OperationsReviewRecord & { key: string })[] = [];
+
+  /** 試験から積まれた確認事項を覗く。 */
+  get all(): readonly OperationsReviewRecord[] {
+    return this.rows;
+  }
+
+  open(command: OpenOperationsReviewCommand): Promise<boolean> {
+    const key = `${command.subjectType}/${command.subjectId}/${command.reasonCode}`;
+    if (this.rows.some((row) => row.key === key)) {
+      // ⚠️ 上書きしない。最初に気づいた時刻と理由を残す。
+      return Promise.resolve(false);
+    }
+    this.rows.push({
+      key,
+      id: `review-${String(this.rows.length + 1)}`,
+      subjectType: command.subjectType,
+      subjectId: command.subjectId,
+      orderId: command.orderId,
+      reasonCode: command.reasonCode,
+      detail: command.detail,
+      status: 'open',
+      resolvedByAccountId: null,
+      resolvedAt: null,
+      resolutionNote: null,
+      createdAt: command.now,
+      updatedAt: command.now,
+    });
+    return Promise.resolve(true);
+  }
+
+  list(query: OperationsReviewQuery): Promise<OperationsReviewPage> {
+    let items: readonly OperationsReviewRecord[] = this.rows;
+    if (query.statuses.length > 0) {
+      items = items.filter((row) => query.statuses.includes(row.status));
+    }
+    if (query.reasonCodes.length > 0) {
+      items = items.filter((row) => query.reasonCodes.includes(row.reasonCode));
+    }
+    return Promise.resolve({ items: items.slice(0, query.limit), nextCursor: null });
+  }
+
+  countOpen(): Promise<OperationsReviewOpenCounts> {
+    const counts = {
+      partial_refund_entitlement_unresolved: 0,
+      wallet_revocation_recipient_unresolved: 0,
+      wallet_revocation_payload_conflict: 0,
+    };
+    for (const row of this.rows) {
+      if (row.status === 'open') {
+        counts[row.reasonCode] += 1;
+      }
+    }
+    return Promise.resolve(counts);
+  }
+
+  resolve(input: {
+    readonly id: string;
+    readonly actorAccountId: string;
+    readonly note: string | null;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const index = this.rows.findIndex((row) => row.id === input.id);
+    const row = index === -1 ? undefined : this.rows[index];
+    // ⚠️ 条件付き。すでに対応済みの行を上書きさせない。
+    if (row === undefined || row.status !== 'open') {
+      return Promise.resolve(false);
+    }
+    this.rows[index] = {
+      ...row,
+      status: 'resolved',
+      resolvedByAccountId: input.actorAccountId,
+      resolvedAt: input.now,
+      resolutionNote: input.note,
+      updatedAt: input.now,
+    };
+    return Promise.resolve(true);
   }
 }
 
@@ -2322,6 +2670,8 @@ export interface TestHarness extends AppDependencies {
   readonly payouts: InMemoryPayouts;
   readonly profiles: InMemoryCreatorProfiles;
   readonly issuance: InMemoryEntitlementIssuance;
+  /** ⚠️ 積まれた確認事項を覗くため、実体の型で持つ。 */
+  readonly operationsReviews: InMemoryOperationsReviews;
 }
 
 /**
@@ -2520,6 +2870,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   */
   legalRepository.seed(publishedTokushoho());
   const issuance = new InMemoryEntitlementIssuance();
+  const operationsReviews = new InMemoryOperationsReviews();
   const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
     version: '0.1.0',
@@ -2530,6 +2881,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     settlement: settlementSettings,
     // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
     refunds,
+    // 運用確認キュー（M3a）。⚠️ 積めたかどうかを試験から覗く。
+    operationsReviews,
     // 受取権の発行（P0-1）。⚠️ 対象の注文は試験ごとに `seedOrder` で置く。
     issuance,
     // 精算（`UD-119`）。⚠️ 対象の注文は試験ごとに差し替える。

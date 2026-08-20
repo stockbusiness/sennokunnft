@@ -249,6 +249,46 @@ const apiEnvObject = baseEnvObject.extend({
   WALLET_DELIVERY_TIMEOUT_MS: integerFromEnv(1000, 60_000, 10_000),
 
   /**
+   * 全額返金にともなう取消（M3a）。**3 本に分けてある。**
+   *
+   * ⚠️ **1 本にまとめない。** 止めたい対象が 3 段あるため。
+   *   1. `claimed → revoked` という業務方針そのもの
+   *   2. 取消イベントを**作る**か
+   *   3. 取消イベントを**送る**か
+   * まとめると、送信だけ止めたい場面で生成まで止まり、
+   * **止めていた期間の返金が永久に相手へ伝わらなくなる**。
+   *
+   * ⚠️ **すべて既定は無効。** `"true"` の完全一致だけを有効とし、
+   * `"1"` や `"TRUE"` は**黙って無効に倒さず起動を拒否する**。
+   * 綴り違いで「有効にしたつもりが無効」になる事故を防ぐ。
+   */
+  REFUND_REVOKE_CLAIMED_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * 取消イベントを作るか。
+   *
+   * ⚠️ **日次の補完（reconciliation）もこのフラグに従う。** 従わせないと、
+   * 無効へ戻したのに cron が作り続ける。
+   */
+  WALLET_REVOCATION_EVENT_GENERATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * 取消イベントを送るか。
+   *
+   * ⚠️ **`WALLET_DELIVERY_ENABLED` も併せて必要**（配送ワーカーそのものの
+   * 親スイッチ）。こちらだけ有効にしても 1 件も送られないため、
+   * その組み合わせは起動時に拒否する。
+   */
+  WALLET_REVOCATION_EVENT_DELIVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
+  /**
    * プラットフォーム手数料率。**bps（1/100 %）の整数**。
    *
    * ✅ **決定済 2026-08-19（`UD-109`）: 20% = `2000`。**
@@ -351,6 +391,46 @@ const workerEnvObject = baseEnvObject.extend({
   WALLET_DELIVERY_TIMEOUT_MS: integerFromEnv(1000, 60_000, 10_000),
   /** 1 巡で送る件数の上限。相手の復旧直後に全件を叩きつけない。 */
   WALLET_DELIVERY_BATCH_SIZE: integerFromEnv(1, 500, 20),
+
+  /**
+   * 全額返金にともなう取消（M3a）。**3 本に分けてある。**
+   *
+   * ⚠️ **1 本にまとめない。** 止めたい対象が 3 段あるため。
+   *   1. `claimed → revoked` という業務方針そのもの
+   *   2. 取消イベントを**作る**か
+   *   3. 取消イベントを**送る**か
+   * まとめると、送信だけ止めたい場面で生成まで止まり、
+   * **止めていた期間の返金が永久に相手へ伝わらなくなる**。
+   *
+   * ⚠️ **すべて既定は無効。** `"true"` の完全一致だけを有効とし、
+   * `"1"` や `"TRUE"` は**黙って無効に倒さず起動を拒否する**。
+   * 綴り違いで「有効にしたつもりが無効」になる事故を防ぐ。
+   */
+  REFUND_REVOKE_CLAIMED_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * 取消イベントを作るか。
+   *
+   * ⚠️ **日次の補完（reconciliation）もこのフラグに従う。** 従わせないと、
+   * 無効へ戻したのに cron が作り続ける。
+   */
+  WALLET_REVOCATION_EVENT_GENERATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * 取消イベントを送るか。
+   *
+   * ⚠️ **`WALLET_DELIVERY_ENABLED` も併せて必要**（配送ワーカーそのものの
+   * 親スイッチ）。こちらだけ有効にしても 1 件も送られないため、
+   * その組み合わせは起動時に拒否する。
+   */
+  WALLET_REVOCATION_EVENT_DELIVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 
   /** 受取ページの前置き。Fixture が出力する Claim URL に使う。 */
   CLAIM_BASE_URL: z.url().default('http://localhost:3000/claims'),

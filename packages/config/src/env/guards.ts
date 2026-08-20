@@ -180,6 +180,29 @@ export function assertWalletDeliveryConfig(env: WalletDeliveryTargets): void {
   }
 }
 
+export interface WalletRevocationTargets {
+  readonly WALLET_DELIVERY_ENABLED: boolean;
+  readonly WALLET_REVOCATION_EVENT_DELIVERY_ENABLED: boolean;
+}
+
+/**
+ * 取消イベントの配送設定が噛み合っているか（M3a）。
+ *
+ * ⚠️ **配送ワーカーの親スイッチが無効なのに、取消の配送だけ有効にさせない。**
+ * そのまま起動すると「配送を有効にしたのに 1 件も送られない」状態が、
+ * **エラーひとつ出さずに**続く。溜まっていることに誰も気づけない。
+ *
+ * 逆（親スイッチだけ有効）は正しい状態である——付与だけを送り、
+ * 取消はまだ送らない、という段階導入がそれにあたる。
+ */
+export function assertWalletRevocationConfig(env: WalletRevocationTargets): void {
+  if (env.WALLET_REVOCATION_EVENT_DELIVERY_ENABLED && !env.WALLET_DELIVERY_ENABLED) {
+    throw new UnsafeEnvironmentError([
+      'WALLET_REVOCATION_EVENT_DELIVERY_ENABLED: 取消の配送が有効なのに WALLET_DELIVERY_ENABLED が無効（1 件も送られない）',
+    ]);
+  }
+}
+
 export interface MediaStorageTargets {
   readonly MEDIA_STORAGE_PROVIDER: string;
   readonly MEDIA_PUBLIC_BASE_URL?: string | undefined;
