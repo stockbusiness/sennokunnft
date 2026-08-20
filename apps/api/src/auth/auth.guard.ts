@@ -214,9 +214,7 @@ export class AuthGuard implements CanActivate {
     request.tokenIssuedAt = verified.identity.issuedAt;
     // ⚠️ ここで平文から照合値へ変換し、以後は平文を触らない（`UD-121`）。
     const emailHash =
-      verified.identity.email === undefined
-        ? null
-        : this.emailHasher.hash(verified.identity.email);
+      verified.identity.email === undefined ? null : this.emailHasher.hash(verified.identity.email);
     const existing = await this.accounts.findByAuthSubject(provider, subject);
     // 初回アクセスならここで作る。作られるロールは常に buyer。
     const account = existing ?? (await this.accounts.provision(provider, subject, emailHash));

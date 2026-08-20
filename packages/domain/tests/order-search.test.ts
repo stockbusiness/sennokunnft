@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  EMPTY_ORDER_SEARCH,
-  hasSearchCriteria,
-  normalizeOrderSearch,
-} from '../src/order/search';
+import { EMPTY_ORDER_SEARCH, hasSearchCriteria, normalizeOrderSearch } from '../src/order/search';
 
 /**
  * 注文の検索条件（`UD-121`）。

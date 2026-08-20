@@ -205,7 +205,6 @@ function normalizeTitleQuery(raw: string | undefined): Result<string | null, Dom
   return ok(value);
 }
 
-
 /**
  * JST の日付を、その日の始まり／終わりの瞬間へ変換する。
  *

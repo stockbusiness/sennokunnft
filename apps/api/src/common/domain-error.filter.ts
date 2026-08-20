@@ -218,7 +218,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: 'この世代は有効化できません。状態をご確認ください。',
   PAYMENT_CREDENTIAL_IN_USE:
     'この世代はいま新規のお支払いを受け付けています。先に切り替えてください。',
-  ORDER_SEARCH_INVALID: '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
+  ORDER_SEARCH_INVALID:
+    '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
   ORDER_NOTE_INVALID:
     'この内容では保存できません。空でないこと、2000 文字以内であること、メールアドレスを書かないことをご確認ください。',
   // ⚠️ 「見つかりません」と書かない。引けていないだけで、注文はあるかもしれない。

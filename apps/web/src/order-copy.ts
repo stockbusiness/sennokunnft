@@ -163,7 +163,8 @@ export const ORDER_COPY = {
   searchHint:
     '分かっているものだけ入れてください。空の欄は絞り込みに使いません。「先週このくらいの金額で」からでも辿れます。',
   searchOrderNumber: '注文番号',
-  searchOrderNumberHint: '末尾の8文字だけでも探せます。お電話ではそこだけ控えられることが多いためです。',
+  searchOrderNumberHint:
+    '末尾の8文字だけでも探せます。お電話ではそこだけ控えられることが多いためです。',
   searchCreatedFrom: 'お申し込み日（から）',
   searchCreatedTo: 'お申し込み日（まで）',
   searchMinAmount: '金額（下限・円）',
@@ -202,7 +203,8 @@ export const ORDER_COPY = {
    */
   notesHint:
     'どなたが、どのように対応したかを残します。あとから消したり直したりはできません。訂正は新しいメモでお願いします。',
-  notesEmailWarning: 'メールアドレスは書かないでください（保存しない決まりのため、保存できません）。',
+  notesEmailWarning:
+    'メールアドレスは書かないでください（保存しない決まりのため、保存できません）。',
   notesEmpty: 'まだ対応メモはありません',
   notesLabel: '対応の内容',
   notesSubmit: 'メモを残す',
@@ -354,7 +356,6 @@ export function webhookStatusLabel(status: string): string {
 export function payFailureHint(reservationExpired: boolean): string {
   return reservationExpired ? ORDER_COPY.payFailedExpiredHint : ORDER_COPY.payFailedRetryHint;
 }
-
 
 const TIMELINE_KIND_LABELS: Readonly<Record<OrderTimelineEntryView['kind'], string>> = {
   order_created: 'お申し込みを受け付けました',

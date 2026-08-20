@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildOrderTimeline, type OrderNoteEntry } from '../src/order/timeline';
 import { ORDER_NOTE_MAX_LENGTH, validateOrderNote } from '../src/order/note';
-import type {
-  OrderView,
-  PaymentAttemptView,
-  WebhookReceiptRecord,
-} from '../src/ports/order';
+import type { OrderView, PaymentAttemptView, WebhookReceiptRecord } from '../src/ports/order';
 
 const AT = (iso: string): Date => new Date(iso);
 

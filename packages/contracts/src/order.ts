@@ -157,8 +157,14 @@ export const adminOrderListQuerySchema = z.object({
    * ドメイン側に 1 か所だけ置く（`normalizeOrderSearch`）。
    * ⚠️ 「から」が「まで」より後なら 400 で返す。
    */
-  createdFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-  createdTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  createdFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  createdTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
   /** 金額（円の整数）。⚠️ 小数を受け取らない。 */
   minTotalAmount: z.coerce.number().int().nonnegative().optional(),
   maxTotalAmount: z.coerce.number().int().nonnegative().optional(),
@@ -267,7 +273,6 @@ export const adminOrderDetailSchema = adminOrderViewSchema.extend({
   payments: adminOrderPaymentsSchema.optional(),
 });
 export type AdminOrderDetail = z.infer<typeof adminOrderDetailSchema>;
-
 
 // ---------------------------------------------------------------------------
 // 問い合わせ対応（`UD-121`）

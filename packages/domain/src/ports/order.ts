@@ -394,7 +394,6 @@ export interface PaymentRepository {
   }): Promise<boolean>;
 }
 
-
 /**
  * 対応メモの保管（`UD-121`）。
  *

@@ -86,11 +86,7 @@ export interface AccountLookupPort {
    * @param emailHash 照合用のメール値（`UD-121`）。変換できないなら `null`。
    *   ⚠️ **平文を渡さない。** 呼び出し側で変換してから渡すこと。
    */
-  provision(
-    provider: string,
-    subject: string,
-    emailHash: string | null,
-  ): Promise<AccountRecord>;
+  provision(provider: string, subject: string, emailHash: string | null): Promise<AccountRecord>;
 
   /**
    * 照合用のメール値を覚え直す（`UD-121`）。

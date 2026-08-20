@@ -273,7 +273,6 @@ export class PrismaOrderRepository implements OrderRepository {
   }
 }
 
-
 /**
  * 検索条件を Prisma の絞り込みへ移す（`UD-121`）。
  *

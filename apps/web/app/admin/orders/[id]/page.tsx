@@ -280,7 +280,10 @@ export default async function AdminOrderDetailPage({
       ) : (
         <ol className="sengoku-timeline">
           {timeline.data.entries.map((entry, index) => (
-            <li className="sengoku-timeline__entry" key={`${entry.kind}-${entry.at}-${String(index)}`}>
+            <li
+              className="sengoku-timeline__entry"
+              key={`${entry.kind}-${entry.at}-${String(index)}`}
+            >
               <p className="sengoku-timeline__at">{formatDateTime(entry.at)}</p>
               <p className="sengoku-timeline__kind">{timelineKindLabel(entry.kind)}</p>
               {/*
