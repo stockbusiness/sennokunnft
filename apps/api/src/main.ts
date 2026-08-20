@@ -37,6 +37,7 @@ import {
   PrismaOrderNoteRepository,
   PrismaSettlementSettingsRepository,
   PrismaRefundRepository,
+  PrismaPayoutRepository,
   PrismaPaymentRepository,
   PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
@@ -585,6 +586,8 @@ async function bootstrap(): Promise<void> {
       accounts: new PrismaAccountRepository(prisma),
       // 返金の記録（`UD-104` / `UD-120`）。
       refunds: refundRepository,
+      // 作家さまへの精算（`UD-119`）。
+      payouts: new PrismaPayoutRepository(prisma),
       // 運営スタッフの在籍と招待（`UD-803`）。
       staffMembers: new PrismaStaffMemberRepository(prisma),
       staffInvitations: new PrismaStaffInvitationRepository(prisma),

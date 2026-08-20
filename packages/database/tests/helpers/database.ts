@@ -61,7 +61,7 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   const settlement = await prisma.settlementSettings.findMany();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, refunds, payments,
+      nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, payout_lines, payouts, refunds, payments,
       orders, wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
       webhook_events, outbox_events, audit_logs, legal_consents, legal_document_versions,
       payment_credentials, settlement_settings

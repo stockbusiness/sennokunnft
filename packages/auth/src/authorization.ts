@@ -102,6 +102,29 @@ export const ACTIONS = [
    * 「返金を受け付けない」「支払いを止める」に書き換えられてしまう。
    */
   'settlement.manage',
+  /**
+   * 精算を見る（`UD-119`）。
+   *
+   * ⚠️ **`auditor` にも開く。** いくら誰へ払ったかが見えないと監査に
+   * ならない。見ることと動かすことは、別の力として分ける。
+   */
+  'payout.view',
+  /**
+   * 精算を締める・確定する（`UD-119`）。
+   *
+   * ⚠️ **`auditor` には渡さない。** 集計そのものは金額を動かさないが、
+   * 確定は作家さまへ渡す明細を確定させる操作である。
+   */
+  'payout.manage',
+  /**
+   * 支払い済みにする（`UD-119`）。
+   *
+   * ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。「振り込んだ」と
+   * 記録する操作で、**実際に振り込んだかどうかを機械は確かめられない**。
+   * 記録だけ進めれば、作家さまには「支払い済み」と見えたまま入金が無い、
+   * という状態を作れてしまう。締める人と、払ったと宣言する人を分ける。
+   */
+  'payout.mark_paid',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -207,6 +230,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'settlement.view',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'settlement.manage',
+    'payout.view',
+    'payout.manage',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'payout.mark_paid',
   ],
   auditor: [
     'artwork.view_public',
@@ -224,6 +251,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'payment_credential.view',
     // ⚠️ 監査は返金の条件を確かめられる必要がある。変えることはできない。
     'settlement.view',
+    // ⚠️ いくら誰へ払ったかが見えないと監査にならない。締めることはできない。
+    'payout.view',
   ],
 };
 
@@ -265,6 +294,12 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   // ⚠️ **返金と支払いの両方を動かす操作**（`UD-104` / `UD-119`）。
   //    「返金を受け付けない」「支払いを止める」に書き換えられる。
   'settlement.manage',
+  /*
+    ⚠️ **「振り込んだ」と記録する操作**（`UD-119`）。実際に振り込んだかを
+       機械は確かめられないので、記録だけ進めれば「支払い済みなのに入金が
+       無い」を作れる。締める（`payout.manage`）人と分ける。
+  */
+  'payout.mark_paid',
 ];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {

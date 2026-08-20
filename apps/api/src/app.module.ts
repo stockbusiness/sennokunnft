@@ -30,6 +30,7 @@ import type {
   OrderNoteRepository,
   SettlementSettingsRepository,
   RefundRepository,
+  PayoutRepository,
   PaymentRepository,
   PaymentGatewayPort,
   CommonUserLinkRepository,
@@ -106,6 +107,8 @@ import {
   SETTLEMENT_CONFIG,
   type SettlementConfig,
 } from './settlement/settlement.controller';
+import { AdminPayoutController } from './settlement/payout.controller';
+import { PAYOUT_CONFIG, PayoutService, type PayoutConfig } from './settlement/payout.service';
 import { CheckoutService } from './order/checkout.service';
 import { PaymentWebhookService } from './order/webhook.service';
 import { PaymentWebhookController } from './order/webhook.controller';
@@ -306,6 +309,13 @@ export interface AppDependencies {
    * 追随できず、返金済みの注文が「お支払い済み」のまま精算に乗る。
    */
   readonly refunds: RefundRepository;
+  /**
+   * 作家さまへの精算（`UD-119`）。
+   *
+   * ⚠️ **省略できない。** 無いと締めも確定もできず、作家さまへの
+   * お支払いが記録として残らない。
+   */
+  readonly payouts: PayoutRepository;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -403,6 +413,7 @@ export class AppModule implements NestModule {
         AdminOrderController,
         // 返金と精算の設定（`UD-104` / `UD-119`）。⚠️ 変更はオーナー限定。
         AdminSettlementController,
+        AdminPayoutController,
         ...(internalJobToken === undefined || internalJobToken === ''
           ? []
           : [InternalJobsController]),
@@ -468,6 +479,20 @@ export class AppModule implements NestModule {
             audit: deps.audit,
           }),
         },
+        {
+          // 精算（`UD-119`）。⚠️ 金額を人が書き換える口を足さないこと。
+          provide: PAYOUT_CONFIG,
+          useFactory: (): PayoutConfig => ({
+            repository: deps.payouts,
+            settings: deps.settlement,
+            // ⚠️ 環境はプロセスに固定する。要求から受け取らない。
+            appEnvironment: deps.integrations?.appEnvironment ?? 'staging',
+            clock: deps.clock,
+            ids: deps.ids,
+            audit: deps.audit,
+          }),
+        },
+        PayoutService,
         {
           /*
             返金の実行（`UD-104` / `UD-120`）。

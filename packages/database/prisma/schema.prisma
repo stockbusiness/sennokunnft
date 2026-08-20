@@ -103,6 +103,8 @@ model Account {
   activatedPaymentCredentials  PaymentCredential[]          @relation("PaymentCredentialActivator")
   settlementSettings           SettlementSettings[]         @relation("SettlementSettingsEditor")
   refunds                      Refund[]                     @relation("RefundActor")
+  payouts                      Payout[]                     @relation("PayoutCreator")
+  paidPayouts                  Payout[]                     @relation("PayoutPayer")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -564,6 +566,7 @@ model Order {
   webhookEvents WebhookEvent[]
   notes         OrderNote[]
   refunds       Refund[]
+  payoutLines   PayoutLine[]
 
   /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
   /// アプリの重複チェックではなく、DB の制約で担保する。
@@ -635,6 +638,85 @@ model OrderNote {
 
   @@index([orderId, createdAt])
   @@map("order_notes")
+}
+
+/// 作家さまへの精算（`UD-119`。docs/SETTLEMENT_AND_REFUND.md §3-3）。
+///
+/// ⚠️ **金額を人が直接書き換える口を作らない**（§4）。訂正は**次の期間での
+/// 調整**として行う。直接書き換えを許すと、明細と振込額が食い違ったときに、
+/// どちらが正しいのか誰にも分からなくなる。
+///
+/// ⚠️ **`confirmed` 以降は行を書き換えない。** 締めたあとに金額が動くと、
+/// 作家さまへ渡した明細と食い違う。
+model Payout {
+  id                  String    @id @default(uuid()) @db.Uuid
+  creatorAccountId    String    @map("creator_account_id") @db.Uuid
+  /// 締め月。`2026-08` の形。⚠️ 表示にも識別にも使う。
+  periodKey           String    @map("period_key")
+  /// 締め期間。⚠️ **JST の月境界を UTC で保存する。** 終了は含まない。
+  periodStart         DateTime  @map("period_start") @db.Timestamptz(6)
+  periodEnd           DateTime  @map("period_end") @db.Timestamptz(6)
+  /// お支払いの期日。⚠️ 焼き付ける。設定を変えても過去の精算は動かない。
+  dueAt               DateTime  @map("due_at") @db.Timestamptz(6)
+  /// `draft` / `confirmed` / `paid`。CHECK 制約で縛る。
+  status              String    @default("draft")
+  currency            String    @default("JPY") @db.Char(3)
+  grossAmount         Int       @default(0) @map("gross_amount")
+  feeAmount           Int       @default(0) @map("fee_amount")
+  /// 差し戻した額。⚠️ 正の数で持つ。
+  refundedAmount      Int       @default(0) @map("refunded_amount")
+  /// 前月からの繰越。⚠️ マイナスもありうる。
+  carriedInAmount     Int       @default(0) @map("carried_in_amount")
+  /// 今回のお支払額。⚠️ 最低支払額に満たなければ 0。
+  netAmount           Int       @default(0) @map("net_amount")
+  /// 翌月への繰越。⚠️ マイナスもありうる。
+  carriedOutAmount    Int       @default(0) @map("carried_out_amount")
+  /// ⚠️ **その時点の**設定。焼き付けてある（§0 の②）。
+  minimumPayoutAmount Int       @map("minimum_payout_amount")
+  transferFeeBearer   String    @map("transfer_fee_bearer")
+  confirmedAt         DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  paidAt              DateTime? @map("paid_at") @db.Timestamptz(6)
+  paidByAccountId     String?   @map("paid_by_account_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator  Account      @relation("PayoutCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  paidBy   Account?     @relation("PayoutPayer", fields: [paidByAccountId], references: [id], onDelete: SetNull)
+  lines    PayoutLine[]
+
+  /// ⚠️ 1 作家さま × 1 締め期間 = 1 行。2 つできると、どちらが正か分からない。
+  @@unique([creatorAccountId, periodKey], map: "payouts_creator_period_key")
+  @@index([periodKey, status], map: "payouts_period_status_idx")
+  @@index([creatorAccountId, createdAt(sort: Desc)], map: "payouts_creator_created_idx")
+  @@map("payouts")
+}
+
+/// 精算の明細（注文 1 件ぶん）。
+///
+/// ⚠️ 部分 UNIQUE 索引 `payout_lines_order_key`（`WHERE is_clawback = false`）が
+/// **二重払い**を止める。Prisma では条件付き索引を書けないため、**手書きの
+/// マイグレーション側にだけ存在する**。消さないこと。
+model PayoutLine {
+  id                   String   @id @default(uuid()) @db.Uuid
+  payoutId             String   @map("payout_id") @db.Uuid
+  orderId              String   @map("order_id") @db.Uuid
+  orderNumber          String   @map("order_number")
+  /// ⚠️ 注文時点の作品名。マスタを引き直さない。改名しても明細は変わらない。
+  artworkTitleSnapshot String   @map("artwork_title_snapshot")
+  grossAmount          Int      @map("gross_amount")
+  feeRateBps           Int      @map("fee_rate_bps")
+  feeAmount            Int      @map("fee_amount")
+  /// ⚠️ 差し戻しはマイナス。合計だけ減らすと、作家さまが理由を読み取れない。
+  netAmount            Int      @map("net_amount")
+  /// 確定済みの精算に載った注文の返金を、次回で差し引く行。
+  isClawback           Boolean  @default(false) @map("is_clawback")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  payout Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([payoutId], map: "payout_lines_payout_idx")
+  @@map("payout_lines")
 }
 
 /// 返金の記録（`UD-104` / `UD-120`。docs/SETTLEMENT_AND_REFUND.md §3-2）。

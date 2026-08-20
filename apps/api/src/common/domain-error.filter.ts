@@ -123,6 +123,13 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 409。鍵を取り込み直すまで、やり直しても同じ結果になる。
   REFUND_CREDENTIAL_UNAVAILABLE: HttpStatus.CONFLICT,
   SETTLEMENT_SETTINGS_INVALID: HttpStatus.BAD_REQUEST,
+  // --- 精算（`UD-119`）---
+  PAYOUT_PERIOD_INVALID: HttpStatus.BAD_REQUEST,
+  // ⚠️ 409。時が経てば通る。入力の誤りではない。
+  PAYOUT_PERIOD_NOT_CLOSED: HttpStatus.CONFLICT,
+  PAYOUT_WINDOW_OPEN: HttpStatus.CONFLICT,
+  PAYOUT_NOT_EDITABLE: HttpStatus.CONFLICT,
+  PAYOUT_NOT_FOUND: HttpStatus.NOT_FOUND,
   // --- 注文の検索と問い合わせ対応（`UD-121`）---
   ORDER_SEARCH_INVALID: HttpStatus.BAD_REQUEST,
   ORDER_NOTE_INVALID: HttpStatus.BAD_REQUEST,
@@ -250,6 +257,16 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'このご注文をお預かりした当時の決済用の鍵が見つからないため、返金できません。その世代の鍵を取り込み直してください。',
   SETTLEMENT_SETTINGS_INVALID:
     'この設定では保存できません。返金を受け付ける期間が、お支払いまでの猶予を超えていないかご確認ください。',
+  PAYOUT_PERIOD_INVALID: '締め月は 2026-08 の形でご指定ください。',
+  PAYOUT_PERIOD_NOT_CLOSED: 'その月はまだ締めを迎えていません。月が明けてからお試しください。',
+  /*
+    ⚠️ **「精算できません」で終わらせない。** 待てば通る。いつ通るのかを
+       運営が知れないと、毎日押して確かめることになる。
+  */
+  PAYOUT_WINDOW_OPEN:
+    '返金をお受けする期間が終わっていないご注文が残っています。期間が過ぎてから確定してください。',
+  PAYOUT_NOT_EDITABLE: 'この精算はすでに確定しているため、変更できません。',
+  PAYOUT_NOT_FOUND: 'その精算は見つかりませんでした。',
   ORDER_SEARCH_INVALID:
     '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
   ORDER_NOTE_INVALID:

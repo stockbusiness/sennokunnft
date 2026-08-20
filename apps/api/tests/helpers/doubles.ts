@@ -93,6 +93,13 @@ import {
 import type {
   EntitlementStatus,
   MintJobStatus,
+  PayoutCandidate,
+  PayoutClawback,
+  PayoutLineView,
+  PayoutRepository,
+  PayoutStatus,
+  PayoutView,
+  SavePayoutDraftCommand,
   RefundContext,
   RefundRecordView,
   RefundRepository,
@@ -1512,6 +1519,222 @@ export class InMemoryRefunds implements RefundRepository {
   }
 }
 
+/**
+ * 精算（`UD-119`）。
+ *
+ * ⚠️ **本物と同じところで断る。** 「代替実装だから通す」を作ると、手元では
+ * 通るのに本番で落ちる経路ができる。1 作家さま × 1 期間 = 1 行、確定済みは
+ * 置き換えない、二重払いをしない——この 3 つはここでも同じに保つ。
+ */
+export class InMemoryPayouts implements PayoutRepository {
+  private readonly payouts = new Map<string, PayoutView>();
+  private readonly lines = new Map<string, PayoutLineView[]>();
+
+  /**
+   * 精算の対象になる注文。
+   *
+   * ⚠️ **試験ごとに差し替える。** 注文の代替実装は作家さまごとの集計を
+   * 持たないので、ここへ直接置く。
+   */
+  candidates: PayoutCandidate[] = [];
+  clawbacks: PayoutClawback[] = [];
+
+  list(query: {
+    readonly limit: number;
+    readonly periodKey?: string | undefined;
+    readonly creatorAccountId?: string | undefined;
+    readonly status?: PayoutStatus | undefined;
+  }): Promise<readonly PayoutView[]> {
+    return Promise.resolve(
+      [...this.payouts.values()]
+        .filter(
+          (row) =>
+            (query.periodKey === undefined || row.periodKey === query.periodKey) &&
+            (query.creatorAccountId === undefined ||
+              row.creatorAccountId === query.creatorAccountId) &&
+            (query.status === undefined || row.status === query.status),
+        )
+        .sort((a, b) => b.periodKey.localeCompare(a.periodKey))
+        .slice(0, query.limit),
+    );
+  }
+
+  findById(payoutId: string): Promise<PayoutView | null> {
+    return Promise.resolve(this.payouts.get(payoutId) ?? null);
+  }
+
+  findByPeriod(creatorAccountId: string, periodKey: string): Promise<PayoutView | null> {
+    return Promise.resolve(
+      [...this.payouts.values()].find(
+        (row) => row.creatorAccountId === creatorAccountId && row.periodKey === periodKey,
+      ) ?? null,
+    );
+  }
+
+  listLines(payoutId: string): Promise<readonly PayoutLineView[]> {
+    return Promise.resolve(this.lines.get(payoutId) ?? []);
+  }
+
+  listCandidates(input: {
+    readonly creatorAccountId: string;
+    readonly periodStart: Date;
+    readonly periodEnd: Date;
+  }): Promise<readonly PayoutCandidate[]> {
+    return Promise.resolve(
+      this.candidates.filter(
+        (row) =>
+          row.creatorAccountId === input.creatorAccountId &&
+          row.paidAt.getTime() >= input.periodStart.getTime() &&
+          // ⚠️ 半開区間。終了の瞬間は次の期間のもの。
+          row.paidAt.getTime() < input.periodEnd.getTime() &&
+          // ⚠️ すでにどこかの精算に載っている注文は入れない。
+          !this.alreadyPaidOut(row.orderId),
+      ),
+    );
+  }
+
+  listClawbacks(creatorAccountId: string): Promise<readonly PayoutClawback[]> {
+    /*
+      ⚠️ **一度差し引いた注文を二度引かない。** 二度引くと、作家さまから
+         取りすぎる。本物は差し戻しの行の有無で見る。ここでも同じにする。
+    */
+    void creatorAccountId;
+    return Promise.resolve(this.clawbacks.filter((row) => !this.alreadyClawedBack(row.orderId)));
+  }
+
+  countOpenRefundWindows(payoutId: string, now: Date): Promise<number> {
+    /*
+      ⚠️ **この精算の明細そのものから数える。** 候補の絞り込みで数えると、
+         下書きを保存した直後は 0 件になる（もうこの精算に載っているため）。
+    */
+    const lines = this.lines.get(payoutId) ?? [];
+    const open = lines.filter((line) => {
+      if (line.isClawback) {
+        return false;
+      }
+      const candidate = this.candidates.find((row) => row.orderId === line.orderId);
+      const until = candidate?.refundableUntil ?? null;
+      // ⚠️ 期限が付いていない注文も「開いている」と数える。
+      return until === null || until.getTime() > now.getTime();
+    });
+    return Promise.resolve(open.length);
+  }
+
+  carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number> {
+    const previous = [...this.payouts.values()].find(
+      (row) => row.creatorAccountId === creatorAccountId && row.periodKey === previousPeriodKey,
+    );
+    // ⚠️ 下書きのままの前月から繰り越さない。金額がまだ動く。
+    if (previous === undefined || previous.status === 'draft') {
+      return Promise.resolve(0);
+    }
+    return Promise.resolve(previous.carriedOutAmount);
+  }
+
+  listCreatorsForPeriod(input: {
+    readonly periodStart: Date;
+    readonly periodEnd: Date;
+    readonly previousPeriodKey: string;
+  }): Promise<readonly string[]> {
+    const sold = this.candidates
+      .filter(
+        (row) =>
+          row.paidAt.getTime() >= input.periodStart.getTime() &&
+          row.paidAt.getTime() < input.periodEnd.getTime(),
+      )
+      .map((row) => row.creatorAccountId);
+    // ⚠️ 繰越だけの作家さまも含める。売上だけで絞ると、繰越が支払われない。
+    const carried = [...this.payouts.values()]
+      .filter(
+        (row) =>
+          row.periodKey === input.previousPeriodKey &&
+          row.status !== 'draft' &&
+          row.carriedOutAmount !== 0,
+      )
+      .map((row) => row.creatorAccountId);
+    return Promise.resolve([...new Set([...sold, ...carried])]);
+  }
+
+  saveDraft(command: SavePayoutDraftCommand): Promise<PayoutView> {
+    const existing = [...this.payouts.values()].find(
+      (row) =>
+        row.creatorAccountId === command.creatorAccountId && row.periodKey === command.periodKey,
+    );
+    if (existing !== undefined) {
+      // ⚠️ 締めたあとは置き換えない。呼び出し側でも見ているが、ここでも見る。
+      if (existing.status !== 'draft') {
+        throw new Error('payout is not editable');
+      }
+      this.payouts.delete(existing.id);
+      this.lines.delete(existing.id);
+    }
+
+    const view: PayoutView = {
+      id: command.payoutId,
+      creatorAccountId: command.creatorAccountId,
+      periodKey: command.periodKey,
+      periodStart: command.periodStart,
+      periodEnd: command.periodEnd,
+      dueAt: command.dueAt,
+      status: 'draft',
+      currency: command.currency,
+      grossAmount: command.grossAmount,
+      feeAmount: command.feeAmount,
+      refundedAmount: command.refundedAmount,
+      carriedInAmount: command.carriedInAmount,
+      netAmount: command.netAmount,
+      carriedOutAmount: command.carriedOutAmount,
+      minimumPayoutAmount: command.minimumPayoutAmount,
+      transferFeeBearer: command.transferFeeBearer,
+      confirmedAt: null,
+      paidAt: null,
+      paidByAccountId: null,
+      lineCount: command.lines.length,
+      createdAt: command.now,
+    };
+    this.payouts.set(view.id, view);
+    this.lines.set(
+      view.id,
+      command.lines.map((line) => ({ ...line })),
+    );
+    return Promise.resolve(view);
+  }
+
+  advance(input: {
+    readonly payoutId: string;
+    readonly from: PayoutStatus;
+    readonly to: PayoutStatus;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<PayoutView | null> {
+    const current = this.payouts.get(input.payoutId);
+    // ⚠️ 条件付き更新。同時に押された「確定」を 2 回通さない。
+    if (current === undefined || current.status !== input.from) {
+      return Promise.resolve(null);
+    }
+    const next: PayoutView = {
+      ...current,
+      status: input.to,
+      ...(input.to === 'confirmed' ? { confirmedAt: input.now } : {}),
+      ...(input.to === 'paid' ? { paidAt: input.now, paidByAccountId: input.actorAccountId } : {}),
+    };
+    this.payouts.set(next.id, next);
+    return Promise.resolve(next);
+  }
+
+  private alreadyPaidOut(orderId: string): boolean {
+    return [...this.lines.values()]
+      .flat()
+      .some((line) => line.orderId === orderId && !line.isClawback);
+  }
+
+  private alreadyClawedBack(orderId: string): boolean {
+    return [...this.lines.values()]
+      .flat()
+      .some((line) => line.orderId === orderId && line.isClawback);
+  }
+}
+
 export class InMemoryOrderNotes implements OrderNoteRepository {
   listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]> {
     return Promise.resolve(
@@ -2049,6 +2272,8 @@ export interface TestHarness extends AppDependencies {
   readonly settlement: InMemorySettlementSettings;
   /** ⚠️ 受取権・発行ジョブの姿を差し替えるため、実体の型で持つ。 */
   readonly refunds: InMemoryRefunds;
+  /** ⚠️ 精算の対象を差し替えるため、実体の型で持つ。 */
+  readonly payouts: InMemoryPayouts;
 }
 
 /**
@@ -2227,6 +2452,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const orderNotes = new InMemoryOrderNotes();
   const settlementSettings = new InMemorySettlementSettings();
   const refunds = new InMemoryRefunds(orderRepository);
+  const payouts = new InMemoryPayouts();
   const commonUserLinks = new InMemoryCommonUserLinks();
   const paymentRepository = new InMemoryPaymentRepository(orderRepository);
   const paymentGateway = new FakePaymentGateway(
@@ -2254,6 +2480,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     settlement: settlementSettings,
     // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
     refunds,
+    // 精算（`UD-119`）。⚠️ 対象の注文は試験ごとに差し替える。
+    payouts,
     idempotency: new InMemoryIdempotencyStore(),
     accounts,
     staffMembers,

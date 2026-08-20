@@ -39,6 +39,14 @@ import {
   type CreateRefundRequest,
   type RefundListResponse,
   type RefundResult,
+  payoutListResponseSchema,
+  payoutDetailResponseSchema,
+  payoutSchema,
+  closePayoutPeriodResponseSchema,
+  type ClosePayoutPeriodResponse,
+  type PayoutDetailResponse,
+  type PayoutListResponse,
+  type PayoutViewDto,
   orderNoteViewSchema,
   settlementSettingsSchema,
   settlementSettingsResponseSchema,
@@ -685,6 +693,64 @@ export function addAdminOrderNote(
     orderNoteViewSchema,
     json({ body }, 'POST'),
   );
+}
+
+// --- 作家さまへの精算（`UD-119`）--------------------------------------------
+//
+// ⚠️ **金額を渡す口をここへ足さない。** API 側にも無い。合計も明細も、
+//    集計が決めた値だけ。訂正は次の期間での調整として行う。
+
+export function fetchPayouts(
+  query: { readonly periodKey?: string; readonly status?: string } = {},
+): Promise<AdminResult<PayoutListResponse>> {
+  const params = new URLSearchParams();
+  params.set('limit', '100');
+  if (query.periodKey !== undefined && query.periodKey !== '') {
+    params.set('periodKey', query.periodKey);
+  }
+  if (query.status !== undefined && query.status !== '') {
+    params.set('status', query.status);
+  }
+  return callAdmin(`/api/v1/admin/payouts?${params.toString()}`, payoutListResponseSchema);
+}
+
+export function fetchPayout(id: string): Promise<AdminResult<PayoutDetailResponse>> {
+  return callAdmin(`/api/v1/admin/payouts/${encodeURIComponent(id)}`, payoutDetailResponseSchema);
+}
+
+/**
+ * その月を締めて、作家さまごとの下書きを作る。
+ *
+ * ⚠️ **作家さまを指定しない。** その期間に売上か繰越のある方は API が
+ * 洗い出す。指定できると、指定し忘れた方がいつまでも支払われない。
+ */
+export function closePayoutPeriod(
+  periodKey: string,
+): Promise<AdminResult<ClosePayoutPeriodResponse>> {
+  return callAdmin(
+    '/api/v1/admin/payouts/close',
+    closePayoutPeriodResponseSchema,
+    json({ periodKey }, 'POST'),
+  );
+}
+
+/** ⚠️ 確定した内容は変更できない。呼ぶ前に画面で確認を挟むこと。 */
+export function confirmPayout(id: string): Promise<AdminResult<PayoutViewDto>> {
+  return callAdmin(`/api/v1/admin/payouts/${encodeURIComponent(id)}/confirm`, payoutSchema, {
+    method: 'POST',
+  });
+}
+
+/**
+ * お支払い済みとして記録する。
+ *
+ * ⚠️ **これは「振り込んだ」という宣言であって、振込そのものではない。**
+ * API 側でオーナー限定＋再認証にしてある。
+ */
+export function markPayoutPaid(id: string): Promise<AdminResult<PayoutViewDto>> {
+  return callAdmin(`/api/v1/admin/payouts/${encodeURIComponent(id)}/mark-paid`, payoutSchema, {
+    method: 'POST',
+  });
 }
 
 // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------
