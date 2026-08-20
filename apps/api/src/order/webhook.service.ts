@@ -12,6 +12,7 @@ import {
   type ProviderPaymentFact,
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
+import type { EntitlementIssuanceService } from './issuance.service';
 import type { RefundService } from './refund.service';
 
 export interface WebhookServiceConfig {
@@ -58,6 +59,14 @@ export class PaymentWebhookService {
      * こちらでは「お支払い済み」のまま残り、精算にまで乗る。
      */
     private readonly refunds: RefundService,
+    /**
+     * 受取権の発行（P0-1）。
+     *
+     * ⚠️ **省略できるようにしていない。** 発行しないと、決済が済んだのに
+     * 受け取るものが生まれない。Claim も Wallet 配送も、この一段が
+     * 無いと一度も動かない。
+     */
+    private readonly issuance: EntitlementIssuanceService,
   ) {}
 
   /**
@@ -308,6 +317,24 @@ export class PaymentWebhookService {
       targetId: order.id,
       summary: { orderNumber: order.orderNumber, eventType: fact.eventType },
     });
+
+    /*
+      受取権をこの場で作る（P0-1）。
+
+      ⚠️ **失敗しても決済の確定を巻き戻さない。** お金は既に動いている。
+         巻き戻すと「払ったのに注文が無い」になる。発行の失敗は注文へ
+         記録され、時計からの掃き出し
+         （`/api/v1/internal/jobs/issue-entitlements`）が拾い直す。
+
+      ⚠️ **ここを唯一の起動口にしない。** この直後にプロセスが落ちた注文は
+         永久に発行されなくなる。掃き出しと併せて 2 本立てにする。
+
+      ⚠️ **何度呼ばれても増えない。** 足りない枚数だけを作る形にしてあり、
+         `UNIQUE(order_line_id, unit_index)` が最終防壁になっている。
+         同じ知らせが 2 度届いても、ここは安全に通る。
+    */
+    await this.issuance.runForOrder(order.id);
+
     await this.recordAndFinish(fact, 'processed', order.id, null, now);
   }
 

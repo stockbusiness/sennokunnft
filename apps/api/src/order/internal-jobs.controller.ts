@@ -8,9 +8,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
-import type { ReleaseExpiredResponse } from '@sengoku/contracts';
-import { RELEASE_BATCH_SIZE } from '@sengoku/domain';
+import type { IssueEntitlementsResponse, ReleaseExpiredResponse } from '@sengoku/contracts';
+import { ISSUANCE_BATCH_SIZE, RELEASE_BATCH_SIZE } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
+import { EntitlementIssuanceService } from './issuance.service';
 import { OrderService } from './order.service';
 
 export const INTERNAL_JOB_CONFIG = Symbol('sengoku:internal-job-config');
@@ -35,6 +36,7 @@ export interface InternalJobConfig {
 export class InternalJobsController {
   constructor(
     private readonly orders: OrderService,
+    private readonly issuance: EntitlementIssuanceService,
     @Inject(INTERNAL_JOB_CONFIG) private readonly config: InternalJobConfig,
   ) {}
 
@@ -50,6 +52,35 @@ export class InternalJobsController {
       releasedCount: released.length,
       // ⚠️ 注文IDまで。購入者・作品名・金額は返さない。
       orderIds: released.map((entry) => entry.orderId),
+    };
+  }
+
+  /**
+   * 受取権の発行を掃き出す（P0-1）。
+   *
+   * ⚠️ **これは取りこぼしの受け皿であって、主たる経路ではない。** ふだんは
+   * 決済確定の直後にその場で発行される。ここが拾うのは、その直後に
+   * プロセスが落ちた注文と、外部の不調で失敗した注文だけ。
+   *
+   * ⚠️ **重なって走っても増えない。** 作るのは足りない枚数だけで、
+   * `UNIQUE(order_line_id, unit_index)` が最終防壁になっている。
+   */
+  @Post('issue-entitlements')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async issueEntitlements(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<IssueEntitlementsResponse> {
+    this.assertAuthorized(token);
+    const result = await this.issuance.sweep(ISSUANCE_BATCH_SIZE);
+    /*
+      ⚠️ **注文番号も購入者も返さない。** これは時計が叩く口で、
+         応答は監視の数値として読まれる。人の情報を混ぜない。
+    */
+    return {
+      pickedCount: result.picked,
+      issuedCount: result.issued,
+      failedCount: result.failed,
     };
   }
 

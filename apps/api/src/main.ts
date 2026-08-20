@@ -36,6 +36,7 @@ import {
   PrismaOrderRepository,
   PrismaOrderNoteRepository,
   PrismaSettlementSettingsRepository,
+  PrismaEntitlementIssuanceRepository,
   PrismaRefundRepository,
   PrismaPayoutRepository,
   PrismaCreatorProfileRepository,
@@ -562,6 +563,21 @@ async function bootstrap(): Promise<void> {
   const settlementSettings = new PrismaSettlementSettingsRepository(prisma);
   // 返金の記録（`UD-120`）。⚠️ 決済を繋いでいない配備でも読み取りは要る。
   const refundRepository = new PrismaRefundRepository(prisma);
+
+  /*
+    受取権の発行（P0-1）。
+
+    ⚠️ **受取トークンの発行器を渡す。** 保存するのはハッシュだけで、平文は
+       この境界の外へ出ない。購入者はご自分の画面から受取URLを発行し直す
+       （`POST /api/v1/entitlements/:id/claim-token`）。
+    ⚠️ **Claim の機能フラグに紐づけない。** 受取権そのものは、Wallet 連携を
+       有効にしていない配備でも作られる必要がある。作られないと、
+       あとから有効にしたときに過去の注文だけ受取権が無い状態になる。
+  */
+  const issuanceRepository = new PrismaEntitlementIssuanceRepository(
+    prisma,
+    new Sha256ClaimTokenService(),
+  );
   const settlementEnvironment = env.APP_ENV === 'production' ? 'production' : 'staging';
   const resolveRefundableUntil = createRefundWindowResolver(
     settlementSettings,
@@ -587,6 +603,8 @@ async function bootstrap(): Promise<void> {
       accounts: new PrismaAccountRepository(prisma),
       // 返金の記録（`UD-104` / `UD-120`）。
       refunds: refundRepository,
+      // 受取権の発行（P0-1）。決済が済んだ注文を受取権に変える。
+      issuance: issuanceRepository,
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),
       // 作家さまの表示名（決定 2026-08-20）。

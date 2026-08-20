@@ -282,6 +282,8 @@ suite('受取権の CHECK 制約', () => {
           artworkId,
           accountId,
           serialNo: 1,
+          // 1 明細 1 枚の下地なので 0 枚目。
+          unitIndex: 0,
           claimTokenHash: randomUUID(),
           status: 'claimed',
         },
@@ -332,6 +334,8 @@ suite('受取権の CHECK 制約', () => {
           artworkId,
           accountId,
           serialNo: 0,
+          // 1 明細 1 枚の下地なので 0 枚目。
+          unitIndex: 0,
           claimTokenHash: randomUUID(),
         },
       }),

@@ -115,6 +115,8 @@ async function seedEntitlement(
       artworkId: artwork.id,
       accountId,
       serialNo: 1,
+      // 1 明細 1 枚の下地なので 0 枚目。
+      unitIndex: 0,
       claimTokenHash: tokenHash,
       status: 'issued',
     },

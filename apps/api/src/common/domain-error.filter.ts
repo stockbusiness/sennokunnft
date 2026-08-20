@@ -26,6 +26,18 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   ORDER_NOT_PENDING: HttpStatus.CONFLICT,
   INVALID_STATE_TRANSITION: HttpStatus.CONFLICT,
   ENTITLEMENT_NOT_CLAIMABLE: HttpStatus.CONFLICT,
+  /*
+    受取権の発行（P0-1）。
+
+    ⚠️ **どれも 500 にしている。** これは利用者の入力の誤りではなく、
+       こちら側の記録が食い違っている状態である。4xx にすると、
+       呼び出し元（決済の Webhook・時計）に「送り方が悪い」と伝わり、
+       直すべき場所を見誤らせる。
+  */
+  ENTITLEMENT_OVER_ISSUED: HttpStatus.INTERNAL_SERVER_ERROR,
+  ENTITLEMENT_SUPPLY_MISMATCH: HttpStatus.INTERNAL_SERVER_ERROR,
+  ENTITLEMENT_ORDER_NOT_FOUND: HttpStatus.INTERNAL_SERVER_ERROR,
+  ENTITLEMENT_ORDER_NOT_PAID: HttpStatus.INTERNAL_SERVER_ERROR,
   ENTITLEMENT_OWNER_MISMATCH: HttpStatus.FORBIDDEN,
   // 403 にしない。有効なトークンが存在するかを攻撃者に教えないため。
   CLAIM_TOKEN_INVALID: HttpStatus.NOT_FOUND,
@@ -161,6 +173,15 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ORDER_NOT_PENDING: 'このご注文はお支払い待ちの状態ではありません。',
   INVALID_STATE_TRANSITION: 'この操作は現在の状態では行えません。',
   ENTITLEMENT_NOT_CLAIMABLE: 'この受取り権利は現在お受け取りいただけません。',
+  /*
+    ⚠️ **どれも同じ文面にしてある。** 利用者に見せる画面には、どの記録が
+       どう食い違っているかを書かない。伝えるべきは「お客さまの操作は
+       済んでいて、こちらで確認している」という一点だけ。
+  */
+  ENTITLEMENT_OVER_ISSUED: 'ただいま確認しております。お手数ですがお問い合わせください。',
+  ENTITLEMENT_SUPPLY_MISMATCH: 'ただいま確認しております。お手数ですがお問い合わせください。',
+  ENTITLEMENT_ORDER_NOT_FOUND: 'ただいま確認しております。お手数ですがお問い合わせください。',
+  ENTITLEMENT_ORDER_NOT_PAID: 'ただいま確認しております。お手数ですがお問い合わせください。',
   ENTITLEMENT_OWNER_MISMATCH: 'この受取り権利をお受け取りいただく権限がありません。',
   CLAIM_TOKEN_INVALID: 'お探しの受取りページは見つかりませんでした。',
   CLAIM_EXPIRED: 'この受取りの期限が過ぎています。運営までお問い合わせください。',

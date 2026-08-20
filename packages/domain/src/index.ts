@@ -258,6 +258,27 @@ export {
   type ReissueAttempt,
 } from './entitlement/reissue';
 
+// 受取権の発行（P0-1）。決済が済んだ注文を受取権に変える。
+export {
+  ISSUANCE_BATCH_SIZE,
+  ISSUANCE_MAX_ATTEMPTS,
+  isIssuanceDue,
+  planIssuance,
+  reconcileSupply,
+  scheduleIssuanceRetry,
+  type IssuancePlan,
+  type IssuanceRetry,
+  type IssuanceTarget,
+  type IssuanceUnit,
+  type SupplyReconciliation,
+} from './entitlement/issuance';
+
+export type {
+  EntitlementIssuanceRepository,
+  IssuanceCandidate,
+  IssuanceOutcome,
+} from './ports/issuance';
+
 export {
   evaluateWalletClaim,
   type WalletClaimAttempt,
