@@ -6,6 +6,7 @@ import {
   type AuditLogPort,
   type ClockPort,
   type IdGeneratorPort,
+  type CheckoutSessionCreated,
   type OrderRepository,
   type PaymentAttemptView,
   type PaymentGatewayPort,
@@ -140,6 +141,8 @@ export class CheckoutService {
       paymentId: this.ids.generate(),
       orderId: order.id,
       provider: this.config.provider,
+      // ⚠️ どの世代の鍵で作ったか（`UD-128`）。返金にこれが要る。
+      credentialId: created.credentialId,
       sessionRef: created.sessionRef,
       paymentRef: created.paymentRef,
       url: created.url,
@@ -175,7 +178,7 @@ export class CheckoutService {
     expiresAt: Date,
     input: { readonly correlationId: string | null },
     attemptCount: number,
-  ): Promise<{ sessionRef: string; paymentRef: string | null; url: string; expiresAt: Date }> {
+  ): Promise<CheckoutSessionCreated> {
     const result = await this.gateway.createCheckoutSession({
       orderId: order.id,
       orderNumber: order.orderNumber,

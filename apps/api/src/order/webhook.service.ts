@@ -98,6 +98,8 @@ export class PaymentWebhookService {
     const claim = await this.payments.claimWebhookEvent({
       id: this.ids.generate(),
       provider: this.config.provider,
+      // ⚠️ どの世代の鍵で署名を検証できたか（`UD-128`）。
+      credentialId: fact.credentialId,
       eventId: fact.eventId,
       eventType: fact.eventType,
       apiVersion: fact.apiVersion,

@@ -128,6 +128,7 @@ async function recordSession(seeded: Seeded, attempt = 0) {
     paymentId: randomUUID(),
     orderId: seeded.orderId,
     provider: PROVIDER,
+    credentialId: null,
     sessionRef: `cs_test_${seeded.orderId}_${String(attempt)}`,
     paymentRef: `pi_test_${seeded.orderId}_${String(attempt)}`,
     url: `https://checkout.example.test/${String(attempt)}`,
@@ -332,6 +333,7 @@ suite('Webhook の受信記録', () => {
     eventType: 'checkout.session.completed',
     apiVersion: '2026-07-29.dahlia',
     livemode: false,
+    credentialId: null,
     payloadDigest: 'sha256:dummy',
     now: NOW,
   };

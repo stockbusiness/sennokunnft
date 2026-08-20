@@ -53,6 +53,8 @@ export class FakePaymentGateway implements PaymentGatewayPort {
       ok({
         sessionRef,
         paymentRef: `fake_pi_${input.idempotencyKey}`,
+        // ⚠️ 世代はアダプタが知らない。包む側が押す。`fake` では常に `null`。
+        credentialId: null,
         url: `${this.checkoutBaseUrl}/${sessionRef}`,
         expiresAt: input.expiresAt,
       }),
@@ -140,6 +142,8 @@ function toFact(payload: unknown, timestampSec: number): ProviderPaymentFact | n
     failureCode:
       typeof data.failure_code === 'string' ? toSafeFailureCode(data.failure_code) : null,
     occurredAt: new Date(timestampSec * 1000),
+    // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
+    credentialId: null,
   };
 }
 

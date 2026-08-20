@@ -40,6 +40,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
           eventType: command.eventType,
           apiVersion: command.apiVersion,
           livemode: command.livemode,
+          // ⚠️ どの世代で通ったか（`UD-128`）。旧アカウント宛の決済が
+          //    まだ起きていることに気づく唯一の手掛かり。
+          credentialId: command.credentialId,
           // ⚠️ 本文の全体は保存しない。残すのは digest だけ。
           payloadDigest: command.payloadDigest,
           orderId: command.orderId,
@@ -165,6 +168,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
           providerSessionRef: command.sessionRef,
           providerPaymentRef: command.paymentRef,
           providerIdempotencyKey: command.idempotencyKey,
+          // ⚠️ 返金に要る（`UD-128`）。埋め忘れると、その注文は返金できない。
+          credentialId: command.credentialId,
           status: 'pending',
           amount: command.amount,
           currency: command.currency,

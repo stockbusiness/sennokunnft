@@ -38,6 +38,16 @@ export interface ProviderPaymentFact {
   /** 失敗のときの、こちらで決めた安全な符号。 */
   readonly failureCode: string | null;
   readonly occurredAt: Date;
+  /**
+   * どの世代の鍵で署名を検証できたか（`UD-118` / `UD-128`）。
+   *
+   * ⚠️ **切り替え後も旧アカウントから知らせは届く。** どの世代で通ったかを
+   * 残しておかないと、「まだ旧アカウント宛に決済が起きている」ことに
+   * 気づけない。
+   *
+   * ⚠️ 緊急上書き中や `fake` では `null`。
+   */
+  readonly credentialId: string | null;
 }
 
 /** 注文側の、突き合わせに使う値。 */

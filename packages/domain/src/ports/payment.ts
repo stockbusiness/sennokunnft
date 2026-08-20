@@ -43,6 +43,17 @@ export interface CheckoutSessionCreated {
   readonly paymentRef: string | null;
   readonly url: string;
   readonly expiresAt: Date;
+  /**
+   * どの世代の鍵で作った口か（`UD-118` / `UD-128`）。
+   *
+   * ⚠️ **必ず注文の決済行へ残す。** ここで作った識別子
+   * （`sessionRef` / `paymentRef`）は**発行したアカウントに紐づく**。
+   * 別のアカウントの鍵では解決できないので、あとで返金するときに
+   * 「どの鍵で作ったか」が分からないと**返金できない**。
+   *
+   * ⚠️ 緊急上書き中（配備環境の鍵を直接使う）や `fake` では `null`。
+   */
+  readonly credentialId: string | null;
 }
 
 export interface PaymentGatewayPort {
