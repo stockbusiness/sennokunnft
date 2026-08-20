@@ -107,6 +107,8 @@ export class StripePaymentGateway implements PaymentGatewayPort {
           session.expires_at === null || session.expires_at === undefined
             ? input.expiresAt
             : new Date(session.expires_at * 1000),
+        // ⚠️ 同上。包む側が押す。
+        credentialId: null,
       });
     } catch (error) {
       /*
@@ -162,6 +164,8 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
     apiVersion: event.api_version ?? null,
     livemode: event.livemode,
     occurredAt: new Date(event.created * 1000),
+    // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
+    credentialId: null,
   };
 
   switch (event.type) {

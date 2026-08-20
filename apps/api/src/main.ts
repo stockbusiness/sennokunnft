@@ -66,6 +66,7 @@ import {
   probeStripeAccount,
   HmacEmailHasher,
 } from '@sengoku/integrations';
+import { acceptingGeneration, CREDENTIAL_VERIFICATION_LIMIT } from '@sengoku/domain';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
 import type { PaymentGatewayPort } from '@sengoku/domain';
 import { AppModule, type AppDependencies } from './app.module';
@@ -404,6 +405,19 @@ async function bootstrap(): Promise<void> {
   const paymentConfigResolver = createPaymentConfigResolver({
     integrations: integrations?.repository ?? null,
     appEnvironment: integrations?.appEnvironment ?? 'staging',
+    provider: env.PAYMENT_PROVIDER,
+    /*
+      ⚠️ **鍵は世代から読む**（`UD-128`）。暗号鍵が無い配備では世代を
+         開けないので `null`。そのときは `no_credential` で止まる——
+         配備環境の鍵へ黙って落ちない。
+    */
+    credentials: paymentCredentials?.repository ?? null,
+    /*
+      ⚠️ **既定は `false`。** 立てると配備環境の鍵を直接使う。
+         世代の表を壊した場合の復旧経路であって、常用しない。
+         立っているあいだは上で起動のたびに警告を出している。
+    */
+    emergencyOverride: env.PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE,
     deployment:
       env.PAYMENT_PROVIDER === 'stripe'
         ? {
@@ -416,6 +430,70 @@ async function bootstrap(): Promise<void> {
           }
         : null,
   });
+
+  /*
+    署名検証で試す世代（`UD-128`）。
+
+    ⚠️ **受付中の世代だけでは足りない。** 切り替えたあとも、旧アカウントで
+       発生した決済の知らせは届き続ける。新しい世代だけ試すと、旧世代の
+       決済が「署名が違う」として捨てられ、支払い済みの注文が未払いのまま残る。
+    ⚠️ **緊急上書き中は世代を使わない。** 世代の表が壊れているから
+       上書きしているので、そこを読みに行っては復旧にならない。
+  */
+  const webhookVerificationConfigs = async () => {
+    const credentials = paymentCredentials?.repository;
+    if (credentials === undefined || env.PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE) {
+      return [];
+    }
+    const opened = await credentials.openForVerification(
+      env.PAYMENT_PROVIDER,
+      env.APP_ENV === 'production' ? 'production' : 'staging',
+      CREDENTIAL_VERIFICATION_LIMIT,
+    );
+    return opened.map((row) => ({
+      secretKey: row.secretKey,
+      webhookSecret: row.webhookSecret,
+      apiVersion: row.apiVersion ?? env.STRIPE_API_VERSION,
+      // 戻り先は検証に使わないが、型をそろえるために入れる。
+      successUrlTemplate: env.STRIPE_CHECKOUT_SUCCESS_URL ?? '',
+      cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
+      settingsSource: 'database' as const,
+      keySource: 'generation' as const,
+      credentialId: row.id,
+    }));
+  };
+
+  /*
+    受付中の世代があるかを、起動時に確かめる（`UD-128`）。
+
+    ⚠️ **落とさずに、警告で伝える。** DB の状態に依存する条件で
+       プロセスを落とすと、DB が一時的に見えないだけで起動できなくなり、
+       再起動の輪に入る。売れないことは購入時の応答（`SALES_SETUP_INCOMPLETE` /
+       `PAYMENT_CREDENTIAL_CHECK_REQUIRED`）で利用者にも運営にも伝わる。
+
+    ⚠️ **黙って通さない。** ここを黙らせると、「画面では有効なのに売れない」
+       状態に誰も気づかないまま本番を迎える。
+  */
+  if (env.PAYMENT_PROVIDER === 'stripe' && !env.PAYMENT_EMERGENCY_CREDENTIAL_OVERRIDE) {
+    const credentials = paymentCredentials?.repository;
+    if (credentials === undefined) {
+      logger.error(
+        '決済の鍵の世代を開けません（INTEGRATION_ENCRYPTION_KEYS が未設定）。支払い口は作れません。',
+      );
+    } else {
+      const generations = await credentials.list(
+        env.PAYMENT_PROVIDER,
+        env.APP_ENV === 'production' ? 'production' : 'staging',
+      );
+      if (acceptingGeneration(generations) === null) {
+        logger.error(
+          { generationCount: generations.length },
+          '受付中の決済資格情報の世代がありません。支払い口は作れません。' +
+            '`pnpm payment:credential -- --import` で取り込み、`--activate=<id>` で有効化してください。',
+        );
+      }
+    }
+  }
 
   const paymentGateway = ((): PaymentGatewayPort | null => {
     if (env.PAYMENT_PROVIDER === 'stripe') {
@@ -430,6 +508,15 @@ async function bootstrap(): Promise<void> {
             cancelUrlTemplate: config.cancelUrlTemplate,
           }),
         'stripe',
+        webhookVerificationConfigs,
+        /*
+          ⚠️ **通った世代に印を付ける。** 「まだ旧アカウント宛に決済が
+             起きている」ことに気づく唯一の手掛かりで、退役してよいかの
+             判断材料にもなる。署名の中身は残さない。
+        */
+        async (credentialId) => {
+          await paymentCredentials?.repository.touchWebhookReceived(credentialId, new Date());
+        },
       );
     }
     if (env.PAYMENT_WEBHOOK_SECRET === undefined) {

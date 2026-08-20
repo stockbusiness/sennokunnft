@@ -9,6 +9,7 @@ import {
   storesSecrets,
   type IntegrationRepository,
   type IntegrationSettings,
+  type PaymentCredentialGeneration,
   type PaymentSettingsFields,
 } from '@sengoku/domain';
 import {
@@ -97,6 +98,8 @@ describe('決済の鍵は保管庫へ置かない', () => {
   /* 保管庫を一切引かないこと。引いたら repositoryDouble が例外を投げる。 */
   it('設定を解決するとき、保管庫から鍵を読まない', async () => {
     const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: credentialsDouble(),
       integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
       deployment: DEPLOYMENT,
@@ -109,12 +112,183 @@ describe('決済の鍵は保管庫へ置かない', () => {
   });
 });
 
+/**
+ * 世代の表の代替（`UD-128`）。
+ *
+ * ⚠️ **既定で 1 世代が受付中。** 鍵は世代から読むのが通常経路なので、
+ * 何も指定しない試験は「世代がある」状態で走るのが正しい。
+ */
+function credentialsDouble(
+  options: {
+    readonly secretKey?: string;
+    readonly webhookSecret?: string;
+    readonly accepting?: boolean;
+    readonly generations?: number;
+  } = {},
+) {
+  const count = options.generations ?? 1;
+  const rows: PaymentCredentialGeneration[] = Array.from({ length: count }, (_, index) => ({
+    id: `cred-${String(index + 1)}`,
+    provider: 'stripe',
+    environment: 'staging',
+    generation: index + 1,
+    status: 'active',
+    accountRef: 'acct_test',
+    label: null,
+    apiVersion: null,
+    lastCheckSucceeded: true,
+    lastCheckAt: new Date('2026-08-01T00:00:00.000Z'),
+    lastWebhookReceivedAt: null,
+    // ⚠️ 受付は最後の 1 件だけ。2 つ受付中だと `acceptingGeneration` が
+    //    選ばない（入金先が不定になるので、分からないなら止める）。
+    acceptsNewPayments: (options.accepting ?? true) && index === count - 1,
+    activatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    retiredAt: null,
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+  }));
+  return {
+    list: () => Promise.resolve(rows),
+    open: (id: string) =>
+      Promise.resolve(
+        rows.some((row) => row.id === id)
+          ? {
+              id,
+              generation: 1,
+              secretKey: options.secretKey ?? DEPLOYMENT.secretKey,
+              webhookSecret: options.webhookSecret ?? DEPLOYMENT.webhookSecret,
+              apiVersion: null,
+            }
+          : null,
+      ),
+    openForVerification: () =>
+      Promise.resolve(
+        rows.map((row) => ({
+          id: row.id,
+          generation: row.generation,
+          secretKey: options.secretKey ?? DEPLOYMENT.secretKey,
+          webhookSecret: options.webhookSecret ?? DEPLOYMENT.webhookSecret,
+          apiVersion: null,
+        })),
+      ),
+  };
+}
+
+/** 通常経路の既定値。⚠️ 緊急上書きは既定で `false`。 */
+const RESOLVER_DEFAULTS = {
+  provider: 'stripe',
+  emergencyOverride: false,
+} as const;
+
 describe('決済設定の解決', () => {
-  it('配備環境に鍵が無ければ決済できない', async () => {
+  it('受付中の世代の鍵を使う（`UD-128`）', async () => {
     const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: credentialsDouble({ secretKey: `${PAYMENT_TEST_KEY_PREFIX}from_generation` }),
       integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
-      deployment: null,
+      deployment: DEPLOYMENT,
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.secretKey).toBe(`${PAYMENT_TEST_KEY_PREFIX}from_generation`);
+      expect(result.config.keySource).toBe('generation');
+      expect(result.config.credentialId).toBe('cred-1');
+    }
+  });
+
+  /*
+    ⚠️ **`UD-128` でいちばん大事な検査。**
+       配備環境に鍵があっても、世代が無ければ決済できない。落ちてしまうと、
+       世代を有効化したつもりで環境変数の古い鍵が使われ続ける。
+       入金先がずれてから気づくことになり、そのときには売上が別の口座にある。
+  */
+  it('世代が無ければ、配備環境に鍵があっても決済できない', async () => {
+    const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: { ...credentialsDouble(), list: () => Promise.resolve([]) },
+      integrations: repositoryDouble(settings()),
+      // 鍵は揃っている。それでも落ちてはいけない。
+      deployment: DEPLOYMENT,
+      appEnvironment: 'staging',
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // ⚠️ `incomplete` と分ける。直し方が違う（設定を埋める／世代を取り込む）。
+      expect(result.reason).toBe('no_credential');
+    }
+  });
+
+  it('世代の表を持たない配備でも、配備環境の鍵へ落ちない', async () => {
+    const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: null,
+      integrations: repositoryDouble(settings()),
+      deployment: DEPLOYMENT,
+      appEnvironment: 'staging',
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('no_credential');
+    }
+  });
+
+  /*
+    ⚠️ 受付中が 2 つあるのは、DB の部分UNIQUE が外れたときにしか起きない。
+       それでも「たまたま先頭」で入金先を決めない。分からないなら止める。
+  */
+  it('受付中の世代が 2 つあれば選ばない', async () => {
+    const rows = credentialsDouble({ generations: 2 });
+    const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: {
+        ...rows,
+        list: async () => (await rows.list()).map((row) => ({ ...row, acceptsNewPayments: true })),
+      },
+      integrations: repositoryDouble(settings()),
+      deployment: DEPLOYMENT,
+      appEnvironment: 'staging',
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('no_credential');
+    }
+  });
+
+  /*
+    緊急上書き。⚠️ **明示的に立てたときだけ**配備環境の鍵を使う。
+       黙って落ちる経路ではないことを、ここで縛る。
+  */
+  it('緊急上書きが立っていれば配備環境の鍵を使う', async () => {
+    const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      emergencyOverride: true,
+      credentials: { ...credentialsDouble(), list: () => Promise.resolve([]) },
+      integrations: repositoryDouble(settings()),
+      deployment: DEPLOYMENT,
+      appEnvironment: 'staging',
+    });
+    const result = await resolve();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.secretKey).toBe(DEPLOYMENT.secretKey);
+      expect(result.config.keySource).toBe('deployment');
+      // ⚠️ 世代を通していないので追えない。常用してはいけない理由。
+      expect(result.config.credentialId).toBeNull();
+    }
+  });
+
+  it('緊急上書きでも、配備環境に鍵が無ければ決済できない', async () => {
+    const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      emergencyOverride: true,
+      credentials: credentialsDouble(),
+      integrations: repositoryDouble(settings()),
+      deployment: { ...DEPLOYMENT, webhookSecret: '' },
+      appEnvironment: 'staging',
     });
     const result = await resolve();
     expect(result.ok).toBe(false);
@@ -123,18 +297,11 @@ describe('決済設定の解決', () => {
     }
   });
 
-  it('署名鍵だけ欠けていても決済できない', async () => {
-    const resolve = createPaymentConfigResolver({
-      integrations: repositoryDouble(settings()),
-      appEnvironment: 'staging',
-      deployment: { ...DEPLOYMENT, webhookSecret: '' },
-    });
-    expect((await resolve()).ok).toBe(false);
-  });
-
   /* 戻り先は DB が正。保存したら次の呼び出しから効く。 */
   it('DB に戻り先があれば DB を使う', async () => {
     const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: credentialsDouble(),
       integrations: repositoryDouble(settings()),
       appEnvironment: 'staging',
       deployment: DEPLOYMENT,
@@ -149,6 +316,8 @@ describe('決済設定の解決', () => {
 
   it('DB に戻り先が無ければ配備環境の値を使う', async () => {
     const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: credentialsDouble(),
       integrations: repositoryDouble(
         settings({ payment: { ...COMPLETE, checkoutSuccessUrl: null } }),
       ),
@@ -170,6 +339,8 @@ describe('決済設定の解決', () => {
   */
   it('DB 側で止めてあれば、配備環境の値へ落ちない', async () => {
     const resolve = createPaymentConfigResolver({
+      ...RESOLVER_DEFAULTS,
+      credentials: credentialsDouble(),
       integrations: repositoryDouble(settings({ enabled: false })),
       appEnvironment: 'staging',
       deployment: DEPLOYMENT,
@@ -268,6 +439,150 @@ describe('解決するゲートウェイ', () => {
     };
   }
 
+  /** 特定の鍵でだけ署名が通る、擬似のゲートウェイ。 */
+  function buildMatching(expected: string, tried: string[]) {
+    return (config: { readonly secretKey: string; readonly webhookSecret: string }) => ({
+      provider: 'stub',
+      createCheckoutSession: async () => ({
+        ok: true as const,
+        value: {
+          sessionRef: 'cs_1',
+          paymentRef: null,
+          url: 'https://pay.example/cs_1',
+          expiresAt: new Date('2026-08-20T00:00:00.000Z'),
+          credentialId: null,
+        },
+      }),
+      verifyAndParseWebhook: async () => {
+        tried.push(config.webhookSecret);
+        return config.webhookSecret === expected
+          ? {
+              ok: true as const,
+              value: {
+                kind: 'ignored' as const,
+                eventId: 'evt_1',
+                eventType: 'x',
+                apiVersion: null,
+                livemode: false,
+                orderId: null,
+                sessionRef: null,
+                paymentRef: null,
+                chargeRef: null,
+                amount: null,
+                currency: null,
+                failureCode: null,
+                occurredAt: new Date('2026-08-20T00:00:00.000Z'),
+                credentialId: null,
+              },
+            }
+          : { ok: false as const, error: { code: 'WEBHOOK_SIGNATURE_INVALID' as const } };
+      },
+    });
+  }
+
+  function configFor(id: string, webhookSecret: string) {
+    return {
+      ...DEPLOYMENT,
+      webhookSecret,
+      settingsSource: 'database' as const,
+      keySource: 'generation' as const,
+      credentialId: id,
+    };
+  }
+
+  /*
+    ⚠️ **`UD-128` の要。** 切り替えたあとも旧アカウントの知らせは届き続ける。
+       受付中の世代だけで判定すると、旧世代の決済が「署名が違う」として
+       捨てられ、支払い済みの注文が未払いのまま残る。
+  */
+  it('旧世代の署名でも、世代を順に試して通す', async () => {
+    const tried: string[] = [];
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-2', 'new') }),
+      buildMatching('old', tried),
+      'stub',
+      async () => [configFor('cred-2', 'new'), configFor('cred-1', 'old')],
+    );
+
+    const result = await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
+    expect(result.ok).toBe(true);
+    // 新しい順に試している。
+    expect(tried).toEqual(['new', 'old']);
+    if (result.ok) {
+      // ⚠️ どの世代で通ったかを返す。旧アカウント宛の決済に気づく手掛かり。
+      expect(result.value.credentialId).toBe('cred-1');
+    }
+  });
+
+  it('通った世代に印を付ける', async () => {
+    const touched: string[] = [];
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-1', 'old') }),
+      buildMatching('old', []),
+      'stub',
+      async () => [configFor('cred-1', 'old')],
+      async (id) => {
+        touched.push(id);
+      },
+    );
+
+    await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
+    expect(touched).toEqual(['cred-1']);
+  });
+
+  it('どの世代でも通らなければ失敗する', async () => {
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-1', 'a') }),
+      buildMatching('never', []),
+      'stub',
+      async () => [configFor('cred-1', 'a'), configFor('cred-2', 'b')],
+    );
+
+    const result = await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('WEBHOOK_SIGNATURE_INVALID');
+      /*
+        ⚠️ どの世代で落ちたかを外へ出さない。「世代 3 では通った」と
+           分かると、鍵の当たりを付ける手掛かりになる。
+      */
+      expect(JSON.stringify(result.error)).not.toContain('cred-');
+    }
+  });
+
+  it('支払い口には、作った世代を押す', async () => {
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-7', 'x') }),
+      buildMatching('x', []),
+      'stub',
+    );
+    const created = await gateway.createCheckoutSession({
+      orderId: 'order-1',
+      amount: 1000,
+      currency: 'JPY',
+      idempotencyKey: 'key-1',
+      expiresAt: new Date('2026-08-20T00:00:00.000Z'),
+    } as never);
+    expect(created.ok).toBe(true);
+    if (created.ok) {
+      // ⚠️ これが無いと、その注文は返金できない。
+      expect(created.value.credentialId).toBe('cred-7');
+    }
+  });
+
+  it('世代が無ければ、直し方の分かる符号を返す', async () => {
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: false, reason: 'no_credential' }),
+      build([]),
+      'stub',
+    );
+    const result = await gateway.verifyAndParseWebhook(Buffer.from('{}'), 'sig');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('PAYMENT_CREDENTIAL_CHECK_REQUIRED');
+    }
+  });
+
   /* 同じ設定なら作り直さない。事業者の SDK は接続を内部に抱える。 */
   it('設定が同じなら作り直さない', async () => {
     const calls: string[] = [];
@@ -275,7 +590,13 @@ describe('解決するゲートウェイ', () => {
     const gateway = new ResolvingPaymentGateway(
       async () => ({
         ok: true,
-        config: { ...DEPLOYMENT, secretKey: secret, settingsSource: 'database' as const },
+        config: {
+          ...DEPLOYMENT,
+          secretKey: secret,
+          settingsSource: 'database' as const,
+          keySource: 'generation' as const,
+          credentialId: 'cred-1',
+        },
       }),
       build(calls),
       'stub',

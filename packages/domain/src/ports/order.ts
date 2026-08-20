@@ -242,6 +242,13 @@ export interface RecordCheckoutSessionCommand {
   readonly paymentId: string;
   readonly orderId: string;
   readonly provider: string;
+  /**
+   * どの世代の鍵で作ったか（`UD-118` / `UD-128`）。
+   *
+   * ⚠️ **これが無いと返金できない。** `sessionRef` / `paymentRef` は
+   * 発行したアカウントに紐づくので、別の鍵では解決できない。
+   */
+  readonly credentialId: string | null;
   readonly sessionRef: string;
   readonly paymentRef: string | null;
   readonly url: string;
@@ -272,6 +279,8 @@ export interface ConfirmPaymentCommand {
 export interface RecordWebhookCommand {
   readonly id: string;
   readonly provider: string;
+  /** どの世代の鍵で署名を検証できたか（`UD-128`）。 */
+  readonly credentialId: string | null;
   readonly eventId: string;
   readonly eventType: string;
   readonly apiVersion: string | null;
