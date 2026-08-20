@@ -179,10 +179,12 @@ export {
   collectibleListResponseSchema,
   collectibleViewSchema,
   issueEntitlementsResponseSchema,
+  reconcileRevocationsResponseSchema,
   type BuyerOrderListResponse,
   type CollectibleListResponse,
   type CollectibleView,
   type DeliverEntitlementsResponse,
+  type ReconcileRevocationsResponse,
   type IssueEntitlementsResponse,
   type ReleaseExpiredResponse,
   PAYMENT_ATTEMPT_STATUS_VALUES,
@@ -302,3 +304,14 @@ export {
   type CreatorProfileView,
   type UpdateCreatorProfileRequest,
 } from './profile';
+
+export {
+  OPERATIONS_REVIEW_REASON_VALUES,
+  OPERATIONS_REVIEW_STATUS_VALUES,
+  operationsReviewSchema,
+  operationsReviewListResponseSchema,
+  resolveOperationsReviewRequestSchema,
+  type OperationsReviewListResponse,
+  type OperationsReviewView,
+  type ResolveOperationsReviewRequest,
+} from './operations-review';

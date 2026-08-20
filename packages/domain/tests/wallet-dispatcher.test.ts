@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   STALE_PROCESSING_MS,
+  canManuallyResend,
   sweepWalletDeliveries,
   type DeliveryAttemptOutcome,
   type WalletDeliveryEnqueueInput,
+  type WalletDeliveryEnqueueOutcome,
+  type WalletDeliveryEventType,
   type WalletDeliveryFailureInput,
   type WalletDeliveryOutboxPort,
   type WalletDeliveryRecord,
   type WalletDeliverySenderPort,
 } from '../src/index';
+
+/** 種別で絞る前の既定。⚠️ **本物の既定ではない**（本物は「送らない」）。 */
+const ALL_EVENT_TYPES = ['entitlement.granted', 'entitlement.revoked'] as const;
 
 const NOW = new Date('2026-08-14T08:00:00.000Z');
 
@@ -63,11 +69,48 @@ class FakeOutbox implements WalletDeliveryOutboxPort {
     return Promise.resolve(this.seed({ id: input.eventId, ...input, status: 'PENDING' }));
   }
 
-  claimBatch(input: { limit: number; now: Date }): Promise<WalletDeliveryRecord[]> {
+  enqueueIdempotent(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryEnqueueOutcome> {
+    const existing = this.rows.get(input.eventId);
+    if (existing === undefined) {
+      const record = this.seed({ id: input.eventId, ...input, status: 'PENDING' });
+      return Promise.resolve({ kind: 'created', record });
+    }
+    if (existing.payloadHash === input.payloadHash) {
+      return Promise.resolve({ kind: 'duplicate', record: { ...existing } });
+    }
+    return Promise.resolve({
+      kind: 'payload_conflict',
+      eventId: input.eventId,
+      expectedPayloadHash: input.payloadHash,
+      actualPayloadHash: existing.payloadHash,
+    });
+  }
+
+  supersedePendingGranted(input: { entitlementId: string; now: Date }): Promise<number> {
+    let count = 0;
+    for (const row of this.rows.values()) {
+      if (row.entitlementId !== input.entitlementId) continue;
+      if (row.eventType !== 'entitlement.granted') continue;
+      // ⚠️ PROCESSING と DELIVERED は触らない。
+      if (row.status !== 'PENDING' && row.status !== 'FAILED' && row.status !== 'DEAD') continue;
+      row.status = 'SUPERSEDED';
+      count += 1;
+    }
+    return Promise.resolve(count);
+  }
+
+  claimBatch(input: {
+    limit: number;
+    now: Date;
+    eventTypes: readonly WalletDeliveryEventType[];
+  }): Promise<WalletDeliveryRecord[]> {
     const claimed: WalletDeliveryRecord[] = [];
     for (const row of this.rows.values()) {
       if (claimed.length >= input.limit) break;
       if (row.status !== 'PENDING' || row.nextRetryAt > input.now) continue;
+      // ⚠️ 種別の絞り込みも本物と同じにする。素通しにすると、
+      //    フラグで止めたはずの種別が送られる不具合を試験が見逃す。
+      if (!input.eventTypes.includes(row.eventType)) continue;
       row.status = 'PROCESSING';
       row.attemptCount += 1;
       claimed.push({ ...row });
@@ -137,7 +180,11 @@ describe('配送ワーカーの 1 巡', () => {
     outbox.seed({ id: 'a' });
     const sender = new FakeSender([{ kind: 'response', statusCode: 202 }]);
 
-    const outcomes = await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    const outcomes = await sweepWalletDeliveries(
+      { outbox, sender, clock: new StubClock() },
+      10,
+      ALL_EVENT_TYPES,
+    );
 
     expect(outcomes).toHaveLength(1);
     expect(outbox.rows.get('a')?.status).toBe('DELIVERED');
@@ -149,7 +196,7 @@ describe('配送ワーカーの 1 巡', () => {
     outbox.seed({ id: 'a' });
     const sender = new FakeSender([{ kind: 'response', statusCode: 503 }]);
 
-    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
 
     const row = outbox.rows.get('a');
     expect(row?.status).toBe('PENDING');
@@ -163,7 +210,7 @@ describe('配送ワーカーの 1 巡', () => {
     outbox.seed({ id: 'a' });
     const sender = new FakeSender([{ kind: 'response', statusCode: 422 }]);
 
-    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
 
     expect(outbox.rows.get('a')?.status).toBe('FAILED');
     expect(outbox.rows.get('a')?.lastErrorCode).toBe('http_422');
@@ -175,7 +222,7 @@ describe('配送ワーカーの 1 巡', () => {
     outbox.seed({ id: 'a', attemptCount: 4, maxAttempts: 5 });
     const sender = new FakeSender([{ kind: 'timeout' }]);
 
-    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
 
     expect(outbox.rows.get('a')?.status).toBe('DEAD');
   });
@@ -185,7 +232,7 @@ describe('配送ワーカーの 1 巡', () => {
     outbox.seed({ id: 'a', attemptCount: 5, maxAttempts: 5 });
     const sender = new FakeSender([{ kind: 'network' }]);
 
-    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
 
     expect(outbox.rows.get('a')?.status).toBe('DEAD');
     expect(outbox.rows.get('a')?.deliveredAt).toBeNull();
@@ -199,13 +246,14 @@ describe('配送ワーカーの 1 巡', () => {
     await sweepWalletDeliveries(
       { outbox, sender: new FakeSender([{ kind: 'timeout' }]), clock },
       10,
+      ALL_EVENT_TYPES,
     );
     // バックオフ後を装って戻す。
     const row = outbox.rows.get('a');
     if (row !== undefined) row.nextRetryAt = NOW;
 
     const second = new FakeSender([{ kind: 'response', statusCode: 200 }]);
-    await sweepWalletDeliveries({ outbox, sender: second, clock }, 10);
+    await sweepWalletDeliveries({ outbox, sender: second, clock }, 10, ALL_EVENT_TYPES);
 
     expect(second.sent[0]?.eventId).toBe('evt_a');
   });
@@ -219,7 +267,7 @@ describe('配送ワーカーの 1 巡', () => {
       send: () => Promise.reject(new Error('boom')),
     };
 
-    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
 
     expect(outbox.rows.get('a')?.status).toBe('PENDING');
     expect(outbox.rows.get('a')?.lastErrorCode).toBe('network');
@@ -230,14 +278,22 @@ describe('配送ワーカーの 1 巡', () => {
     for (const id of ['a', 'b', 'c']) outbox.seed({ id });
     const sender = new FakeSender([]);
 
-    const outcomes = await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 2);
+    const outcomes = await sweepWalletDeliveries(
+      { outbox, sender, clock: new StubClock() },
+      2,
+      ALL_EVENT_TYPES,
+    );
 
     expect(outcomes).toHaveLength(2);
   });
 
   it('巡回のたびに取り残しの回収を試みる', async () => {
     const outbox = new FakeOutbox();
-    await sweepWalletDeliveries({ outbox, sender: new FakeSender([]), clock: new StubClock() }, 10);
+    await sweepWalletDeliveries(
+      { outbox, sender: new FakeSender([]), clock: new StubClock() },
+      10,
+      ALL_EVENT_TYPES,
+    );
     expect(outbox.reclaimed).toBe(1);
   });
 
@@ -257,5 +313,82 @@ describe('配送ワーカーの 1 巡', () => {
     expect(await outbox.requeue({ id: 'delivered', now: NOW })).toBe(false);
     // event_id は変えない。変えると相手の冪等キーが変わる。
     expect(outbox.rows.get('dead')?.eventId).toBe('evt_dead');
+  });
+});
+
+describe('配送してよい種別の絞り込み（M3a）', () => {
+  it('取消の配送を止めても、付与の配送は止まらない', async () => {
+    /*
+      ⚠️ **段階導入では「付与だけ送る」期間がある。** そこで付与まで
+         止まると、受け取った方の画面が「お届け中」のまま進まない。
+    */
+    const outbox = new FakeOutbox();
+    outbox.seed({ id: 'granted', eventType: 'entitlement.granted' });
+    outbox.seed({ id: 'revoked', eventType: 'entitlement.revoked' });
+    const sender = new FakeSender([
+      { kind: 'response', statusCode: 200 },
+      { kind: 'response', statusCode: 200 },
+    ]);
+
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, [
+      'entitlement.granted',
+    ]);
+
+    expect(sender.sent.map((item) => item.eventId)).toEqual(['evt_granted']);
+    expect(outbox.rows.get('revoked')?.status).toBe('PENDING');
+  });
+
+  it('種別を 1 つも指定しなければ、1 件も送らない', async () => {
+    /*
+      ⚠️ **「指定が無い＝全部」にしない。** フラグの読み落とし 1 つで
+         全種別の配送が始まる。安全側は「送らない」。
+    */
+    const outbox = new FakeOutbox();
+    outbox.seed({ id: 'granted', eventType: 'entitlement.granted' });
+    const sender = new FakeSender([{ kind: 'response', statusCode: 200 }]);
+
+    const outcomes = await sweepWalletDeliveries(
+      { outbox, sender, clock: new StubClock() },
+      10,
+      [],
+    );
+
+    expect(outcomes).toEqual([]);
+    expect(sender.sent).toEqual([]);
+  });
+
+  it('取消に追い越された付与は、拾われず送り直しもできない', async () => {
+    const outbox = new FakeOutbox();
+    outbox.seed({ id: 'granted', eventType: 'entitlement.granted', entitlementId: 'ent-1' });
+    await outbox.supersedePendingGranted({ entitlementId: 'ent-1', now: NOW });
+    expect(outbox.rows.get('granted')?.status).toBe('SUPERSEDED');
+
+    const sender = new FakeSender([{ kind: 'response', statusCode: 200 }]);
+    await sweepWalletDeliveries({ outbox, sender, clock: new StubClock() }, 10, ALL_EVENT_TYPES);
+
+    // ⚠️ 送られない。取り消したはずの作品が、あとから相手側に現れない。
+    expect(sender.sent).toEqual([]);
+    // ⚠️ 手動再送の対象にもならない。
+    expect(canManuallyResend('SUPERSEDED')).toBe(false);
+  });
+
+  it('送信中（PROCESSING）の付与は追い越さない', async () => {
+    /*
+      ⚠️ **届いたかどうかが分からない行を止めても、相手側の状態は
+         変えられない。** 相手の Tombstone 処理に委ねる。
+    */
+    const outbox = new FakeOutbox();
+    const row = outbox.seed({
+      id: 'granted',
+      eventType: 'entitlement.granted',
+      entitlementId: 'ent-1',
+    });
+    const stored = outbox.rows.get(row.id);
+    if (stored !== undefined) stored.status = 'PROCESSING';
+
+    const count = await outbox.supersedePendingGranted({ entitlementId: 'ent-1', now: NOW });
+
+    expect(count).toBe(0);
+    expect(outbox.rows.get('granted')?.status).toBe('PROCESSING');
   });
 });

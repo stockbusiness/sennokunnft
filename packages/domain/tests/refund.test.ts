@@ -23,6 +23,8 @@ const BASE: RefundEligibilityInput = {
   entitlementStatus: 'issued',
   mintStatus: null,
   reason: 'buyer_request',
+  // ⚠️ 既定は偽。設定していない配備の振る舞いを変えないことを前提にする。
+  revokeClaimedEntitlements: false,
   now: NOW,
 };
 
@@ -110,11 +112,44 @@ describe('decideRefund — 発行がどこまで進んだか', () => {
     }
   });
 
-  it('受取り済みなら、受取権は取り消さない', () => {
-    // ⚠️ 受け取った事実は起きたこと。記録から消さない。
+  it('受取り済みでも、切り替える前は取り消さない', () => {
+    // 段階導入のため、既定では従来どおりの振る舞いを保つ。
     const result = decide({ entitlementStatus: 'claimed', mintStatus: null });
     expect(result.ok).toBe(true);
     if (result.ok) {
+      expect(result.value.effects.revokeEntitlement).toBe(false);
+    }
+  });
+
+  it('切り替えると、受取り済みも取り消す（`UD-104` 追補）', () => {
+    /*
+      ⚠️ **「受け取った事実」と「いま使える権利」は別。** 全額返金が
+         成立した以上、権利が使えるまま残るのは認めない。受け取った
+         記録（`claimed_at` など）は消さない——消さないことは DB 側の
+         試験で確かめる。
+    */
+    const result = decide({
+      entitlementStatus: 'claimed',
+      mintStatus: null,
+      revokeClaimedEntitlements: true,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.kind).toBe('allowed');
+      expect(result.value.effects.revokeEntitlement).toBe(true);
+    }
+  });
+
+  it('切り替えても、発行処理中は取り消さない（`INV-M4`）', () => {
+    // ⚠️ ここを緩めない。外部へ送信済みの可能性があり、多重発行は戻せない。
+    const result = decide({
+      entitlementStatus: 'claimed',
+      mintStatus: 'processing',
+      revokeClaimedEntitlements: true,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.kind).toBe('needs_review');
       expect(result.value.effects.revokeEntitlement).toBe(false);
     }
   });

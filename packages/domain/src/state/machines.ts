@@ -15,16 +15,25 @@ import { createStateMachine, type TransitionTable } from './transition';
 /**
  * 受取権の状態（DOMAIN_MODEL.md §4.2）。
  *
- * `claimed` は終端。一度受け取られた受取権は他の状態へ戻らない（INV-E2）。
- * 返金があっても `claimed` のままにするのは、
- * 発行済み資産の回収可否が未決定（UD-511）で、勝手に取り消せないため。
+ * `revoked` が終端。**`claimed` は終端ではない**（`UD-104` 追補・2026-08-20 決定）。
+ *
+ * ⚠️ **「受け取った事実」と「いま使える権利」を分ける。**
+ * 全額返金が成立した以上、権利が使えるまま残るのは認められない。
+ * かといって受け取った事実は起きたことなので、記録からは消さない。
+ * したがって `claimed → revoked` を許し、`claimed_at` / `claimed_by_*` /
+ * Wallet の配送記録は**そのまま残す**。
+ *
+ * ⚠️ **`revoked` から戻る道を作らない。** 再付与が要るなら、この行を
+ * 戻すのではなく**新しい受取権**を発行する。戻せるようにすると、
+ * 「いま有効か」を状態列だけでは答えられなくなる。
  */
 export const ENTITLEMENT_STATUSES = ['issued', 'claimed', 'expired', 'revoked'] as const;
 export type EntitlementStatus = (typeof ENTITLEMENT_STATUSES)[number];
 
 const entitlementTable: TransitionTable<EntitlementStatus> = {
   issued: ['claimed', 'expired', 'revoked'],
-  claimed: [],
+  // 全額返金でのみ取り消す。⚠️ `issued` / `expired` へは戻さない。
+  claimed: ['revoked'],
   expired: [],
   revoked: [],
 };

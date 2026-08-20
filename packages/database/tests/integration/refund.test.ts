@@ -219,6 +219,8 @@ suite('返金の反映', () => {
       revokeEntitlement: true,
       cancelMintJob: false,
       mintNote: null,
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     });
 
@@ -253,6 +255,8 @@ suite('返金の反映', () => {
       revokeEntitlement: true,
       cancelMintJob: false,
       mintNote: null,
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     };
 
@@ -278,6 +282,8 @@ suite('返金の反映', () => {
       revokeEntitlement: false,
       cancelMintJob: false,
       mintNote: null,
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     });
 
@@ -323,6 +329,8 @@ suite('返金の反映', () => {
       revokeEntitlement: false,
       cancelMintJob: true,
       mintNote: '外部へ送信済みの可能性があるため取り消していません。',
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     });
 
@@ -368,6 +376,8 @@ suite('返金の反映', () => {
       revokeEntitlement: false,
       cancelMintJob: true,
       mintNote: null,
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     });
 
@@ -392,6 +402,8 @@ suite('返金の反映', () => {
       revokeEntitlement: true,
       cancelMintJob: false,
       mintNote: null,
+      revokeClaimedEntitlements: false,
+      planRevocation: null,
       now: NOW,
     });
 

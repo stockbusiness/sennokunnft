@@ -17,6 +17,10 @@ import type { OrderPaymentStatus, RefundStatus } from './order-status';
  * ⚠️ **運営の不具合による返金を、期間で自動的に断らない。** 自社の不具合に
  * 「14 日を過ぎたので対応できません」と言うのは、消費者契約法上も、
  * 商売としても通らない。`reason` が `our_fault` のときは期限を見ない。
+ *
+ * ⚠️ **一部返金では受取権を動かさない**（2026-08-20 再確認）。数量や明細を
+ * 指定して返金する経路が無く、どのシリアルを取り消すべきか機械には
+ * 決められない。**推測で取り消さず、運用確認へ回す**（呼び出し元の責務）。
  */
 
 /**
@@ -51,6 +55,13 @@ export interface RefundEligibilityInput {
   /** 発行ジョブの状態。まだ作られていなければ `null`。 */
   readonly mintStatus: MintJobStatus | null;
   readonly reason: RefundReason;
+  /**
+   * 受取済み（`claimed`）の受取権も取り消すか（`UD-104` 追補・2026-08-20 決定）。
+   *
+   * ⚠️ **段階導入のためのフラグ。設定を読まない。** 呼び出し元が渡す。
+   * 偽なら従来どおり「受取済みは取り消さない」。
+   */
+  readonly revokeClaimedEntitlements: boolean;
   readonly now: Date;
 }
 
@@ -152,12 +163,21 @@ function decideByProgress(input: RefundEligibilityInput): RefundDecision {
 
   /*
     受取り済みだが発行ジョブがまだ無い。
-    ⚠️ 受取権は取り消さない。受け取った事実は起きたことである。
+
+    ⚠️ **「受け取った事実」と「いま使える権利」を分ける**（`UD-104` 追補）。
+       全額返金が成立した以上、権利が使えるまま残るのは認められない。
+       一方で受け取った事実は起きたことなので、`claimed_at` などの記録は
+       消さない。取り消すのは権利の有効性だけである。
+    ⚠️ 段階導入のため、実際に取り消すかは呼び出し元のフラグで決める。
   */
   if (entitlementStatus === 'claimed') {
     return {
       kind: 'allowed',
-      effects: { revokeEntitlement: false, cancelMintJob: false, requiresManualReview: false },
+      effects: {
+        revokeEntitlement: input.revokeClaimedEntitlements,
+        cancelMintJob: false,
+        requiresManualReview: false,
+      },
     };
   }
 

@@ -1,5 +1,6 @@
 import type {
   WalletDeliveryEnqueueInput,
+  WalletDeliveryEnqueueOutcome,
   WalletDeliveryEventType,
   WalletDeliveryFailureInput,
   WalletDeliveryOutboxPort,
@@ -49,7 +50,16 @@ export class PrismaWalletDeliveryOutboxRepository implements WalletDeliveryOutbo
   async claimBatch(input: {
     readonly limit: number;
     readonly now: Date;
+    readonly eventTypes: readonly WalletDeliveryEventType[];
   }): Promise<WalletDeliveryRecord[]> {
+    /*
+      ⚠️ **空なら 1 件も掴まない。**
+         「指定が無い＝全部」にすると、フラグの読み落とし 1 つで
+         全種別の配送が始まる。安全側は「送らない」。
+    */
+    if (input.eventTypes.length === 0) {
+      return [];
+    }
     const rows = await this.prisma.$queryRaw<readonly RawRow[]>(Prisma.sql`
       UPDATE "wallet_delivery_outbox"
          SET "status" = 'PROCESSING',
@@ -60,6 +70,7 @@ export class PrismaWalletDeliveryOutboxRepository implements WalletDeliveryOutbo
            FROM "wallet_delivery_outbox"
           WHERE "status" = 'PENDING'
             AND "next_retry_at" <= ${input.now}
+            AND "event_type" IN (${Prisma.join(input.eventTypes)})
           ORDER BY "next_retry_at"
             FOR UPDATE SKIP LOCKED
           LIMIT ${input.limit}
@@ -69,6 +80,41 @@ export class PrismaWalletDeliveryOutboxRepository implements WalletDeliveryOutbo
                 "correlation_id"
     `);
     return rows.map(fromRaw);
+  }
+
+  /**
+   * 配送待ちの行を**冪等に**作る。
+   *
+   * ⚠️ **素の INSERT にしない。** UNIQUE 違反の例外はトランザクション全体を
+   * 巻き戻す。この処理は返金のトランザクションの中から呼ばれるため、
+   * 重複した Webhook 1 通で**返金の記録ごと消える**。返金は決済事業者へ
+   * 既に届いているので、金額の食い違いのうちいちばん見つけにくい形になる。
+   *
+   * ⚠️ **本文が違うのに「入っていたからよし」としない。** 冪等キーが同じで
+   * 中身が違う以上、どちらが相手に保存されたのかこちらからは分からない。
+   * 例外にはせず、呼び出し元が運用確認へ回せるように結果で返す。
+   */
+  enqueueIdempotent(input: WalletDeliveryEnqueueInput): Promise<WalletDeliveryEnqueueOutcome> {
+    return enqueueWalletDeliveryIdempotent(this.prisma, input);
+  }
+
+  /**
+   * まだ送っていない付与イベントを「取消に追い越された」状態にする。
+   *
+   * ⚠️ **`PROCESSING` を触らない。** いま送っている最中か、送信直後に
+   * 落ちた可能性がある。届いたかどうかが分からない行を止めても、
+   * 相手側の状態は変えられない。相手の Tombstone 処理に委ねる。
+   *
+   * ⚠️ **`DELIVERED` も触らない。** すでに届いており、打ち消すのは
+   * 取消イベントの仕事である。
+   *
+   * ⚠️ **行を消さない。** 「送ろうとしていた」事実は残す。
+   */
+  supersedePendingGranted(input: {
+    readonly entitlementId: string;
+    readonly now: Date;
+  }): Promise<number> {
+    return supersedePendingGrantedEvents(this.prisma, input);
   }
 
   /**
@@ -202,6 +248,93 @@ function fromRaw(row: RawRow): WalletDeliveryRecord {
     maxAttempts: Number(row.max_attempts),
     correlationId: row.correlation_id,
   };
+}
+
+/**
+ * トランザクションクライアントでも通る最小の口。
+ *
+ * ⚠️ **`PrismaClient` そのものを要求しない。** 返金のトランザクションの
+ * 中から同じ処理を呼べるようにするため、必要なものだけを型で示す。
+ */
+export type WalletOutboxExecutor = Pick<PrismaClient, '$executeRaw' | 'walletDeliveryOutbox'>;
+
+/**
+ * 配送待ちの行を**冪等に**作る。
+ *
+ * ⚠️ **素の INSERT にしない。** UNIQUE 違反の例外はトランザクション全体を
+ * 巻き戻す。この処理は返金のトランザクションの中からも呼ばれるため、
+ * 重複した Webhook 1 通で**返金の記録ごと消える**。返金は決済事業者へ
+ * 既に届いているので、金額の食い違いのうちいちばん見つけにくい形になる。
+ *
+ * ⚠️ **本文が違うのに「入っていたからよし」としない。** 冪等キーが同じで
+ * 中身が違う以上、どちらが相手に保存されたのかこちらからは分からない。
+ * 例外にはせず、呼び出し元が運用確認へ回せるように結果で返す。
+ *
+ * ⚠️ **通常の生成と取りこぼしの補完で、この 1 つを共有する。** 2 つ書くと、
+ * 片方だけが冪等という状態がいつか生まれる。
+ */
+export async function enqueueWalletDeliveryIdempotent(
+  db: WalletOutboxExecutor,
+  input: WalletDeliveryEnqueueInput,
+): Promise<WalletDeliveryEnqueueOutcome> {
+  const inserted = await db.$executeRaw(Prisma.sql`
+    INSERT INTO "wallet_delivery_outbox"
+      ("id", "event_id", "event_type", "entitlement_id", "target_site_key",
+       "payload", "payload_hash", "correlation_id",
+       "next_retry_at", "created_at", "updated_at")
+    VALUES
+      (gen_random_uuid(), ${input.eventId}, ${input.eventType}, ${input.entitlementId}::uuid,
+       ${input.targetSiteKey}, ${input.payload}, ${input.payloadHash}, ${input.correlationId},
+       ${input.now}, ${input.now}, ${input.now})
+    ON CONFLICT ("event_id") DO NOTHING
+  `);
+
+  const row = await db.walletDeliveryOutbox.findUnique({ where: { eventId: input.eventId } });
+  if (row === null) {
+    // 入れた直後に誰かが消した場合しかここへ来ない。行を消す口はどこにも
+    // 無いので、起きたら設計の前提が壊れている。黙って進めない。
+    throw new Error(`wallet delivery outbox row vanished: ${input.eventId}`);
+  }
+
+  if (inserted === 1) {
+    return { kind: 'created', record: toRecord(row) };
+  }
+  if (row.payloadHash === input.payloadHash) {
+    return { kind: 'duplicate', record: toRecord(row) };
+  }
+  return {
+    kind: 'payload_conflict',
+    eventId: input.eventId,
+    expectedPayloadHash: input.payloadHash,
+    actualPayloadHash: row.payloadHash,
+  };
+}
+
+/**
+ * まだ送っていない付与イベントを「取消に追い越された」状態にする。
+ *
+ * ⚠️ **`PROCESSING` を触らない。** いま送っている最中か、送信直後に落ちた
+ * 可能性がある。届いたかどうかが分からない行を止めても、相手側の状態は
+ * 変えられない。相手の Tombstone 処理に委ねる。
+ *
+ * ⚠️ **`DELIVERED` も触らない。** すでに届いており、打ち消すのは取消
+ * イベントの仕事である。
+ *
+ * ⚠️ **行を消さない。** 「送ろうとしていた」事実は残す。
+ */
+export async function supersedePendingGrantedEvents(
+  db: Pick<PrismaClient, 'walletDeliveryOutbox'>,
+  input: { readonly entitlementId: string; readonly now: Date },
+): Promise<number> {
+  const updated = await db.walletDeliveryOutbox.updateMany({
+    where: {
+      entitlementId: input.entitlementId,
+      eventType: 'entitlement.granted',
+      status: { in: ['PENDING', 'FAILED', 'DEAD'] },
+    },
+    data: { status: 'SUPERSEDED', updatedAt: input.now },
+  });
+  return updated.count;
 }
 
 function toRecord(row: {

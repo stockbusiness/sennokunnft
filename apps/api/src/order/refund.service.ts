@@ -4,6 +4,7 @@ import {
   type AuditLogPort,
   type ClockPort,
   type IdGeneratorPort,
+  type OperationsReviewRepository,
   type PaymentGatewayPort,
   type RefundContext,
   type RefundDecision,
@@ -11,6 +12,7 @@ import {
   type RefundRecordView,
   type RefundRepository,
   type RefundSettlement,
+  type RevocationPlanner,
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
 import { DomainErrorException } from '../common/domain-error.filter';
@@ -68,6 +70,23 @@ export class RefundService {
     private readonly ids: IdGeneratorPort,
     private readonly audit: AuditLogPort,
     private readonly logger: Logger,
+    /**
+     * 受取済み（`claimed`）も取り消すか（`UD-104` 追補）。
+     *
+     * ⚠️ **段階導入のためのフラグ。** 偽のあいだは従来どおり未受取だけを
+     * 取り消す。真にすると受取済みも `revoked` へ進むが、
+     * `claimed_at` などの受取記録は**残したまま**である。
+     */
+    private readonly revokeClaimedEntitlements: boolean = false,
+    /**
+     * 取消イベントの組み立て。⚠️ **`null` なら作らない**（生成フラグが無効）。
+     *
+     * ⚠️ Nest の任意注入は `undefined` を渡してくる。境界で `?? null` に
+     * そろえること（P0-2 で同型の不具合を出した）。
+     */
+    private readonly planRevocation: RevocationPlanner | null = null,
+    /** 機械が決められなかったことを積む先。 */
+    private readonly reviews: OperationsReviewRepository | null = null,
   ) {}
 
   listByOrder(orderId: string): Promise<readonly RefundRecordView[]> {
@@ -179,8 +198,16 @@ export class RefundService {
         revokedEntitlements: settlement.revokedEntitlements,
         cancelledMintJobs: settlement.cancelledMintJobs,
         annotatedMintJobs: settlement.annotatedMintJobs,
+        // ⚠️ 件数だけ。受取権IDや共通顧客IDは監査へ載せない。
+        revocationEventsCreated: settlement.revocationEventsCreated,
+        revocationEventsDuplicate: settlement.revocationEventsDuplicate,
+        supersededGrantedEvents: settlement.supersededGrantedEvents,
+        revocationsNeedingReview: settlement.revocationsNeedingReview.length,
+        revocationPayloadConflicts: settlement.revocationPayloadConflicts.length,
       },
     });
+
+    this.reportRevocation(context.orderId, settlement);
 
     const refreshed = await this.refunds.listByOrder(context.orderId);
     return { refund: refreshed.find((row) => row.id === refund.id) ?? refund, settlement };
@@ -272,8 +299,24 @@ export class RefundService {
         amount: delta,
         refundedTotal: input.refundedTotal,
         fullyRefunded,
+        revokedEntitlements: settlement.revokedEntitlements,
+        revocationEventsCreated: settlement.revocationEventsCreated,
+        revocationEventsDuplicate: settlement.revocationEventsDuplicate,
+        supersededGrantedEvents: settlement.supersededGrantedEvents,
+        revocationsNeedingReview: settlement.revocationsNeedingReview.length,
+        revocationPayloadConflicts: settlement.revocationPayloadConflicts.length,
       },
     });
+
+    this.reportRevocation(context.orderId, settlement);
+    if (!fullyRefunded) {
+      /*
+        ⚠️ **一部返金では受取権を自動で取り消さない**（`UD-104`）。
+           数量や明細を指定して返金する経路が無く、どのシリアルを
+           取り消すべきかは機械には決められない。人の確認へ回す。
+      */
+      await this.reviewPartialRefund(context.orderId, refund.id, input.now);
+    }
 
     return { refund, settlement };
   }
@@ -302,6 +345,8 @@ export class RefundService {
       entitlementStatus: context.entitlementStatus,
       mintStatus: context.mintStatus,
       reason,
+      // ⚠️ 設定を読まない。段階導入のフラグは呼び出し側が持つ。
+      revokeClaimedEntitlements: this.revokeClaimedEntitlements,
       now,
     });
     if (!decided.ok) {
@@ -340,7 +385,80 @@ export class RefundService {
         input.context.mintStatus === 'processing'
           ? '返金されましたが、外部へ送信済みの可能性があるため取り消していません。'
           : null,
+      revokeClaimedEntitlements: this.revokeClaimedEntitlements,
+      planRevocation: this.planRevocation,
       now: input.now,
     });
+  }
+
+  /**
+   * 取消の結果のうち、**人が知るべきこと**を外へ出す。
+   *
+   * ⚠️ **返金の成否を変えない。** ここで投げると、決済事業者へ届いている
+   * 返金の記録だけが消える。伝えるだけにとどめる。
+   *
+   * 運用確認の行そのものは返金と同じトランザクションで積んである。
+   * ここでやるのは、監視が拾えるようログへ出すことだけ。
+   */
+  private reportRevocation(orderId: string, settlement: RefundSettlement): void {
+    for (const item of settlement.revocationsNeedingReview) {
+      this.logger.warn(
+        { orderId, entitlementId: item.entitlementId, reason: item.reason },
+        '取り消しましたが、お届け先が特定できないため通知していません',
+      );
+    }
+    for (const conflict of settlement.revocationPayloadConflicts) {
+      /*
+        ⚠️ **無言で成功にしない。** 冪等キーが同じで中身が違う以上、
+           どちらが相手に保存されたのかこちらからは分からない。
+        ⚠️ 本文そのものは出さない。突き合わせに要るのはハッシュまで。
+      */
+      this.logger.error(
+        {
+          orderId,
+          entitlementId: conflict.entitlementId,
+          eventId: conflict.eventId,
+          expectedPayloadHash: conflict.expectedPayloadHash,
+          actualPayloadHash: conflict.actualPayloadHash,
+        },
+        '同じイベントIDで本文が食い違いました。運用確認へ回しています',
+      );
+    }
+  }
+
+  /**
+   * 一部返金で、取り消す対象を確定できないことを記録する。
+   *
+   * ⚠️ **ログだけで済ませない。** ログは流れて消える。数量や明細を指定して
+   * 返金する経路が無い以上、どのシリアルを取り消すべきかは人にしか
+   * 決められない。未対応と分かる形で残さないと、そのまま埋もれる。
+   *
+   * ⚠️ **推測で取り消さない。** 間違えると、返金と無関係な作品が
+   * 利用者の手元から消える。
+   *
+   * ⚠️ **ここで投げない。** 返金はもう成立している。
+   */
+  private async reviewPartialRefund(orderId: string, refundId: string, now: Date): Promise<void> {
+    this.logger.warn(
+      { orderId, refundId },
+      '一部返金のため、取り消す受取権を自動では決めていません',
+    );
+    if (this.reviews === null) {
+      return;
+    }
+    try {
+      await this.reviews.open({
+        subjectType: 'order',
+        subjectId: orderId,
+        orderId,
+        reasonCode: 'partial_refund_entitlement_unresolved',
+        // ⚠️ 個人情報を入れない。識別子と、決められなかった理由まで。
+        detail: `一部返金のため、取り消す数量・受取権・シリアルを確定できませんでした（refundId=${refundId}）。`,
+        now,
+      });
+    } catch (error) {
+      // 積めなくても返金は成立している。⚠️ ここで投げ返さない。
+      this.logger.error({ orderId, refundId, error }, '運用確認へ積めませんでした');
+    }
   }
 }

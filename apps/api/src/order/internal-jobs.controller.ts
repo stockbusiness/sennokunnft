@@ -11,11 +11,16 @@ import { timingSafeEqual } from 'node:crypto';
 import type {
   DeliverEntitlementsResponse,
   IssueEntitlementsResponse,
+  ReconcileRevocationsResponse,
   ReleaseExpiredResponse,
 } from '@sengoku/contracts';
 import { AUTO_DELIVERY_BATCH_SIZE, ISSUANCE_BATCH_SIZE, RELEASE_BATCH_SIZE } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
+import {
+  REVOCATION_RECONCILE_BATCH_SIZE,
+  type RevocationReconcileService,
+} from '../claim/revocation-reconcile.service';
 import { EntitlementIssuanceService } from './issuance.service';
 import { OrderService } from './order.service';
 
@@ -32,6 +37,14 @@ export interface InternalJobConfig {
    * 配備ごとに変えることになり、繋いだ日に設定漏れで動かない。
    */
   readonly autoDelivery: WalletAutoDeliveryService | null;
+  /**
+   * 取消の知らせの取りこぼしを埋める処理（M3a）。
+   *
+   * ⚠️ **`null` は「取消イベントを作らない」を意味する**（生成フラグが無効）。
+   * 補完もこのフラグに従う。従わせないと、無効へ戻したのに日次の時計が
+   * 作り続ける——「止めたはずのものが別の入口から動く」状態になる。
+   */
+  readonly revocationReconcile: RevocationReconcileService | null;
 }
 
 /**
@@ -125,6 +138,45 @@ export class InternalJobsController {
       deliveredCount: result.delivered,
       skippedCount: result.skipped,
       failedCount: result.failed,
+    };
+  }
+
+  /**
+   * 取消の知らせの取りこぼしを埋める（M3a）。
+   *
+   * ⚠️ **これは取りこぼしの受け皿であって、主たる経路ではない。** ふだんは
+   * 返金と同じトランザクションで積まれる。ここが拾うのは、生成フラグが
+   * 無効だったあいだに取り消された分だけ。
+   *
+   * ⚠️ **重なって走っても増えない。** イベントIDが受取権IDから決まり、
+   * 追加は衝突時に何もしないため。
+   */
+  @Post('reconcile-revocations')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async reconcileRevocations(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<ReconcileRevocationsResponse> {
+    this.assertAuthorized(token);
+    if (this.config.revocationReconcile === null) {
+      // 取消イベントを作らない配備。⚠️ 黙って 0 を返す（異常ではない）。
+      return {
+        pickedCount: 0,
+        createdCount: 0,
+        duplicateCount: 0,
+        needsReviewCount: 0,
+        conflictCount: 0,
+        truncated: false,
+      };
+    }
+    const result = await this.config.revocationReconcile.run(REVOCATION_RECONCILE_BATCH_SIZE);
+    return {
+      pickedCount: result.picked,
+      createdCount: result.created,
+      duplicateCount: result.duplicate,
+      needsReviewCount: result.needsReview,
+      conflictCount: result.conflicts,
+      truncated: result.truncated,
     };
   }
 

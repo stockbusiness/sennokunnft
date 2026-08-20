@@ -106,6 +106,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   //    ときにだけ立ち、運用ログとアラートで扱う。万一 HTTP へ漏れたときに
   //    利用者の入力のせいに見せないよう 5xx 側へ置く。
   WALLET_EVENT_INVALID: HttpStatus.INTERNAL_SERVER_ERROR,
+  // すでに誰かが対応済み。⚠️ 競合であって、権限や入力の誤りではない。
+  OPERATIONS_REVIEW_NOT_OPEN: HttpStatus.CONFLICT,
   // --- 法務文書 ---
   // ⚠️ 403 にしない。権限の話ではなく、公開済みの版は誰であっても
   //    書き換えられない。
@@ -253,6 +255,7 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   COMMON_USER_MISMATCH: 'この受取りは、ご購入されたご本人のアカウントでお受け取りください。',
   // 利用者に原因は無い。何が起きたかは伝えず、時間をおいて試せることだけ伝える。
   WALLET_EVENT_INVALID: 'ただいま処理できませんでした。しばらくしてからお試しください。',
+  OPERATIONS_REVIEW_NOT_OPEN: 'この確認事項は、すでに対応済みになっています。',
   LEGAL_VERSION_NOT_DRAFT:
     'すでに公開されている版は書き換えられません。新しい版を作成してください。',
   LEGAL_DOCUMENT_INVALID: '入力内容を確認してください。HTMLタグは使用できません。',

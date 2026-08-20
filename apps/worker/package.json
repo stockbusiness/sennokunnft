@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "staging:create-test-entitlement": "tsx src/staging-fixture-cli.ts",
     "wallet:resend": "tsx src/wallet-resend-cli.ts",
+    "wallet:revocation-backfill": "tsx src/wallet-revocation-backfill-cli.ts",
     "payment:credential": "tsx src/payment-credential-cli.ts"
   },
   "dependencies": {

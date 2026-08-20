@@ -64,6 +64,7 @@ export class PrismaWalletDeliveryAdminRepository implements WalletDeliveryAdminP
       DELIVERED: 0,
       FAILED: 0,
       DEAD: 0,
+      SUPERSEDED: 0,
     };
     for (const row of grouped) {
       counts[row.status] = row._count._all;

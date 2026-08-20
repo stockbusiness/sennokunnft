@@ -4,6 +4,7 @@ import {
   apiEnvSchema,
   assertClaimApiConfig,
   assertWalletDeliveryConfig,
+  assertWalletRevocationConfig,
   assertMediaStorageConfig,
   assertSupabaseAuthConfig,
   assertStripeConfig,
@@ -29,6 +30,8 @@ import {
   PrismaLegalDocumentRepository,
   PrismaLegalConsentRepository,
   PrismaPaymentCredentialRepository,
+  PrismaOperationsReviewRepository,
+  PrismaRevocationReconcileRepository,
   PrismaWalletDeliveryAdminRepository,
   PrismaWalletDeliveryOutboxRepository,
   PrismaListingRepository,
@@ -157,6 +160,8 @@ async function bootstrap(): Promise<void> {
     //    起動させると受取は成立し続け、配送だけが全件溜まる。
     //    利用者の画面は「お届け中」のままなので、誰も異常に気づけない。
     assertWalletDeliveryConfig(env);
+    // ⚠️ 取消だけ配送を有効にしても 1 件も送られない。黙って起動させない。
+    assertWalletRevocationConfig(env);
     // ⚠️ r2 なのに設定が欠けたまま起動させない。
     //    起動すると画像のアップロードだけが失敗し、
     //    「画像の無い作品」ができあがる。表面化するのは配送の段。
@@ -612,6 +617,23 @@ async function bootstrap(): Promise<void> {
       payouts: new PrismaPayoutRepository(prisma),
       // 作家さまの表示名（決定 2026-08-20）。
       profiles: new PrismaCreatorProfileRepository(prisma),
+      // 運用確認キュー（M3a）。機械が決められなかったことを残す。
+      operationsReviews: new PrismaOperationsReviewRepository(prisma),
+      /*
+        全額返金にともなう取消（M3a）。⚠️ **3 つとも既定は無効。**
+
+        ⚠️ **フラグを 1 本にまとめない。** 止めたい対象が 3 段ある
+           （業務方針そのもの／作るか／送るか）。まとめると、送信だけ
+           止めたい場面で生成まで止まり、**止めていた期間の返金が
+           永久に相手へ伝わらなくなる**。
+      */
+      revocation: {
+        revokeClaimed: env.REFUND_REVOKE_CLAIMED_ENABLED,
+        generationEnabled: env.WALLET_REVOCATION_EVENT_GENERATION_ENABLED,
+        reconcile: new PrismaRevocationReconcileRepository(prisma),
+        outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
+        logger,
+      },
       // 運営スタッフの在籍と招待（`UD-803`）。
       staffMembers: new PrismaStaffMemberRepository(prisma),
       staffInvitations: new PrismaStaffInvitationRepository(prisma),

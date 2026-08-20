@@ -36,7 +36,16 @@ export { PrismaNonceStore } from './repositories/nonce.repository';
 
 export { PrismaClaimRepository } from './repositories/claim.repository';
 
-export { PrismaWalletDeliveryOutboxRepository } from './repositories/wallet-delivery.repository';
+export {
+  PrismaWalletDeliveryOutboxRepository,
+  enqueueWalletDeliveryIdempotent,
+  supersedePendingGrantedEvents,
+} from './repositories/wallet-delivery.repository';
+export {
+  PrismaOperationsReviewRepository,
+  openOperationsReview,
+} from './repositories/operations-review.repository';
+export { PrismaRevocationReconcileRepository } from './repositories/revocation-reconcile.repository';
 export { PrismaWalletDeliveryAdminRepository } from './repositories/wallet-delivery-admin.repository';
 
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';

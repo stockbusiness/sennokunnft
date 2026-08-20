@@ -1,6 +1,7 @@
 import {
   sweepWalletDeliveries,
   type ClockPort,
+  type WalletDeliveryEventType,
   type WalletDeliveryOutboxPort,
   type WalletDeliverySenderPort,
 } from '@sengoku/domain';
@@ -33,6 +34,17 @@ export interface WalletDeliveryJobOptions {
   readonly createSender: (config: ResolvedWalletDelivery) => WalletDeliverySenderPort;
   readonly logger: RunnerLogger;
   readonly batchSize: number;
+  /**
+   * 送ってよいイベントの種別。
+   *
+   * ⚠️ **「指定が無い＝全部」にしない。** フラグの読み落とし 1 つで
+   * 全種別の配送が始まる。安全側は「送らない」。
+   *
+   * ⚠️ **取消の配送を止めても、付与の配送は止めない。** 段階導入では
+   * 「付与だけ送る」期間があり、そこで付与まで止まると
+   * 受け取った方の画面が「お届け中」のまま進まなくなる。
+   */
+  readonly eventTypes: readonly WalletDeliveryEventType[];
 }
 
 export function createWalletDeliveryJob(options: WalletDeliveryJobOptions): JobHandler {
@@ -79,6 +91,7 @@ export function createWalletDeliveryJob(options: WalletDeliveryJobOptions): JobH
           sender: options.createSender(resolved.config),
         },
         options.batchSize,
+        options.eventTypes,
       );
 
       const counts = { delivered: 0, retrying: 0, failed: 0, dead: 0 };

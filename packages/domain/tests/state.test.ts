@@ -42,10 +42,22 @@ describe('受取権の状態遷移', () => {
     assertExhaustiveTransitions(entitlementStateMachine, ENTITLEMENT_STATUSES);
   });
 
-  it('claimed は終端で、どの状態へも戻らない（INV-E2）', () => {
-    expect(entitlementStateMachine.isTerminal('claimed')).toBe(true);
+  it('claimed から進めるのは revoked だけ（`UD-104` 追補）', () => {
+    /*
+      ⚠️ **`issued` / `expired` へは戻さない。** 戻せるようにすると、
+         「いま有効か」を状態列だけでは答えられなくなる。
+      全額返金で権利を失わせても、受け取った記録そのものは消さない。
+    */
     for (const to of ENTITLEMENT_STATUSES) {
-      expect(entitlementStateMachine.canTransition('claimed', to)).toBe(false);
+      expect(entitlementStateMachine.canTransition('claimed', to)).toBe(to === 'revoked');
+    }
+  });
+
+  it('revoked は終端で、どの状態へも戻らない', () => {
+    // 再付与は、この行を戻すのではなく新しい受取権を作ることで行う。
+    expect(entitlementStateMachine.isTerminal('revoked')).toBe(true);
+    for (const to of ENTITLEMENT_STATUSES) {
+      expect(entitlementStateMachine.canTransition('revoked', to)).toBe(false);
     }
   });
 

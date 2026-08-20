@@ -45,6 +45,8 @@ import type {
   IntegrationService as IntegrationServiceName,
   EnvIntegrationSummary,
   ProbeOutcome,
+  OperationsReviewRepository,
+  RevocationReconcileRepository,
 } from '@sengoku/domain';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
@@ -116,6 +118,10 @@ import {
   type IssuanceConfig,
 } from './order/issuance.service';
 import { RefundService } from './order/refund.service';
+import { WalletRevokePlanner } from './claim/revoke.planner';
+import { RevocationReconcileService } from './claim/revocation-reconcile.service';
+import { OperationsReviewController } from './operations/operations-review.controller';
+import { OperationsReviewService } from './operations/operations-review.service';
 import {
   AdminSettlementController,
   SETTLEMENT_CONFIG,
@@ -355,6 +361,39 @@ export interface AppDependencies {
    * 匿名のままになる。
    */
   readonly profiles: CreatorProfileRepository;
+  /**
+   * 運用確認キュー（M3a）。
+   *
+   * ⚠️ **省略できない。** 無いと、機械が決められなかったことが
+   * ログだけになり、忙しい日にそのまま埋もれる。
+   */
+  readonly operationsReviews: OperationsReviewRepository;
+  /**
+   * 全額返金にともなう取消（M3a）。**3 つに分かれている。**
+   *
+   * ⚠️ **1 つにまとめない。** 止めたい対象が 3 段あるため
+   * （業務方針そのもの／作るか／送るか）。
+   */
+  readonly revocation?: {
+    /**
+     * 受取済み（`claimed`）も取り消すか（`UD-104` 追補）。
+     *
+     * ⚠️ 偽のあいだは従来どおり未受取だけを取り消す。
+     */
+    readonly revokeClaimed: boolean;
+    /**
+     * 取消イベントを作るか。
+     *
+     * ⚠️ **日次の補完もこのフラグに従う。** 従わせないと、無効へ戻したのに
+     * 時計が作り続ける。
+     */
+    readonly generationEnabled: boolean;
+    /** 取りこぼしを埋めるための読み取り。 */
+    readonly reconcile: RevocationReconcileRepository;
+    /** 取消の知らせを積む先。 */
+    readonly outbox: WalletDeliveryOutboxPort;
+    readonly logger: Logger;
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -438,6 +477,13 @@ export class AppModule implements NestModule {
     const paymentCredentials = deps.paymentCredentials;
     const internalJobToken = deps.orders.internalJobToken;
     const payments = deps.payments;
+    /*
+      取消の本文を組み立てる道具（M3a）。
+      ⚠️ **フラグに関係なく作る。** 状態を持たず、外部にも触れない。
+         作るかどうかを決めるのは、これを**渡すかどうか**の側。
+    */
+    const revokePlanner = new WalletRevokePlanner(deps.hashContent);
+    const revocation = deps.revocation;
     return {
       module: AppModule,
       controllers: [
@@ -469,6 +515,8 @@ export class AppModule implements NestModule {
           : [PublicLegalController, AdminLegalController, LegalConsentController]),
         ...(paymentCredentials === undefined ? [] : [PaymentCredentialController]),
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
+        // 運用確認キュー（M3a）。⚠️ 積む口は無く、読むのと印を付けるだけ。
+        OperationsReviewController,
       ],
       providers: [
         {
@@ -593,8 +641,50 @@ export class AppModule implements NestModule {
                    出力を増やす理由も無い。
               */
               payments?.logger ?? SILENT_LOGGER,
+              /*
+                受取済みも取り消すか（`UD-104` 追補）。
+                ⚠️ **既定は偽。** 設定していない配備の振る舞いを変えない。
+              */
+              deps.revocation?.revokeClaimed ?? false,
+              /*
+                取消イベントの組み立て。
+                ⚠️ **生成フラグが無効なら `null`。** 渡さないのではなく
+                   `null` を渡す——Nest の任意注入は `undefined` を渡してくるため、
+                   境界で必ずどちらかへそろえる（P0-2 で同型の不具合を出した）。
+              */
+              deps.revocation?.generationEnabled === true ? revokePlanner.plan : null,
+              deps.operationsReviews,
             ),
         },
+        {
+          // 運用確認キューの読み書き（M3a）。⚠️ 積む口はここに無い。
+          provide: OperationsReviewService,
+          useFactory: () =>
+            new OperationsReviewService(deps.operationsReviews, deps.clock, deps.audit),
+        },
+        /*
+          取消の取りこぼしを埋める処理（M3a）。
+          ⚠️ **生成フラグが無効なら provider ごと作らない。** 作っておいて
+             中で握りつぶすと、「止めたはずのものが別の入口から動く」余地が残る。
+             口（cron）は生やしたまま 0 件を返す。
+        */
+        ...(revocation === undefined || !revocation.generationEnabled
+          ? []
+          : [
+              {
+                provide: RevocationReconcileService,
+                useFactory: (): RevocationReconcileService =>
+                  new RevocationReconcileService(
+                    revocation.reconcile,
+                    revocation.outbox,
+                    deps.operationsReviews,
+                    revokePlanner.plan,
+                    deps.clock,
+                    deps.audit,
+                    revocation.logger,
+                  ),
+              },
+            ]),
         {
           // 注文の検索・経過・対応メモ（`UD-121`）。
           // ⚠️ ここは読み取りと追記だけ。状態を変える処理を足さない。
@@ -646,9 +736,13 @@ export class AppModule implements NestModule {
                      いない配備では provider ごと存在しないため、必須にすると
                      起動しない。掃き出しの口は生やしたまま 0 件を返す。
                 */
-                inject: [{ token: WalletAutoDeliveryService, optional: true }],
+                inject: [
+                  { token: WalletAutoDeliveryService, optional: true },
+                  { token: RevocationReconcileService, optional: true },
+                ],
                 useFactory: (
                   autoDelivery: WalletAutoDeliveryService | undefined,
+                  revocationReconcile: RevocationReconcileService | undefined,
                 ): InternalJobConfig => ({
                   token: internalJobToken,
                   /*
@@ -658,6 +752,7 @@ export class AppModule implements NestModule {
                        無い相手のメソッドを呼んで 500 になる。
                   */
                   autoDelivery: autoDelivery ?? null,
+                  revocationReconcile: revocationReconcile ?? null,
                 }),
               },
             ]),

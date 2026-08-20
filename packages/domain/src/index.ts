@@ -300,6 +300,45 @@ export {
   type WalletClaimableEntitlement,
 } from './entitlement/wallet-claim';
 
+// 全額返金にともなう取り消し（M3a）。受け取った事実は残し、権利だけを失わせる。
+export {
+  REVOCATION_EVENT_ID_PREFIX,
+  REVOCATION_REVIEW_REASONS,
+  decideRevocation,
+  fallbackRevocationCorrelationId,
+  revocableEntitlementStatuses,
+  revocationEventId,
+  type RevocationDecision,
+  type RevocationReviewReason,
+  type RevocationTarget,
+} from './entitlement/revocation';
+
+// 運用確認キュー。機械が決められなかったことを、拾い直せる形で残す。
+export {
+  OPERATIONS_REVIEW_MAX_PAGE_SIZE,
+  OPERATIONS_REVIEW_PAGE_SIZE,
+  OPERATIONS_REVIEW_REASON_CODES,
+  OPERATIONS_REVIEW_STATUSES,
+  OPERATIONS_REVIEW_SUBJECT_TYPES,
+  type OpenOperationsReviewCommand,
+  type OperationsReviewReasonCode,
+  type OperationsReviewRecord,
+  type OperationsReviewStatus,
+  type OperationsReviewSubjectType,
+} from './operations/review';
+
+export type {
+  OperationsReviewOpenCounts,
+  OperationsReviewPage,
+  OperationsReviewQuery,
+  OperationsReviewRepository,
+} from './ports/operations-review';
+
+export type {
+  MissingRevocation,
+  RevocationReconcileRepository,
+} from './ports/revocation-reconcile';
+
 export {
   availableSupply,
   reserveSupply,
@@ -320,14 +359,18 @@ export {
   WALLET_DELIVERY_EVENT_TYPES,
   SOURCE_SYSTEM_KEY,
   TARGET_SITE_KEY,
-  WALLET_EVENT_VERSION,
+  WALLET_GRANTED_EVENT_VERSION,
+  WALLET_REVOKED_EVENT_VERSION,
   BLOCKCHAIN_STATUS_NOT_MINTED,
   ENTITLEMENT_TYPE_DIGITAL_COLLECTIBLE,
+  REVOCATION_REASON_CODES,
   isContentHash,
+  isWalletCorrelationId,
   formatSerialNumber,
   isLongLivedImageUrl,
   buildGrantedEvent,
   buildRevokedEvent,
+  type RevocationReasonCode,
   type WalletDeliveryEventType,
   type WalletEventMetadata,
   type WalletEventData,
@@ -336,6 +379,7 @@ export {
   type WalletDeliveryEvent,
   type WalletEventEnvelopeInput,
   type WalletGrantedEventInput,
+  type WalletRevokedEventInput,
 } from './wallet-delivery/event';
 
 export {
@@ -362,6 +406,7 @@ export {
 export type {
   WalletDeliveryRecord,
   WalletDeliveryEnqueueInput,
+  WalletDeliveryEnqueueOutcome,
   WalletDeliveryFailureInput,
   WalletDeliveryOutboxPort,
   WalletDeliverySenderPort,
@@ -651,6 +696,11 @@ export {
   type RefundRecordView,
   type RefundRepository,
   type RefundSettlement,
+  type RevocationPayloadConflict,
+  type RevocationPlan,
+  type RevocationPlanInput,
+  type RevocationPlanner,
+  type RevocationReviewItem,
   type SettleRefundCommand,
   type StartRefundCommand,
 } from './ports/refund';

@@ -314,6 +314,30 @@ export const deliverEntitlementsResponseSchema = z.object({
 });
 export type DeliverEntitlementsResponse = z.infer<typeof deliverEntitlementsResponseSchema>;
 
+/**
+ * 取消の知らせの取りこぼしを埋めた結果（M3a）。
+ *
+ * ⚠️ **件数だけ返す。** これは時計が叩く口で、応答は監視の数値として
+ * 読まれる。受取権ID・注文番号・共通顧客IDを混ぜない。
+ */
+export const reconcileRevocationsResponseSchema = z.object({
+  pickedCount: z.number().int().nonnegative(),
+  createdCount: z.number().int().nonnegative(),
+  /** すでに同じ本文があった数（冪等成功）。⚠️ 失敗ではない。 */
+  duplicateCount: z.number().int().nonnegative(),
+  /** 宛先が決まらず、運用確認へ回した数。 */
+  needsReviewCount: z.number().int().nonnegative(),
+  /** 同じイベントIDで本文が食い違った数。 */
+  conflictCount: z.number().int().nonnegative(),
+  /**
+   * 上限に達して見送った可能性があるか。
+   *
+   * ⚠️ **黙って切らない。** 出さないと「全部埋まった」と読み違える。
+   */
+  truncated: z.boolean(),
+});
+export type ReconcileRevocationsResponse = z.infer<typeof reconcileRevocationsResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // 決済（決済 Phase P2）
 // ---------------------------------------------------------------------------
