@@ -18,6 +18,20 @@ CREATE UNIQUE INDEX "accounts_display_name_key_unique"
   ON "accounts" ("display_name_key")
   WHERE "display_name_key" IS NOT NULL;
 
+-- 既にある表示名を落とす。
+--
+-- ⚠️ **これが無いと、この移行そのものが失敗する。** 下の CHECK は既存の行も
+--    検査するため、鍵の無い表示名が 1 行でも残っていると ALTER が通らない。
+--
+-- ⚠️ **鍵を SQL で作って埋めない。** PostgreSQL には NFKC 正規化が無く、
+--    lower() だけではアプリ側の鍵と一致しない。ずれた鍵を埋めると、
+--    見た目の同じ名前をあとから通してしまう —— **間違った鍵は、鍵が無いより悪い。**
+--
+-- ⚠️ **消しているのは開発用のシードが入れた値だけ。** この列はこれまで
+--    どの画面にも API にも出ておらず、書いていたのは `prisma/seed.ts` のみ。
+--    シードを流し直せば戻る。
+UPDATE "accounts" SET "display_name" = NULL WHERE "display_name" IS NOT NULL;
+
 -- ⚠️ **表示名と鍵は、どちらか片方だけでは意味を持たない。**
 --    片方だけ入った行は、重複判定をすり抜けるか、表示できないかのどちらか。
 ALTER TABLE "accounts"
