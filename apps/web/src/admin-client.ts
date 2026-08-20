@@ -34,6 +34,11 @@ import {
   adminOrderDetailSchema,
   adminOrderTimelineResponseSchema,
   adminOrderNotesResponseSchema,
+  refundListResponseSchema,
+  refundResultSchema,
+  type CreateRefundRequest,
+  type RefundListResponse,
+  type RefundResult,
   orderNoteViewSchema,
   settlementSettingsSchema,
   settlementSettingsResponseSchema,
@@ -624,6 +629,35 @@ export function fetchAdminOrderTimeline(
   return callAdmin(
     `/api/v1/admin/orders/${encodeURIComponent(orderId)}/timeline`,
     adminOrderTimelineResponseSchema,
+  );
+}
+
+// --- 返金（`UD-104` / `UD-120`）------------------------------------------
+
+/** その注文の返金の記録。⚠️ 新しい順。 */
+export function fetchAdminOrderRefunds(orderId: string): Promise<AdminResult<RefundListResponse>> {
+  return callAdmin(
+    `/api/v1/admin/orders/${encodeURIComponent(orderId)}/refunds`,
+    refundListResponseSchema,
+  );
+}
+
+/**
+ * 返金する。
+ *
+ * ⚠️ **金額を渡さない。** 返すのは常に残額の全部（一部返金は自動処理
+ * しない決定）。額を渡せる形にすると、桁を 1 つ多く打った操作が通る。
+ *
+ * ⚠️ **取り消せない。** 呼ぶ前に、画面側で必ず確認を挟むこと。
+ */
+export function refundAdminOrder(
+  orderId: string,
+  request: CreateRefundRequest,
+): Promise<AdminResult<RefundResult>> {
+  return callAdmin(
+    `/api/v1/admin/orders/${encodeURIComponent(orderId)}/refund`,
+    refundResultSchema,
+    json(request, 'POST'),
   );
 }
 

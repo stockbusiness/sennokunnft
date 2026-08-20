@@ -13,6 +13,7 @@ import {
   type PaymentSettingsFields,
 } from '@sengoku/domain';
 import {
+  createPaymentConfigByCredentialResolver,
   createPaymentConfigResolver,
   createPlatformFeeRateResolver,
   ResolvingPaymentGateway,
@@ -435,6 +436,8 @@ describe('解決するゲートウェイ', () => {
         provider: 'stub',
         createCheckoutSession: async () => ({ ok: true as const, value: null as never }),
         verifyAndParseWebhook: async () => ({ ok: true as const, value: null as never }),
+        // ⚠️ この組では返金を見ない。呼ばれたら試験の書き間違い。
+        refundPayment: async () => ({ ok: true as const, value: null as never }),
       };
     };
   }
@@ -443,6 +446,7 @@ describe('解決するゲートウェイ', () => {
   function buildMatching(expected: string, tried: string[]) {
     return (config: { readonly secretKey: string; readonly webhookSecret: string }) => ({
       provider: 'stub',
+      refundPayment: async () => ({ ok: true as const, value: null as never }),
       createCheckoutSession: async () => ({
         ok: true as const,
         value: {
@@ -471,6 +475,8 @@ describe('解決するゲートウェイ', () => {
                 amount: null,
                 currency: null,
                 failureCode: null,
+                refundRef: null,
+                refundedTotal: null,
                 occurredAt: new Date('2026-08-20T00:00:00.000Z'),
                 credentialId: null,
               },
@@ -655,6 +661,147 @@ describe('解決するゲートウェイ', () => {
     if (!result.ok) {
       expect(JSON.stringify(result.error)).not.toContain('NOT_A_REAL');
     }
+  });
+});
+
+/**
+ * 返金は「決済した当時の世代」で投げる（`UD-118` §2 / `UD-120`）。
+ *
+ * ⚠️ **ここが仕様の要。** `payment_intent` は発行したアカウントに紐づく。
+ * 受付中の世代で投げると、運営会社を切り替えたあとに過去の注文を
+ * 返金できない——いちばん困る形で穴が開く。
+ */
+describe('返金の世代', () => {
+  const DEPLOYMENT_CONFIG = {
+    secretKey: `${PAYMENT_TEST_KEY_PREFIX}NOT_A_REAL_KEY`,
+    webhookSecret: 'whsec_NOT_A_REAL_SECRET',
+    apiVersion: '2026-07-29.dahlia',
+    successUrlTemplate: 'https://env.example.com/orders/{ORDER_ID}',
+    cancelUrlTemplate: 'https://env.example.com/orders',
+  };
+
+  function configFor(id: string | null, secretKey: string) {
+    return {
+      ...DEPLOYMENT_CONFIG,
+      secretKey,
+      settingsSource: 'database' as const,
+      keySource: 'generation' as const,
+      credentialId: id,
+    };
+  }
+
+  /** どの鍵で投げられたかを記録する、擬似のゲートウェイ。 */
+  function buildRecording(used: string[]) {
+    return (config: { readonly secretKey: string }) => ({
+      provider: 'stub',
+      createCheckoutSession: async () => ({ ok: true as const, value: null as never }),
+      verifyAndParseWebhook: async () => ({ ok: true as const, value: null as never }),
+      refundPayment: async () => {
+        used.push(config.secretKey);
+        return {
+          ok: true as const,
+          value: { refundRef: 're_1', amount: 3000, pending: false },
+        };
+      },
+    });
+  }
+
+  const REFUND_INPUT = {
+    paymentRef: 'pi_1',
+    chargeRef: null,
+    amount: 3000,
+    currency: 'JPY',
+    reason: 'buyer_request' as const,
+    idempotencyKey: 'refund_1',
+  };
+
+  it('決済した当時の世代の鍵で投げる（受付中の世代ではない）', async () => {
+    const used: string[] = [];
+    const gateway = new ResolvingPaymentGateway(
+      // 受付中はこちら。⚠️ 返金はこの鍵を使ってはいけない。
+      async () => ({ ok: true, config: configFor('cred-new', 'sk_new') }),
+      buildRecording(used),
+      'stub',
+      null,
+      null,
+      async (id: string) =>
+        id === 'cred-old'
+          ? { ok: true, config: configFor('cred-old', 'sk_old') }
+          : { ok: false, reason: 'no_credential' },
+    );
+
+    const result = await gateway.refundPayment({ ...REFUND_INPUT, credentialId: 'cred-old' });
+    expect(result.ok).toBe(true);
+    expect(used).toEqual(['sk_old']);
+  });
+
+  it('当時の世代を開けなければ断る（受付中の世代へ落ちない）', async () => {
+    /*
+      ⚠️ **落ちると、無関係のアカウントへ返金を投げることになる。**
+         金額が合っていれば通ってしまい、そのアカウントから現金が出ていく。
+         断る方がはるかに軽い。
+    */
+    const used: string[] = [];
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-new', 'sk_new') }),
+      buildRecording(used),
+      'stub',
+      null,
+      null,
+      async () => ({ ok: false, reason: 'no_credential' }),
+    );
+
+    const result = await gateway.refundPayment({ ...REFUND_INPUT, credentialId: 'cred-gone' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('REFUND_CREDENTIAL_UNAVAILABLE');
+    }
+    // ⚠️ 1 度も投げていないこと。
+    expect(used).toEqual([]);
+  });
+
+  it('世代を通していない決済（緊急上書き・fake）は、いま解決できる設定で投げる', async () => {
+    const used: string[] = [];
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor(null, 'sk_current') }),
+      buildRecording(used),
+      'stub',
+      null,
+      null,
+      async () => ({ ok: false, reason: 'no_credential' }),
+    );
+
+    const result = await gateway.refundPayment({ ...REFUND_INPUT, credentialId: null });
+    expect(result.ok).toBe(true);
+    expect(used).toEqual(['sk_current']);
+  });
+
+  it('世代を開く口を渡していなければ、直し方の分かる符号を返す', async () => {
+    const gateway = new ResolvingPaymentGateway(
+      async () => ({ ok: true, config: configFor('cred-new', 'sk_new') }),
+      buildRecording([]),
+      'stub',
+    );
+    const result = await gateway.refundPayment({ ...REFUND_INPUT, credentialId: 'cred-old' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('REFUND_CREDENTIAL_UNAVAILABLE');
+      // ⚠️ 鍵が符号にも文面にも出ない。
+      expect(JSON.stringify(result.error)).not.toContain('sk_');
+    }
+  });
+});
+
+describe('返金は「止めている」ことを理由に断らない', () => {
+  /*
+    ⚠️ **止めるのは新規のお支払いであって、返すことではない。** ここで
+       `enabled` を見ると、事故を止めるために連携を止めた瞬間に、
+       その事故の返金までできなくなる。
+  */
+  it('世代を開く解決は、連携の停止を見ない', () => {
+    const source = createPaymentConfigByCredentialResolver.toString();
+    expect(source).not.toContain('enabled');
+    expect(source).not.toContain('findSettings');
   });
 });
 

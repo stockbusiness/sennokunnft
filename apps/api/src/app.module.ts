@@ -29,6 +29,7 @@ import type {
   OrderRepository,
   OrderNoteRepository,
   SettlementSettingsRepository,
+  RefundRepository,
   PaymentRepository,
   PaymentGatewayPort,
   CommonUserLinkRepository,
@@ -44,6 +45,23 @@ import type {
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
+
+/**
+ * 何も書き出さないログ。
+ *
+ * ⚠️ **本番で使わない。** 決済を繋いでいない配備（手元・E2E）で、
+ * 返金の経路が logger を要求するために置いてある。決済を繋いだ配備では
+ * `payments.logger` が渡るので、こちらは使われない。
+ */
+const SILENT_LOGGER: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  fatal: () => undefined,
+  child: () => SILENT_LOGGER,
+  // ⚠️ pino の全面を実装しない。使うのは上の 5 つと `child` だけ。
+} as unknown as Logger;
 import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
 import { ClaimService } from './claim/claim.service';
@@ -82,6 +100,7 @@ import {
 } from './order/order.controller';
 import { OrderService } from './order/order.service';
 import { OrderSupportService } from './order/order-support.service';
+import { RefundService } from './order/refund.service';
 import {
   AdminSettlementController,
   SETTLEMENT_CONFIG,
@@ -280,6 +299,13 @@ export interface AppDependencies {
    * 一切通らなくなる。それに気づくのは問い合わせが来たとき。
    */
   readonly settlement: SettlementSettingsRepository;
+  /**
+   * 返金の記録（`UD-104` / `UD-120`）。
+   *
+   * ⚠️ **省略できない。** 無いと、事業者の画面から返金されたときに
+   * 追随できず、返金済みの注文が「お支払い済み」のまま精算に乗る。
+   */
+  readonly refunds: RefundRepository;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -443,6 +469,29 @@ export class AppModule implements NestModule {
           }),
         },
         {
+          /*
+            返金の実行（`UD-104` / `UD-120`）。
+            ⚠️ **決済を繋いでいない配備でも配る。** 返金の記録を読む口
+               （`GET :id/refunds`）は決済に依らず要る。投げる先が無い
+               ときは、送信の直前で断る（黙って成功にしない）。
+          */
+          provide: RefundService,
+          useFactory: () =>
+            new RefundService(
+              deps.refunds,
+              payments?.gateway ?? null,
+              deps.clock,
+              deps.ids,
+              deps.audit,
+              /*
+                ⚠️ **決済を繋いでいない配備では書き出さない。** この経路で
+                   ログに載るのは注文IDと符号だけだが、送る先が無い配備で
+                   出力を増やす理由も無い。
+              */
+              payments?.logger ?? SILENT_LOGGER,
+            ),
+        },
+        {
           // 注文の検索・経過・対応メモ（`UD-121`）。
           // ⚠️ ここは読み取りと追記だけ。状態を変える処理を足さない。
           provide: OrderSupportService,
@@ -527,7 +576,8 @@ export class AppModule implements NestModule {
               },
               {
                 provide: PaymentWebhookService,
-                useFactory: () =>
+                inject: [RefundService],
+                useFactory: (refundService: RefundService) =>
                   new PaymentWebhookService(
                     payments.gateway,
                     payments.repository,
@@ -541,6 +591,8 @@ export class AppModule implements NestModule {
                       expectLivemode: payments.expectLivemode,
                       resolveRefundableUntil: payments.resolveRefundableUntil,
                     },
+                    // ⚠️ 事業者の画面からの返金に追随する（`UD-120`）。
+                    refundService,
                   ),
               },
             ]),

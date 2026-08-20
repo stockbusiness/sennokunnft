@@ -102,6 +102,7 @@ model Account {
   registeredPaymentCredentials PaymentCredential[]          @relation("PaymentCredentialRegistrar")
   activatedPaymentCredentials  PaymentCredential[]          @relation("PaymentCredentialActivator")
   settlementSettings           SettlementSettings[]         @relation("SettlementSettingsEditor")
+  refunds                      Refund[]                     @relation("RefundActor")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -562,6 +563,7 @@ model Order {
   reservations  InventoryReservation[]
   webhookEvents WebhookEvent[]
   notes         OrderNote[]
+  refunds       Refund[]
 
   /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
   /// アプリの重複チェックではなく、DB の制約で担保する。
@@ -579,6 +581,8 @@ model Order {
   @@index([totalAmount])
   /// Fixture 由来の行を洗い出して掃除するため。
   @@index([source, createdAt])
+  /// 返金済みの注文を洗い出すため（`UD-120`）。追随に失敗した行を探す。
+  @@index([refundStatus, paidAt(sort: Desc)], map: "orders_refund_status_idx")
   @@map("orders")
 }
 
@@ -631,6 +635,57 @@ model OrderNote {
 
   @@index([orderId, createdAt])
   @@map("order_notes")
+}
+
+/// 返金の記録（`UD-104` / `UD-120`。docs/SETTLEMENT_AND_REFUND.md §3-2）。
+///
+/// ⚠️ **追記のみ。取り消す口を作らない。** 間違えたら再課金であって、
+/// 記録を消すことではない。状態を進める UPDATE だけを許す。
+///
+/// ⚠️ **事業者の画面から返金されるケースを前提にする。** 運営が慌てて
+/// Stripe の画面から返すのは実際に起きる。`initiated_by` で必ず分けて
+/// 残す。丸めると、こちらを経由していない返金が見分けられなくなる。
+///
+/// ⚠️ 部分 UNIQUE 索引 `refunds_provider_ref_key`
+/// （`WHERE provider_refund_ref IS NOT NULL`）が「同じ返金を 2 回積まない」
+/// を守る。Prisma では条件付き索引を書けないため、**手書きの
+/// マイグレーション側にだけ存在する**。消さないこと。
+model Refund {
+  id                String    @id @default(uuid()) @db.Uuid
+  orderId           String    @map("order_id") @db.Uuid
+  /// どの決済を戻したか。⚠️ 世代の鍵はここから解決する（`UD-118`）。
+  /// ⚠️ 決済行を特定できない事業者発の返金があるため NULL を許す。
+  paymentId         String?   @map("payment_id") @db.Uuid
+  /// 戻した額（円）。⚠️ 最小通貨単位の整数。
+  amount            Int
+  currency          String    @db.Char(3)
+  /// `buyer_request` / `our_fault` / `provider_initiated`。CHECK 制約で縛る。
+  /// ⚠️ 事業者の文言をそのまま入れない。
+  reason            String
+  /// `admin` / `provider`。CHECK 制約で縛る。
+  initiatedBy       String    @map("initiated_by")
+  /// 誰が行ったか。⚠️ `provider` なら NULL（CHECK 制約で守る）。
+  actorAccountId    String?   @map("actor_account_id") @db.Uuid
+  /// `requested` / `succeeded` / `failed`。CHECK 制約で縛る。
+  status            String    @default("requested")
+  /// 事業者側の識別子。⚠️ 二重反映を防ぐ鍵。
+  providerRefundRef String?   @map("provider_refund_ref")
+  /// 失敗の分類。⚠️ 事業者の符号をそのまま入れない。
+  failureCode       String?   @map("failure_code")
+  /// 運用の注記。⚠️ 事業者の応答本文を入れない。
+  note              String?
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  settledAt         DateTime? @map("settled_at") @db.Timestamptz(6)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  actor   Account? @relation("RefundActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt(sort: Desc)], map: "refunds_order_created_idx")
+  /// 事業者へ届かないまま残った行を洗い出すため。
+  @@index([status, createdAt], map: "refunds_status_created_idx")
+  @@map("refunds")
 }
 
 /// 在庫の仮引当（決済 Phase P0・P1・指示書 §5.3）。
@@ -718,6 +773,7 @@ model Payment {
   order         Order              @relation(fields: [orderId], references: [id])
   credential    PaymentCredential? @relation(fields: [credentialId], references: [id], onDelete: Restrict)
   webhookEvents WebhookEvent[]
+  refunds       Refund[]
 
   /// ⚠️ 試行ごとに 1 行。失敗した行も消さない（決済 Phase P2 の決定 B）。
   /// 「何回目で何が起きたか」を説明できないと、問い合わせに答えられない。

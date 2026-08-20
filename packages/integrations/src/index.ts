@@ -92,8 +92,10 @@ export {
 
 export {
   createPaymentConfigResolver,
+  createPaymentConfigByCredentialResolver,
   createPlatformFeeRateResolver,
   type EnvPaymentConfig,
+  type PaymentConfigByCredentialResolver,
   type PaymentConfigResolution,
   type PaymentConfigResolver,
   type PaymentConfigResolverOptions,

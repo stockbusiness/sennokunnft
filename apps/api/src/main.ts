@@ -36,6 +36,7 @@ import {
   PrismaOrderRepository,
   PrismaOrderNoteRepository,
   PrismaSettlementSettingsRepository,
+  PrismaRefundRepository,
   PrismaPaymentRepository,
   PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
@@ -59,6 +60,7 @@ import {
   StripePaymentGateway,
   ResolvingPaymentGateway,
   createPaymentConfigResolver,
+  createPaymentConfigByCredentialResolver,
   createPlatformFeeRateResolver,
   generateStorageKey,
   AeadSecretBox,
@@ -404,7 +406,7 @@ async function bootstrap(): Promise<void> {
        入ったあとは DB が正。DB 側で止めてあるときは環境変数へ
        落ちない（落ちると管理画面の「停止」が効かない）。
   */
-  const paymentConfigResolver = createPaymentConfigResolver({
+  const paymentConfigOptions = {
     integrations: integrations?.repository ?? null,
     appEnvironment: integrations?.appEnvironment ?? 'staging',
     provider: env.PAYMENT_PROVIDER,
@@ -431,7 +433,16 @@ async function bootstrap(): Promise<void> {
             cancelUrlTemplate: env.STRIPE_CHECKOUT_CANCEL_URL ?? '',
           }
         : null,
-  });
+  };
+  const paymentConfigResolver = createPaymentConfigResolver(paymentConfigOptions);
+  /*
+    返金のときに、**決済した当時の世代**を開く口（`UD-120`）。
+
+    ⚠️ **受付中の世代では返金できない。** `payment_intent` は発行した
+       アカウントに紐づく。運営会社を切り替えたあとに新しい鍵で投げると
+       「そんな決済は無い」と断られる（`UD-118` §2）。
+  */
+  const paymentConfigByCredential = createPaymentConfigByCredentialResolver(paymentConfigOptions);
 
   /*
     署名検証で試す世代（`UD-128`）。
@@ -519,6 +530,8 @@ async function bootstrap(): Promise<void> {
         async (credentialId) => {
           await paymentCredentials?.repository.touchWebhookReceived(credentialId, new Date());
         },
+        // ⚠️ 返金は決済した当時の世代で投げる（`UD-120`）。
+        paymentConfigByCredential,
       );
     }
     if (env.PAYMENT_WEBHOOK_SECRET === undefined) {
@@ -545,6 +558,8 @@ async function bootstrap(): Promise<void> {
        購入者都合の返金が通らなくなるが、**勝手に期限を決めるより良い**。
   */
   const settlementSettings = new PrismaSettlementSettingsRepository(prisma);
+  // 返金の記録（`UD-120`）。⚠️ 決済を繋いでいない配備でも読み取りは要る。
+  const refundRepository = new PrismaRefundRepository(prisma);
   const settlementEnvironment = env.APP_ENV === 'production' ? 'production' : 'staging';
   const resolveRefundableUntil = createRefundWindowResolver(
     settlementSettings,
@@ -568,6 +583,8 @@ async function bootstrap(): Promise<void> {
       artworks: new PrismaArtworkRepository(prisma),
       listings: new PrismaListingRepository(prisma),
       accounts: new PrismaAccountRepository(prisma),
+      // 返金の記録（`UD-104` / `UD-120`）。
+      refunds: refundRepository,
       // 運営スタッフの在籍と招待（`UD-803`）。
       staffMembers: new PrismaStaffMemberRepository(prisma),
       staffInvitations: new PrismaStaffInvitationRepository(prisma),

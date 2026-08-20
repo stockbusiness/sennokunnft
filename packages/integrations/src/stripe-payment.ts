@@ -10,6 +10,8 @@ import {
   type PaymentFactKind,
   type PaymentGatewayPort,
   type ProviderPaymentFact,
+  type RefundExecuted,
+  type RefundPaymentInput,
   type Result,
 } from '@sengoku/domain';
 
@@ -142,6 +144,60 @@ export class StripePaymentGateway implements PaymentGatewayPort {
     return ok(toFact(event));
   }
 
+  /**
+   * 返金を投げる（`UD-120`）。
+   *
+   * ⚠️ **Charge ではなく Payment Intent を優先して指す。** Charge は
+   * 決済のやり直しで増えることがあり、こちらが覚えている 1 本が
+   * 最新とは限らない。Intent を指せば Stripe 側が最新の Charge を選ぶ。
+   *
+   * ⚠️ **`reason` をそのまま渡さない。** Stripe が受け付ける語彙は
+   * 3 つだけで、こちらの符号とは別物。対応表で移す。
+   */
+  async refundPayment(input: RefundPaymentInput): Promise<Result<RefundExecuted, DomainError>> {
+    const target =
+      input.paymentRef !== null && input.paymentRef !== ''
+        ? { payment_intent: input.paymentRef }
+        : input.chargeRef !== null && input.chargeRef !== ''
+          ? { charge: input.chargeRef }
+          : null;
+    if (target === null) {
+      // 事業者側の識別子が無い決済は返せない。⚠️ 黙って成功にしない。
+      return err(domainError('REFUND_PROVIDER_ERROR', 'no provider payment reference'));
+    }
+
+    try {
+      const refund = await this.stripe.refunds.create(
+        {
+          ...target,
+          // ⚠️ 金額を必ず指定する。省略すると Stripe は全額を返す。
+          //    こちらが決めた額と食い違いうるので、明示する。
+          amount: input.amount,
+          ...(stripeReason(input.reason) === null
+            ? {}
+            : { reason: stripeReason(input.reason) as Stripe.RefundCreateParams.Reason }),
+        },
+        // ⚠️ 返金の記録の識別子から作る。再試行しても 1 回になる。
+        { idempotencyKey: input.idempotencyKey },
+      );
+
+      return ok({
+        refundRef: refund.id,
+        // ⚠️ Stripe が実際に返した額。要求額をそのまま書き戻さない。
+        amount: refund.amount,
+        /*
+          ⚠️ **`pending` を成功に丸めない。** 銀行振込の返金は日をまたぐ。
+             丸めると、返っていないのに返した扱いの注文ができる。
+             `requires_action` も同じ扱いにする（人の操作待ち）。
+        */
+        pending: refund.status === 'pending' || refund.status === 'requires_action',
+      });
+    } catch (error) {
+      // ⚠️ 例外の文面を持ち出さない。返金の要求には金額が載る。
+      return err(domainError('REFUND_PROVIDER_ERROR', safeErrorSummary(error)));
+    }
+  }
+
   private resolveUrl(template: string, orderId: string): string {
     // ⚠️ 戻り先に Stripe の秘密を含めない。注文IDだけを差し込む。
     return template.includes(ORDER_ID_PLACEHOLDER)
@@ -166,6 +222,9 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
     occurredAt: new Date(event.created * 1000),
     // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
     credentialId: null,
+    // 返金のときだけ埋まる。それ以外は `null`。
+    refundRef: null,
+    refundedTotal: null,
   };
 
   switch (event.type) {
@@ -242,6 +301,31 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
       };
     }
 
+    case 'charge.refunded': {
+      const charge = event.data.object;
+      /*
+        ⚠️ **こちらから投げたぶんも、事業者の画面から返したぶんも、同じ
+           知らせで届く。** 運営が慌てて Stripe の画面から返金するのは
+           実際に起きるので、両方を同じ形で受ける。
+      */
+      const latest = charge.refunds?.data[0] ?? null;
+      return {
+        ...base,
+        kind: 'refunded',
+        orderId: readOrderId(charge.metadata),
+        sessionRef: null,
+        paymentRef: typeof charge.payment_intent === 'string' ? charge.payment_intent : null,
+        chargeRef: charge.id,
+        // ⚠️ 元の決済額。返した額ではない。取り違えると全額判定が狂う。
+        amount: charge.amount,
+        currency: charge.currency,
+        failureCode: null,
+        refundRef: latest?.id ?? null,
+        // ⚠️ 累計。今回ぶんではない。
+        refundedTotal: charge.amount_refunded,
+      };
+    }
+
     default:
       /*
         ⚠️ **知らないイベントは無視して 2xx を返す**（指示書 §5.4）。
@@ -260,6 +344,22 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
         failureCode: null,
       };
   }
+}
+
+/**
+ * こちらの返金理由を、Stripe が受け付ける語彙へ移す。
+ *
+ * ⚠️ **そのまま渡さない。** Stripe は 3 語しか受け付けず、こちらの符号とは
+ * 別物。合わない語を送ると要求ごと弾かれ、返金が通らない。
+ *
+ * ⚠️ **`buyer_request` は指定しない（`null`）。** Stripe の
+ * `requested_by_customer` は「不正利用の申告ではない」ことを示すために
+ * 使われ、こちらの「誤購入」と意味が完全には重ならない。**分からない
+ * ものを分かったことにしない**——省略すれば Stripe 側で `null` のまま残る。
+ */
+function stripeReason(reason: 'buyer_request' | 'our_fault' | 'provider_initiated'): string | null {
+  // 当方の不具合は Stripe でも「重複・誤請求」に最も近い。
+  return reason === 'our_fault' ? 'duplicate' : null;
 }
 
 function readOrderId(metadata: Stripe.Metadata | null | undefined): string | null {

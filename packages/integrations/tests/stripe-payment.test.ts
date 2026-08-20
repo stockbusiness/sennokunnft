@@ -150,6 +150,77 @@ describe('Stripe イベントの正規化', () => {
     expect(fact.orderId).toBeNull();
   });
 
+  it('返金の知らせを「返金」へ畳み、累計を持ち出す', () => {
+    /*
+      ⚠️ **累計を取る。** 事業者は「この決済でいくら返したか」を積算で
+         持つ。差分だと、知らせが前後して届いたときに合わなくなる。
+      ⚠️ **`amount` は元の決済額。** 返した額と取り違えると、全額かどうかの
+         判定が狂う。
+    */
+    const fact = toStripePaymentFact(
+      event('charge.refunded', {
+        id: 'ch_test_10',
+        payment_intent: 'pi_test_10',
+        amount: 12000,
+        amount_refunded: 12000,
+        currency: 'jpy',
+        metadata: { order_id: 'order-10' },
+        refunds: { data: [{ id: 're_test_10' }] },
+      }),
+    );
+
+    expect(fact.kind).toBe('refunded');
+    expect(fact.orderId).toBe('order-10');
+    expect(fact.chargeRef).toBe('ch_test_10');
+    expect(fact.paymentRef).toBe('pi_test_10');
+    expect(fact.amount).toBe(12000);
+    expect(fact.refundedTotal).toBe(12000);
+    expect(fact.refundRef).toBe('re_test_10');
+  });
+
+  it('一部返金でも累計をそのまま持ち出す', () => {
+    const fact = toStripePaymentFact(
+      event('charge.refunded', {
+        id: 'ch_test_11',
+        payment_intent: 'pi_test_11',
+        amount: 12000,
+        amount_refunded: 3000,
+        currency: 'jpy',
+        metadata: { order_id: 'order-11' },
+        refunds: { data: [{ id: 're_test_11' }] },
+      }),
+    );
+    expect(fact.refundedTotal).toBe(3000);
+  });
+
+  it('返金の一覧が無くても畳める（識別子は null）', () => {
+    // ⚠️ 無いものを推測で埋めない。二重反映の判定は識別子の有無で分かれる。
+    const fact = toStripePaymentFact(
+      event('charge.refunded', {
+        id: 'ch_test_12',
+        amount: 12000,
+        amount_refunded: 12000,
+        currency: 'jpy',
+        metadata: { order_id: 'order-12' },
+      }),
+    );
+    expect(fact.kind).toBe('refunded');
+    expect(fact.refundRef).toBeNull();
+  });
+
+  it('返金でないイベントでは、返金の値が入らない', () => {
+    const fact = toStripePaymentFact(
+      event('payment_intent.succeeded', {
+        id: 'pi_test_13',
+        amount_received: 12000,
+        currency: 'jpy',
+        metadata: { order_id: 'order-13' },
+      }),
+    );
+    expect(fact.refundRef).toBeNull();
+    expect(fact.refundedTotal).toBeNull();
+  });
+
   it('livemode と API バージョンを持ち出す', () => {
     // ⚠️ 本番と試験の取り違えを、呼び出し側が見分けられるようにする。
     const fact = toStripePaymentFact(
