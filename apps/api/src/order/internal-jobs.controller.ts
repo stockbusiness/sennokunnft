@@ -8,9 +8,14 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
-import type { IssueEntitlementsResponse, ReleaseExpiredResponse } from '@sengoku/contracts';
-import { ISSUANCE_BATCH_SIZE, RELEASE_BATCH_SIZE } from '@sengoku/domain';
+import type {
+  DeliverEntitlementsResponse,
+  IssueEntitlementsResponse,
+  ReleaseExpiredResponse,
+} from '@sengoku/contracts';
+import { AUTO_DELIVERY_BATCH_SIZE, ISSUANCE_BATCH_SIZE, RELEASE_BATCH_SIZE } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
+import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
 import { EntitlementIssuanceService } from './issuance.service';
 import { OrderService } from './order.service';
 
@@ -19,6 +24,14 @@ export const INTERNAL_JOB_CONFIG = Symbol('sengoku:internal-job-config');
 export interface InternalJobConfig {
   /** ⚠️ 未設定なら、このコントローラは登録されない（配線側で切る）。 */
   readonly token: string;
+  /**
+   * Wallet への自動配送（P0-2）。
+   *
+   * ⚠️ **`null` は「まだ Wallet へ繋がない」を意味する。** 繋がない配備でも
+   * 口だけは生やし、**呼ばれたら 0 件を返す**。口ごと消すと、時計の設定を
+   * 配備ごとに変えることになり、繋いだ日に設定漏れで動かない。
+   */
+  readonly autoDelivery: WalletAutoDeliveryService | null;
 }
 
 /**
@@ -80,6 +93,37 @@ export class InternalJobsController {
     return {
       pickedCount: result.picked,
       issuedCount: result.issued,
+      failedCount: result.failed,
+    };
+  }
+
+  /**
+   * Wallet への自動配送を掃き出す（P0-2）。
+   *
+   * ⚠️ **これは「登録が済んだ方から順に届ける」口でもある。** 受取用の
+   * ウォレットを買ったあとで登録した方は、共通顧客IDが解決した時点で
+   * ここに拾われる——**登録完了の合図を別に作らずに**配送が再開する。
+   *
+   * ⚠️ **重なって走っても二重に届かない。** 受取の確定は現在の状態を条件に
+   * した更新で行うので、勝てるのは 1 本だけ。負けた側は「すでに受け取り済み」
+   * として数える。
+   */
+  @Post('deliver-entitlements')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async deliverEntitlements(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<DeliverEntitlementsResponse> {
+    this.assertAuthorized(token);
+    if (this.config.autoDelivery === null) {
+      // Wallet へ繋いでいない配備。⚠️ 黙って 0 を返す（異常ではない）。
+      return { pickedCount: 0, deliveredCount: 0, skippedCount: 0, failedCount: 0 };
+    }
+    const result = await this.config.autoDelivery.sweep(AUTO_DELIVERY_BATCH_SIZE);
+    return {
+      pickedCount: result.picked,
+      deliveredCount: result.delivered,
+      skippedCount: result.skipped,
       failedCount: result.failed,
     };
   }

@@ -3,6 +3,7 @@ import type {
   ClaimDeliveryEnqueue,
   ClaimLookupResult,
   ClaimRepositoryPort,
+  EntitlementStatus,
   ReissuableEntitlement,
   WalletDeliveryStatus,
 } from '@sengoku/domain';
@@ -27,57 +28,50 @@ export class PrismaClaimRepository implements ClaimRepositoryPort {
   async findByTokenHash(claimTokenHash: string): Promise<ClaimLookupResult | null> {
     const row = await this.prisma.entitlement.findUnique({
       where: { claimTokenHash },
-      select: {
-        id: true,
-        status: true,
-        expiresAt: true,
-        accountId: true,
-        claimedByCommonUserId: true,
-        walletDeliveryStatus: true,
-        orderId: true,
-        orderLineId: true,
-        artworkId: true,
-        serialNo: true,
-        artwork: {
-          select: { title: true, description: true, imageKey: true, imageHash: true },
-        },
-        purchaser: { select: { commonUserId: true, commonUserStatus: true } },
-      },
+      select: CLAIM_LOOKUP_SELECT,
     });
-    if (row === null) {
-      return null;
+    return row === null ? null : toClaimLookup(row);
+  }
+
+  /**
+   * 自動配送の対象を拾う（P0-2）。
+   *
+   * ⚠️ **受取用のウォレットが結び付いている方の分だけ。** `RESOLVED` 以外は
+   * 拾わない——値が入っていても本人だと確定していない状態（`CONFLICT` など）が
+   * あり、そこへ送ると名寄せ途中の別人へ届く。
+   *
+   * ⚠️ **古い受取権から。** 待たせている方を先に片づける。
+   */
+  async listAutoDeliverable(limit: number): Promise<ClaimLookupResult[]> {
+    const rows = await this.prisma.entitlement.findMany({
+      where: {
+        status: 'issued',
+        purchaser: { commonUserStatus: 'RESOLVED', commonUserId: { not: null } },
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+
+    const found: ClaimLookupResult[] = [];
+    for (const row of rows) {
+      const detail = await this.findForAutoDelivery(row.id);
+      if (detail !== null) {
+        found.push(detail);
+      }
     }
+    return found;
+  }
 
-    // ⚠️ **RESOLVED 以外の common_user_id を本人照合に使わない。**
-    // CONFLICT の行にも値は入っている（運用で確認するための手がかり）。
-    // 値があることと、本人だと確定していることは別。ここを緩めると、
-    // 名寄せ候補が残ったままの人あてに受取先が決まる。
-    const purchaserCommonUserId =
-      row.purchaser.commonUserStatus === 'RESOLVED' ? row.purchaser.commonUserId : null;
-
-    return {
-      entitlement: {
-        id: row.id,
-        status: row.status,
-        deliveryStatus: row.walletDeliveryStatus as WalletDeliveryStatus,
-        expiresAt: row.expiresAt,
-        purchaserCommonUserId,
-        claimedByCommonUserId: row.claimedByCommonUserId,
-      },
-      purchaserAccountId: row.accountId,
-      cardName: row.artwork.title,
-      // 表示情報は受取確定の時点で読む。配送のたびに読み直さない（§24）。
-      snapshot: {
-        orderId: row.orderId,
-        orderLineId: row.orderLineId,
-        artworkId: row.artworkId,
-        serialNo: row.serialNo,
-        artworkTitle: row.artwork.title,
-        artworkDescription: row.artwork.description,
-        imageKey: row.artwork.imageKey,
-        imageHash: row.artwork.imageHash,
-      },
-    };
+  /** 受取権IDから、自動配送に要る材料を引く（P0-2）。 */
+  async findForAutoDelivery(entitlementId: string): Promise<ClaimLookupResult | null> {
+    // ⚠️ 引き方だけを変え、材料は `findByTokenHash` と同じものを返す。
+    //    自動の経路だけ材料が減ると、人が受け取ったときと違う本文が渡る。
+    const row = await this.prisma.entitlement.findUnique({
+      where: { id: entitlementId },
+      select: CLAIM_LOOKUP_SELECT,
+    });
+    return row === null ? null : toClaimLookup(row);
   }
 
   /**
@@ -195,4 +189,86 @@ export class PrismaClaimRepository implements ClaimRepositoryPort {
     });
     return updated.count === 1;
   }
+}
+
+/**
+ * 受取権を引くときに読む列。
+ *
+ * ⚠️ **受取トークンから引くときも、受取権IDから引くときも同じものを読む。**
+ * 引き方ごとに列を選び直すと、片方だけ材料が欠けたときに気づけない——
+ * Wallet へ渡る本文が、人が受け取ったときと機械が届けたときで変わる。
+ */
+const CLAIM_LOOKUP_SELECT = {
+  id: true,
+  status: true,
+  expiresAt: true,
+  accountId: true,
+  claimedByCommonUserId: true,
+  walletDeliveryStatus: true,
+  orderId: true,
+  orderLineId: true,
+  artworkId: true,
+  serialNo: true,
+  artwork: {
+    select: { title: true, description: true, imageKey: true, imageHash: true },
+  },
+  purchaser: { select: { commonUserId: true, commonUserStatus: true } },
+} as const;
+
+type ClaimLookupRow = {
+  readonly id: string;
+  readonly status: string;
+  readonly expiresAt: Date | null;
+  readonly accountId: string;
+  readonly claimedByCommonUserId: string | null;
+  readonly walletDeliveryStatus: string;
+  readonly orderId: string;
+  readonly orderLineId: string;
+  readonly artworkId: string;
+  readonly serialNo: number;
+  readonly artwork: {
+    readonly title: string;
+    readonly description: string;
+    readonly imageKey: string | null;
+    readonly imageHash: string | null;
+  };
+  readonly purchaser: {
+    readonly commonUserId: string | null;
+    readonly commonUserStatus: string;
+  };
+};
+
+function toClaimLookup(row: ClaimLookupRow): ClaimLookupResult {
+  /*
+    ⚠️ **`RESOLVED` 以外の `common_user_id` を本人照合に使わない。**
+       `CONFLICT` の行にも値は入っている（運用で確認するための手がかり）。
+       値があることと、本人だと確定していることは別。ここを緩めると、
+       名寄せ候補が残ったままの方あてに受取先が決まる。
+  */
+  const purchaserCommonUserId =
+    row.purchaser.commonUserStatus === 'RESOLVED' ? row.purchaser.commonUserId : null;
+
+  return {
+    entitlement: {
+      id: row.id,
+      status: row.status as EntitlementStatus,
+      deliveryStatus: row.walletDeliveryStatus as WalletDeliveryStatus,
+      expiresAt: row.expiresAt,
+      purchaserCommonUserId,
+      claimedByCommonUserId: row.claimedByCommonUserId,
+    },
+    purchaserAccountId: row.accountId,
+    cardName: row.artwork.title,
+    // 表示情報は受取確定の時点で読む。配送のたびに読み直さない（§24）。
+    snapshot: {
+      orderId: row.orderId,
+      orderLineId: row.orderLineId,
+      artworkId: row.artworkId,
+      serialNo: row.serialNo,
+      artworkTitle: row.artwork.title,
+      artworkDescription: row.artwork.description,
+      imageKey: row.artwork.imageKey,
+      imageHash: row.artwork.imageHash,
+    },
+  };
 }

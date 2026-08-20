@@ -91,6 +91,25 @@ export interface ClaimRepositoryPort {
     readonly delivery?: ClaimDeliveryEnqueue | undefined;
   }): Promise<ClaimConfirmOutcome>;
 
+  /**
+   * 自動配送の対象を拾う（P0-2）。
+   *
+   * ⚠️ **受取用のウォレットが結び付いている購入者の分だけ。** 結び付いて
+   * いない方の受取権を拾うと、送る先が無いまま行列へ載ることになる。
+   *
+   * ⚠️ **受取トークンでは引かない。** 平文は保存していないので、こちらから
+   * 引く手立てが無い。自動の経路は受取権IDで動く。
+   */
+  listAutoDeliverable(limit: number): Promise<ClaimLookupResult[]>;
+
+  /**
+   * 受取権IDから、自動配送に要る材料を引く（P0-2）。
+   *
+   * ⚠️ `findByTokenHash` と同じ材料を返す。**自動の経路だけ材料を減らさない。**
+   * 減らすと、人が受け取ったときと違う本文が Wallet へ渡る。
+   */
+  findForAutoDelivery(entitlementId: string): Promise<ClaimLookupResult | null>;
+
   /** 再発行の判定に必要な情報を、受取権IDから引く。 */
   findForReissue(entitlementId: string): Promise<ReissuableEntitlement | null>;
 

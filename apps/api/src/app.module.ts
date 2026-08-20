@@ -68,6 +68,7 @@ const SILENT_LOGGER: Logger = {
 import { AuthGuard } from './auth/auth.guard';
 import { ClaimController } from './claim/claim.controller';
 import { ClaimService } from './claim/claim.service';
+import { WalletAutoDeliveryService } from './claim/auto-delivery.service';
 import { WalletDeliveryPlanner } from './claim/delivery.planner';
 import { ClaimReissueController } from './claim/reissue.controller';
 import { ReissueService, type ClaimTokenRotationSource } from './claim/reissue.service';
@@ -612,7 +613,24 @@ export class AppModule implements NestModule {
           : [
               {
                 provide: INTERNAL_JOB_CONFIG,
-                useFactory: (): InternalJobConfig => ({ token: internalJobToken }),
+                /*
+                  ⚠️ **自動配送は `optional` で受け取る。** Wallet へ繋いで
+                     いない配備では provider ごと存在しないため、必須にすると
+                     起動しない。掃き出しの口は生やしたまま 0 件を返す。
+                */
+                inject: [{ token: WalletAutoDeliveryService, optional: true }],
+                useFactory: (
+                  autoDelivery: WalletAutoDeliveryService | undefined,
+                ): InternalJobConfig => ({
+                  token: internalJobToken,
+                  /*
+                    ⚠️ **`undefined` を `null` へ寄せる。** 見つからない依存に
+                       Nest が渡すのは `undefined` で、`null` ではない。
+                       受け取る側が `=== null` で見ていると素通りし、
+                       無い相手のメソッドを呼んで 500 になる。
+                  */
+                  autoDelivery: autoDelivery ?? null,
+                }),
               },
             ]),
         ...(payments === undefined
@@ -651,10 +669,16 @@ export class AppModule implements NestModule {
               },
               {
                 provide: PaymentWebhookService,
-                inject: [RefundService, EntitlementIssuanceService],
+                inject: [
+                  RefundService,
+                  EntitlementIssuanceService,
+                  // ⚠️ Wallet へ繋いでいない配備では存在しない。
+                  { token: WalletAutoDeliveryService, optional: true },
+                ],
                 useFactory: (
                   refundService: RefundService,
                   issuanceService: EntitlementIssuanceService,
+                  autoDelivery: WalletAutoDeliveryService | undefined,
                 ) =>
                   new PaymentWebhookService(
                     payments.gateway,
@@ -673,6 +697,9 @@ export class AppModule implements NestModule {
                     refundService,
                     // ⚠️ 決済確定の直後に受取権を作る（P0-1）。
                     issuanceService,
+                    // ⚠️ 登録済みの方には、その場で届けにいく（P0-2）。
+                    //    ⚠️ 見つからない依存に Nest が渡すのは `undefined`。
+                    autoDelivery ?? null,
                   ),
               },
             ]),
@@ -775,6 +802,27 @@ export class AppModule implements NestModule {
                   ),
                 inject: [IdempotencyService],
               },
+              /*
+                Wallet への自動配送（P0-2）。
+
+                ⚠️ **配送を有効にしていない配備では配らない。** 「渡すが中で
+                   何もしない」にすると、無効なのに本文を組み立てて落ちる
+                   経路が残る（`ClaimService` の planner と同じ扱い）。
+              */
+              ...(claim.deliveryEnabled
+                ? [
+                    {
+                      provide: WalletAutoDeliveryService,
+                      useFactory: () =>
+                        new WalletAutoDeliveryService(
+                          claim.claims,
+                          new WalletDeliveryPlanner(deps.ids, deps.storage, deps.hashContent),
+                          deps.clock,
+                          deps.audit,
+                        ),
+                    },
+                  ]
+                : []),
               SenNoKuniHmacGuard,
               ClaimRateLimitGuard,
               {

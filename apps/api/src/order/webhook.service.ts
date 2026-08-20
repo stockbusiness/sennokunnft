@@ -12,6 +12,7 @@ import {
   type ProviderPaymentFact,
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
+import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
 import type { EntitlementIssuanceService } from './issuance.service';
 import type { RefundService } from './refund.service';
 
@@ -67,6 +68,13 @@ export class PaymentWebhookService {
      * 無いと一度も動かない。
      */
     private readonly issuance: EntitlementIssuanceService,
+    /**
+     * Wallet への自動配送（P0-2）。
+     *
+     * ⚠️ **`null` は「まだ Wallet へ繋がない」を意味する。** 繋がない配備
+     * では届けにいかない。受取権はできているので、繋いだあとに掃き出しが拾う。
+     */
+    private readonly autoDelivery: WalletAutoDeliveryService | null = null,
   ) {}
 
   /**
@@ -333,7 +341,19 @@ export class PaymentWebhookService {
          `UNIQUE(order_line_id, unit_index)` が最終防壁になっている。
          同じ知らせが 2 度届いても、ここは安全に通る。
     */
-    await this.issuance.runForOrder(order.id);
+    const issued = await this.issuance.runForOrder(order.id);
+
+    /*
+      受取用のウォレットを登録済みの方には、その場で届けにいく（P0-2）。
+
+      ⚠️ **未登録の方をここで待たない。** 登録が済んだ時点で、掃き出し
+         （`/api/v1/internal/jobs/deliver-entitlements`）が拾い直す。
+      ⚠️ **失敗しても決済の知らせは 200 で返す。** 決済も発行も済んでいる。
+         ここで投げると同じ知らせが送り直され、いずれ宛先ごと無効化される。
+    */
+    if (issued !== null && issued.entitlementIds.length > 0 && this.autoDelivery !== null) {
+      await this.autoDelivery.runForEntitlements(issued.entitlementIds);
+    }
 
     await this.recordAndFinish(fact, 'processed', order.id, null, now);
   }

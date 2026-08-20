@@ -279,6 +279,13 @@ export type {
   IssuanceOutcome,
 } from './ports/issuance';
 
+// Wallet への自動配送（P0-2）。登録済みの方にはこちらから届ける。
+export {
+  AUTO_DELIVERY_BATCH_SIZE,
+  evaluateAutoDelivery,
+  type AutoDeliveryDecision,
+} from './entitlement/auto-delivery';
+
 export {
   evaluateWalletClaim,
   type WalletClaimAttempt,

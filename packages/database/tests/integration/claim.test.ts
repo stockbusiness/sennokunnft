@@ -418,3 +418,67 @@ suite('受取URLの再発行（同時でも 1 本だけ）', () => {
     expect(await repo.findForReissue(randomUUID())).toBeNull();
   });
 });
+
+/**
+ * 自動配送の取り出し（P0-2）。
+ *
+ * ⚠️ ここで確かめるのは**誰を拾うか**の一点。届けるかどうかの判定は
+ * ドメイン（`evaluateAutoDelivery`）が持ち、単体試験が別にある。
+ */
+suite('自動配送の取り出し', () => {
+  it('受取用のウォレットが結び付いている方の分を拾う', async () => {
+    const { entitlementId } = await seedEntitlement({ commonUserId: PURCHASER_CU });
+    const found = await repo.listAutoDeliverable(10);
+    expect(found.map((row) => row.entitlement.id)).toEqual([entitlementId]);
+  });
+
+  it('まだ結び付いていない方の分は拾わない', async () => {
+    // ⚠️ 拾うと、送る先が無いまま行列へ載る。
+    await seedEntitlement({ commonUserId: null });
+    expect(await repo.listAutoDeliverable(10)).toEqual([]);
+  });
+
+  it('名寄せ途中（CONFLICT）の行は拾わない', async () => {
+    /*
+      ⚠️ **ここが要。** `CONFLICT` の行にも値は入っている（運用で確認する
+         ための手がかり）。値があることと、本人だと確定していることは別。
+         拾うと、名寄せ途中の別人へ届く。
+    */
+    await seedEntitlement({ commonUserId: PURCHASER_CU, commonUserStatus: 'CONFLICT' });
+    expect(await repo.listAutoDeliverable(10)).toEqual([]);
+  });
+
+  it('受け取り済みの分は拾わない', async () => {
+    const { entitlementId } = await seedEntitlement({ commonUserId: PURCHASER_CU });
+    await repo.confirmClaim({
+      entitlementId,
+      commonUserId: PURCHASER_CU,
+      accountId: (await prisma.entitlement.findUniqueOrThrow({ where: { id: entitlementId } }))
+        .accountId,
+      now: NOW,
+    });
+    expect(await repo.listAutoDeliverable(10)).toEqual([]);
+  });
+
+  it('受取権IDから、受取トークンから引いたときと同じ材料が返る', async () => {
+    /*
+      ⚠️ **材料が食い違うと、人が受け取ったときと機械が届けたときで
+         Wallet へ渡る本文が変わる。** 引き方を変えただけで中身が変わらない
+         ことを、ここで留める。
+    */
+    const { entitlementId, tokenHash } = await seedEntitlement({ commonUserId: PURCHASER_CU });
+    const byToken = await repo.findByTokenHash(tokenHash);
+    const byId = await repo.findForAutoDelivery(entitlementId);
+    expect(byId).toEqual(byToken);
+  });
+
+  it('存在しない受取権IDでは null を返す', async () => {
+    expect(await repo.findForAutoDelivery(randomUUID())).toBeNull();
+  });
+
+  it('上限の数までしか拾わない', async () => {
+    await seedEntitlement({ commonUserId: PURCHASER_CU });
+    await seedEntitlement({ commonUserId: OTHER_CU });
+    expect(await repo.listAutoDeliverable(1)).toHaveLength(1);
+  });
+});
