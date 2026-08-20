@@ -1,7 +1,11 @@
 import {
+  buyerOrderListResponseSchema,
   checkoutSessionResponseSchema,
+  collectibleListResponseSchema,
   orderViewSchema,
+  type BuyerOrderListResponse,
   type CheckoutSessionResponse,
+  type CollectibleListResponse,
   type OrderView,
 } from '@sengoku/contracts';
 import { getWebEnv } from './env';
@@ -130,6 +134,47 @@ export async function fetchOrder(orderId: string): Promise<OrderResult<OrderView
 
   const parsed = orderViewSchema.safeParse(await response.json());
   if (!parsed.success) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * ご自分のご注文の一覧（P0-3）。
+ *
+ * ⚠️ **誰の分かを渡さない。** API がトークンから決める。渡せる形にすると、
+ * そこが他人の注文を覗く道になる。
+ */
+export async function fetchMyOrders(): Promise<OrderResult<BuyerOrderListResponse>> {
+  return fetchList('/api/v1/orders', buyerOrderListResponseSchema);
+}
+
+/** ご自分が受け取ったものの一覧（P0-3）。⚠️ 同上、誰の分かは渡さない。 */
+export async function fetchMyCollectibles(): Promise<OrderResult<CollectibleListResponse>> {
+  return fetchList('/api/v1/collectibles', collectibleListResponseSchema);
+}
+
+/** 一覧を読む共通の手順。⚠️ 形が合わなければ握りつぶさず `unavailable` にする。 */
+async function fetchList<T>(
+  path: string,
+  schema: { safeParse(value: unknown): { success: boolean; data?: T } },
+): Promise<OrderResult<T>> {
+  const response = await call(path, { method: 'GET' });
+  if (response === null) {
+    return { ok: false, reason: 'unauthenticated' };
+  }
+  if (response === 'unreachable') {
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason:
+        response.status === 401 || response.status === 403 ? 'unauthenticated' : 'unavailable',
+    };
+  }
+  const parsed = schema.safeParse(await response.json());
+  if (!parsed.success || parsed.data === undefined) {
     return { ok: false, reason: 'unavailable' };
   }
   return { ok: true, data: parsed.data };

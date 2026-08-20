@@ -39,6 +39,7 @@ import {
   PrismaOrderRepository,
   PrismaOrderNoteRepository,
   PrismaSettlementSettingsRepository,
+  PrismaCollectibleRepository,
   PrismaEntitlementIssuanceRepository,
   PrismaRefundRepository,
   PrismaPayoutRepository,
@@ -610,6 +611,8 @@ async function bootstrap(): Promise<void> {
       refunds: refundRepository,
       // 受取権の発行（P0-1）。決済が済んだ注文を受取権に変える。
       issuance: issuanceRepository,
+      // ご自分が受け取ったもの（P0-3）。⚠️ 絞り込みはリポジトリが必ず行う。
+      collectibles: new PrismaCollectibleRepository(prisma),
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),
       // 作家さまの表示名（決定 2026-08-20）。

@@ -273,6 +273,13 @@ export {
   type SupplyReconciliation,
 } from './entitlement/issuance';
 
+// 買った方が自分の受け取ったものを見る口（P0-3）。
+export type {
+  CollectibleListPage,
+  CollectibleRepository,
+  CollectibleView,
+} from './ports/collectible';
+
 export type {
   EntitlementIssuanceRepository,
   IssuanceCandidate,
