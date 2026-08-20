@@ -1,0 +1,333 @@
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  buildPayoutDraft,
+  canConfirmPayout,
+  isPeriodClosed,
+  parsePayoutPeriod,
+  payoutDueAt,
+  previousPayoutPeriod,
+  transitionPayoutStatus,
+  type AuditLogPort,
+  type ClockPort,
+  type IdGeneratorPort,
+  type IntegrationEnvironment,
+  type PayoutDraft,
+  type PayoutLineView,
+  type PayoutPeriod,
+  type PayoutRepository,
+  type PayoutStatus,
+  type PayoutView,
+  type SettlementSettingsRepository,
+} from '@sengoku/domain';
+import { DomainErrorException } from '../common/domain-error.filter';
+
+/**
+ * 精算（`UD-119`。決定 2026-08-20）。
+ *
+ * ⚠️ **金額を人が書き換える口を作らない**（`SETTLEMENT_AND_REFUND.md` §4）。
+ * ここに「金額を直す」メソッドを足さないこと。訂正は**次の期間での調整**
+ * として行う。直接書き換えを許すと、明細と振込額が食い違ったときに、
+ * どちらが正しいのか誰にも分からなくなる。
+ *
+ * ⚠️ **設定は「締めるとき」に 1 度だけ読む。** 読んだ値は精算へ焼き付ける。
+ * 判定のたびに読むと、最低支払額を変えた瞬間に過去の精算が動く
+ * （`SETTLEMENT_AND_REFUND.md` §0 の三層）。
+ */
+
+/** 注入の合図。⚠️ interface は実行時に消えるので、型では注入できない。 */
+export const PAYOUT_CONFIG = Symbol('sengoku:payout-config');
+
+export interface PayoutConfig {
+  readonly repository: PayoutRepository;
+  readonly settings: SettlementSettingsRepository;
+  /** このプロセスの環境。⚠️ 要求から受け取らない。 */
+  readonly appEnvironment: IntegrationEnvironment;
+  readonly clock: ClockPort;
+  readonly ids: IdGeneratorPort;
+  readonly audit: AuditLogPort;
+}
+
+/** 締めた結果。⚠️ 作家さまごとに 1 件ずつ返す。丸めない。 */
+export interface ClosePeriodResult {
+  readonly periodKey: string;
+  readonly items: readonly PayoutView[];
+}
+
+@Injectable()
+export class PayoutService {
+  constructor(@Inject(PAYOUT_CONFIG) private readonly config: PayoutConfig) {}
+
+  list(query: {
+    readonly limit: number;
+    readonly periodKey?: string | undefined;
+    readonly creatorAccountId?: string | undefined;
+    readonly status?: PayoutStatus | undefined;
+  }): Promise<readonly PayoutView[]> {
+    return this.config.repository.list(query);
+  }
+
+  async detail(payoutId: string): Promise<{
+    readonly payout: PayoutView;
+    readonly lines: readonly PayoutLineView[];
+    readonly openRefundWindows: number;
+  } | null> {
+    const payout = await this.config.repository.findById(payoutId);
+    if (payout === null) {
+      return null;
+    }
+    const lines = await this.config.repository.listLines(payoutId);
+
+    /*
+      ⚠️ **確定済みなら、いま数え直さない。** 確定の時点で 0 だったことは
+         記録として残っている。数え直すと、あとから足された注文で
+         「確定済みなのに窓が開いている」という読み方ができてしまう。
+    */
+    if (payout.status !== 'draft') {
+      return { payout, lines, openRefundWindows: 0 };
+    }
+    const openRefundWindows = await this.config.repository.countOpenRefundWindows(
+      payout.id,
+      this.config.clock.now(),
+    );
+    return { payout, lines, openRefundWindows };
+  }
+
+  /**
+   * 期間を締めて、作家さまごとの下書きを作る。
+   *
+   * ⚠️ **作家さまを指定させない。** その期間に売上か繰越のある方を、
+   * こちらで洗い出す。指定できると、指定し忘れた方がいつまでも
+   * 支払われない——そして誰も気づかない。
+   *
+   * ⚠️ **何度でも作り直せる。** ただし `draft` のときだけ。締めたあとの
+   * 精算は動かさない。
+   */
+  async closePeriod(input: {
+    readonly periodKey: string;
+    readonly actorAccountId: string;
+  }): Promise<ClosePeriodResult> {
+    const now = this.config.clock.now();
+    const period = this.periodOrThrow(input.periodKey);
+
+    /*
+      ⚠️ **締めを迎えていない期間は締めさせない。** `endAt` は「翌月の
+         1 日 0 時（JST）」なので、その瞬間より前に集計すると、まだ売れる
+         余地のある期間を締めることになる。
+    */
+    if (!isPeriodClosed(period, now)) {
+      throw new DomainErrorException('PAYOUT_PERIOD_NOT_CLOSED');
+    }
+
+    const settings = await this.config.settings.find(this.config.appEnvironment);
+    if (settings === null) {
+      /*
+        ⚠️ **既定値を作らない。** 最低支払額も振込手数料の負担も、
+           決めていないまま精算へ焼き付けてはいけない。焼き付けた値は
+           もう直せない。
+      */
+      throw new DomainErrorException('SETTLEMENT_SETTINGS_INVALID');
+    }
+
+    const previous = previousPayoutPeriod(period);
+    const creators = await this.config.repository.listCreatorsForPeriod({
+      periodStart: period.startAt,
+      periodEnd: period.endAt,
+      previousPeriodKey: previous.key,
+    });
+
+    const items: PayoutView[] = [];
+    for (const creatorAccountId of creators) {
+      /*
+        ⚠️ **締めたあとの精算は飛ばす。** 例外にしない——1 人でも確定
+           済みの方がいると、その期間を作り直せなくなる。飛ばした事実は
+           監査ログの件数から読める。
+      */
+      const existing = await this.config.repository.findByPeriod(creatorAccountId, period.key);
+      if (existing !== null && existing.status !== 'draft') {
+        continue;
+      }
+
+      const draft = await this.buildFor(creatorAccountId, period, settings, now);
+      const saved = await this.config.repository.saveDraft({
+        payoutId: this.config.ids.generate(),
+        creatorAccountId,
+        periodKey: period.key,
+        periodStart: period.startAt,
+        periodEnd: period.endAt,
+        // ⚠️ 期日も焼き付ける。設定を変えても過去の精算は動かない。
+        dueAt: payoutDueAt(period, settings.payoutOffsetMonths),
+        currency: 'JPY',
+        grossAmount: draft.grossAmount,
+        feeAmount: draft.feeAmount,
+        refundedAmount: draft.refundedAmount,
+        carriedInAmount: draft.carriedInAmount,
+        netAmount: draft.netAmount,
+        carriedOutAmount: draft.carriedOutAmount,
+        minimumPayoutAmount: draft.minimumPayoutAmount,
+        transferFeeBearer: draft.transferFeeBearer,
+        lines: draft.lines.map((line) => ({ id: this.config.ids.generate(), ...line })),
+        now,
+      });
+      items.push(saved);
+    }
+
+    await this.config.audit.record({
+      actorAccountId: input.actorAccountId,
+      action: 'payout.period_closed',
+      targetType: 'payout_period',
+      targetId: period.key,
+      // ⚠️ 金額は秘密ではないが、ここに要るのは件数まで。
+      summary: { periodKey: period.key, creators: creators.length, drafts: items.length },
+    });
+
+    return { periodKey: period.key, items };
+  }
+
+  /**
+   * 確定する。
+   *
+   * ⚠️ **返金の窓が開いている注文が 1 件でもあれば断る**
+   * （`SETTLEMENT_AND_REFUND.md` §2-3）。閉じる前に確定すると、返金のたびに
+   * 作家さまから返してもらう話になる。いちばん揉める作業で、少額なら
+   * 回収を諦めることになり、諦めた分は運営の損になる。
+   */
+  async confirm(input: {
+    readonly payoutId: string;
+    readonly actorAccountId: string;
+  }): Promise<PayoutView> {
+    const now = this.config.clock.now();
+    const payout = await this.findOrThrow(input.payoutId);
+    this.assertTransition(payout.status, 'confirmed');
+
+    /*
+      ⚠️ **この精算の明細そのものから数え直す。** 下書きを作った時点の
+         件数ではない。作ってから確定するまでのあいだに窓は閉じるので、
+         作った時点で止めると、いつまでも確定できない精算ができる。
+    */
+    const openRefundWindows = await this.config.repository.countOpenRefundWindows(payout.id, now);
+    const allowed = canConfirmPayout({ openRefundWindows });
+    if (!allowed.ok) {
+      throw new DomainErrorException(allowed.error.code);
+    }
+
+    const advanced = await this.config.repository.advance({
+      payoutId: payout.id,
+      from: 'draft',
+      to: 'confirmed',
+      actorAccountId: input.actorAccountId,
+      now,
+    });
+    if (advanced === null) {
+      // 同時に押された。⚠️ 2 回通す形にしない。
+      throw new DomainErrorException('PAYOUT_NOT_EDITABLE');
+    }
+
+    await this.config.audit.record({
+      actorAccountId: input.actorAccountId,
+      action: 'payout.confirmed',
+      targetType: 'payout',
+      targetId: payout.id,
+      summary: {
+        periodKey: payout.periodKey,
+        netAmount: advanced.netAmount,
+        carriedOutAmount: advanced.carriedOutAmount,
+      },
+    });
+    return advanced;
+  }
+
+  /**
+   * 支払い済みにする。
+   *
+   * ⚠️ **これは「振り込んだ」という宣言であって、振込そのものではない。**
+   * 実際に振り込んだかを機械は確かめられない。だからオーナー限定にし、
+   * 誰がいつ宣言したかを必ず残す。
+   */
+  async markPaid(input: {
+    readonly payoutId: string;
+    readonly actorAccountId: string;
+  }): Promise<PayoutView> {
+    const now = this.config.clock.now();
+    const payout = await this.findOrThrow(input.payoutId);
+    this.assertTransition(payout.status, 'paid');
+
+    const advanced = await this.config.repository.advance({
+      payoutId: payout.id,
+      from: 'confirmed',
+      to: 'paid',
+      actorAccountId: input.actorAccountId,
+      now,
+    });
+    if (advanced === null) {
+      throw new DomainErrorException('PAYOUT_NOT_EDITABLE');
+    }
+
+    await this.config.audit.record({
+      actorAccountId: input.actorAccountId,
+      action: 'payout.paid',
+      targetType: 'payout',
+      targetId: payout.id,
+      summary: { periodKey: payout.periodKey, netAmount: advanced.netAmount },
+    });
+    return advanced;
+  }
+
+  /**
+   * 締めるときの集計。
+   *
+   * ⚠️ **保存された金額と比べ直す用途に使わない。** 比べて差があったら
+   * 直す、という作りにすると、締めたあとに金額が動く道ができる。
+   */
+  private async buildFor(
+    creatorAccountId: string,
+    period: PayoutPeriod,
+    settings: { minimumPayoutAmount: number; transferFeeBearer: 'creator' | 'platform' },
+    now: Date,
+  ): Promise<PayoutDraft> {
+    const previous = previousPayoutPeriod(period);
+    const [candidates, clawbacks, carriedInAmount] = await Promise.all([
+      this.config.repository.listCandidates({
+        creatorAccountId,
+        periodStart: period.startAt,
+        periodEnd: period.endAt,
+      }),
+      this.config.repository.listClawbacks(creatorAccountId),
+      this.config.repository.carriedInAmount(creatorAccountId, previous.key),
+    ]);
+
+    return buildPayoutDraft({
+      period,
+      creatorAccountId,
+      candidates,
+      clawbacks,
+      carriedInAmount,
+      minimumPayoutAmount: settings.minimumPayoutAmount,
+      transferFeeBearer: settings.transferFeeBearer,
+      now,
+    });
+  }
+
+  private periodOrThrow(periodKey: string): PayoutPeriod {
+    const parsed = parsePayoutPeriod(periodKey);
+    if (!parsed.ok) {
+      throw new DomainErrorException(parsed.error.code);
+    }
+    return parsed.value;
+  }
+
+  private async findOrThrow(payoutId: string): Promise<PayoutView> {
+    const payout = await this.config.repository.findById(payoutId);
+    if (payout === null) {
+      throw new DomainErrorException('PAYOUT_NOT_FOUND');
+    }
+    return payout;
+  }
+
+  /** ⚠️ 状態機械はドメインが持つ。ここでは呼ぶだけ。 */
+  private assertTransition(from: PayoutStatus, to: PayoutStatus): void {
+    const moved = transitionPayoutStatus(from, to);
+    if (!moved.ok) {
+      throw new DomainErrorException(moved.error.code);
+    }
+  }
+}

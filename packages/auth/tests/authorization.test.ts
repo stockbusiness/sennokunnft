@@ -58,6 +58,14 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
     ⚠️ **`auditor` には渡さない。** お金が動く操作である。
   */
   'order.refund': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // ⚠️ 監査は見られる。締めることはできない。
+  'payout.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  'payout.manage': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
+    ⚠️ **オーナーの印が要る。** 下の「オーナーの印」の組が別に確かめるので、
+       ここ（印を持たない actor の表）では operator でも拒否になる。
+  */
+  'payout.mark_paid': { anonymous: false, buyer: false, operator: false, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },
@@ -276,6 +284,7 @@ describe('オーナーの印', () => {
     'integration.manage',
     'integration.manage_secret',
     'legal.publish',
+    'payout.mark_paid',
     'payment_credential.manage',
     // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
     'settlement.manage',

@@ -568,6 +568,36 @@ export {
 export type { SettlementSettingsRepository } from './ports/settlement';
 
 export {
+  PAYOUT_STATUSES,
+  buildPayoutDraft,
+  canConfirmPayout,
+  transitionPayoutStatus,
+  type PayoutCandidate,
+  type PayoutClawback,
+  type PayoutDraft,
+  type PayoutDraftInput,
+  type PayoutLineDraft,
+  type PayoutStatus,
+} from './settlement/payout';
+
+export {
+  isPeriodClosed,
+  parsePayoutPeriod,
+  payoutDueAt,
+  payoutPeriodContaining,
+  payoutPeriodOf,
+  previousPayoutPeriod,
+  type PayoutPeriod,
+} from './settlement/period';
+
+export type {
+  PayoutLineView,
+  PayoutRepository,
+  PayoutView,
+  SavePayoutDraftCommand,
+} from './ports/payout';
+
+export {
   REFUND_RECORD_STATUSES,
   REFUND_INITIATORS,
   type RefundContext,
