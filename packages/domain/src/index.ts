@@ -786,3 +786,64 @@ export type {
   WebhookClaim,
   WebhookReceiptRecord,
 } from './ports/order';
+
+// --- 購入者への知らせ（P0-4） ---------------------------------------------
+export {
+  NOTIFICATION_EVENT_TYPES,
+  NOTIFICATION_SUBJECT_TYPES,
+  NOTIFICATION_VARIABLES,
+  COMMON_NOTIFICATION_VARIABLES,
+  allowedVariables,
+  isNotificationEventType,
+  subjectTypeOf,
+} from './notification/events';
+export type { NotificationEventType, NotificationSubjectType } from './notification/events';
+
+export {
+  NOTIFICATION_TEMPLATE_STATUSES,
+  NOTIFICATION_SUBJECT_MAX,
+  NOTIFICATION_BODY_MAX,
+  referencedVariables,
+  renderTemplate,
+  validateTemplate,
+} from './notification/template';
+export type {
+  NotificationTemplateDraft,
+  NotificationTemplateStatus,
+  RenderedNotification,
+} from './notification/template';
+
+export {
+  NOTIFICATION_STATUSES,
+  NOTIFICATION_MAX_ATTEMPTS,
+  NOTIFICATION_BATCH_SIZE,
+  canResendNotification,
+  decideNotification,
+  isRetryableMailOutcome,
+  mailErrorCodeFor,
+} from './notification/dispatch';
+export type {
+  MailAttemptOutcome,
+  NotificationAttemptContext,
+  NotificationDecision,
+  NotificationStatus,
+} from './notification/dispatch';
+
+export { maskEmail } from './notification/recipient';
+export type { RecipientResolution } from './notification/recipient';
+
+export type {
+  MailSenderPort,
+  NotificationEnqueueInput,
+  NotificationEnqueueOutcome,
+  NotificationFailureInput,
+  NotificationHistoryPage,
+  NotificationHistoryPort,
+  NotificationHistoryQuery,
+  NotificationHistoryRecord,
+  NotificationOutboxPort,
+  NotificationRecord,
+  NotificationTemplateRecord,
+  NotificationTemplateRepository,
+  RecipientResolverPort,
+} from './ports/notification';

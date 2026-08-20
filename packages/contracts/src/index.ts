@@ -315,3 +315,25 @@ export {
   type OperationsReviewView,
   type ResolveOperationsReviewRequest,
 } from './operations-review';
+
+// --- 購入者への知らせ（P0-4） ---------------------------------------------
+export {
+  NOTIFICATION_EVENT_TYPE_VALUES,
+  NOTIFICATION_STATUS_VALUES,
+  createNotificationTemplateRequestSchema,
+  notificationHistoryListResponseSchema,
+  notificationHistoryQuerySchema,
+  notificationHistorySchema,
+  notificationTemplateListResponseSchema,
+  notificationTemplateSchema,
+  sendNotificationsResponseSchema,
+} from './notification';
+export type {
+  CreateNotificationTemplateRequest,
+  NotificationHistoryListResponse,
+  NotificationHistoryQuery,
+  NotificationHistoryView,
+  NotificationTemplateListResponse,
+  NotificationTemplateView,
+  SendNotificationsResponse,
+} from './notification';

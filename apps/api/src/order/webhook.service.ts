@@ -13,6 +13,7 @@ import {
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
+import { BuyerNotifier, NULL_NOTIFIER } from '../notification/buyer-notifier';
 import type { EntitlementIssuanceService } from './issuance.service';
 import type { RefundService } from './refund.service';
 
@@ -75,6 +76,13 @@ export class PaymentWebhookService {
      * では届けにいかない。受取権はできているので、繋いだあとに掃き出しが拾う。
      */
     private readonly autoDelivery: WalletAutoDeliveryService | null = null,
+    /**
+     * 購入者への知らせ（P0-4）。
+     *
+     * ⚠️ **決して例外を投げない実装を渡す。** ここは決済確定の直後で、
+     * 例外を投げると事業者へ 5xx を返し、同じ知らせが送り直され続ける。
+     */
+    private readonly notifier: BuyerNotifier = NULL_NOTIFIER,
   ) {}
 
   /**
@@ -190,6 +198,12 @@ export class PaymentWebhookService {
         targetId: order.id,
         summary: { orderNumber: order.orderNumber, failureCode: fact.failureCode ?? 'unknown' },
       });
+      // お支払いが成立しなかった知らせ（P0-4）。⚠️ 記録より後に積む。
+      await this.notifier.paymentFailed({
+        orderId: order.id,
+        accountId: order.accountId,
+        orderNumber: order.orderNumber,
+      });
       await this.recordAndFinish(fact, 'processed', order.id, fact.failureCode, now);
       return true;
     }
@@ -207,6 +221,17 @@ export class PaymentWebhookService {
       targetId: order.id,
       // ⚠️ 二重解放していないことが後から分かるように、結果を残す。
       summary: { orderNumber: order.orderNumber, released },
+    });
+    /*
+      お支払いの期限が過ぎた知らせ（P0-4）。
+
+      ⚠️ **黙って取り置きを解かない。** 買った方から見ると、
+         注文したはずのものが理由も分からず消える。
+    */
+    await this.notifier.paymentExpired({
+      orderId: order.id,
+      accountId: order.accountId,
+      orderNumber: order.orderNumber,
     });
     await this.recordAndFinish(fact, 'processed', order.id, null, now);
     return true;
@@ -327,6 +352,22 @@ export class PaymentWebhookService {
     });
 
     /*
+      お支払いを確認した知らせ（P0-4）。
+
+      ⚠️ **決済の確定より後に積む。** 先に積むと、確定に失敗したときに
+         「お支払いを確認しました」だけが届く。
+      ⚠️ **同じ Webhook が 2 度届いても 1 通だけ。** 種別と対象で一意にして
+         あり、DB の UNIQUE が最後の砦になる。
+    */
+    await this.notifier.paymentSucceeded({
+      orderId: order.id,
+      accountId: order.accountId,
+      orderNumber: order.orderNumber,
+      totalAmount: order.totalAmount,
+      currency: order.currency,
+    });
+
+    /*
       受取権をこの場で作る（P0-1）。
 
       ⚠️ **失敗しても決済の確定を巻き戻さない。** お金は既に動いている。
@@ -351,8 +392,26 @@ export class PaymentWebhookService {
       ⚠️ **失敗しても決済の知らせは 200 で返す。** 決済も発行も済んでいる。
          ここで投げると同じ知らせが送り直され、いずれ宛先ごと無効化される。
     */
+    let deliveredNow = 0;
     if (issued !== null && issued.entitlementIds.length > 0 && this.autoDelivery !== null) {
-      await this.autoDelivery.runForEntitlements(issued.entitlementIds);
+      const result = await this.autoDelivery.runForEntitlements(issued.entitlementIds);
+      deliveredNow = result.delivered;
+    }
+
+    /*
+      受取用のウォレットの登録をお願いする知らせ（P0-4）。
+
+      ⚠️ **その場で 1 枚も届かなかったときだけ。** 届いている方へ
+         「登録してください」と送ると、何をすればよいのか分からなくなる。
+      ⚠️ **注文 1 件につき 1 通。** 受取権の枚数だけ送ると、
+         3 枚買った方に同じお願いが 3 通届く。
+    */
+    if (issued !== null && issued.entitlementIds.length > 0 && deliveredNow === 0) {
+      await this.notifier.walletRegistrationRequested({
+        orderId: order.id,
+        accountId: order.accountId,
+        orderNumber: order.orderNumber,
+      });
     }
 
     await this.recordAndFinish(fact, 'processed', order.id, null, now);

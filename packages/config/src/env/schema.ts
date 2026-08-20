@@ -289,6 +289,54 @@ const apiEnvObject = baseEnvObject.extend({
     .transform((value) => value === 'true'),
 
   /**
+   * 購入者への知らせを**作る**か（P0-4）。
+   *
+   * ⚠️ **送るかどうかとは別の軸。** まとめると、送信だけ止めたい場面で
+   * 生成まで止まり、止めていたあいだの注文が永久に知らされなくなる。
+   *
+   * ⚠️ `"1"` や `"TRUE"` は**黙って無効に倒さず起動を拒否する**。
+   */
+  NOTIFICATION_GENERATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * 購入者への知らせを**送る**か（P0-4）。
+   *
+   * ⚠️ 有効にするには送信事業者・差出人・宛先の取り出し先がそろっている
+   * 必要がある。そろっていなければ**起動を拒否する**——起動させると、
+   * 知らせだけが全件溜まり、誰も異常に気づけない。
+   */
+  NOTIFICATION_DELIVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** メールの送信事業者。⚠️ 既定は `none`（送らない）。 */
+  MAIL_PROVIDER: z.enum(['none', 'resend']).default('none'),
+  /** ⚠️ ログへ出さない。画面・API・監査ログへも返さない。 */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  /** 差出人。`名前 <address>` の形も使える。 */
+  MAIL_FROM_ADDRESS: z.string().min(1).optional(),
+  /** 返信先。⚠️ 未設定なら差出人へ返る。 */
+  MAIL_REPLY_TO: z.string().min(1).optional(),
+  /**
+   * 宛先を取り出すための鍵（`UD-503` 決定 2026-08-20）。
+   *
+   * ⚠️ **全利用者を読める強い鍵。** この用途以外へ配らない。
+   * 画面側（`apps/web`）へ渡さない。⚠️ ログへ出さない。
+   */
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  /** 文面へ差し込む事業者名。 */
+  NOTIFICATION_SITE_NAME: z.string().min(1).default('千ノ国NFTマーケット'),
+  /**
+   * 文面の中のリンクの起点。
+   *
+   * ⚠️ **設定を誤ると、知らせの中のリンクが全部おかしくなる。** 送ったあとに
+   * 気づいても、届いたメールは直せない。配備ごとに必ず設定する。
+   */
+  NOTIFICATION_SITE_URL: z.url().default('http://localhost:3000'),
+
+  /**
    * プラットフォーム手数料率。**bps（1/100 %）の整数**。
    *
    * ✅ **決定済 2026-08-19（`UD-109`）: 20% = `2000`。**

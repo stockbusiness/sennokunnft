@@ -73,3 +73,13 @@ export {
   PrismaLegalDocumentRepository,
   PrismaLegalConsentRepository,
 } from './repositories/legal.repository';
+
+// --- 購入者への知らせ（P0-4） ---------------------------------------------
+export { PrismaNotificationOutboxRepository } from './repositories/notification.repository';
+export { PrismaNotificationTemplateRepository } from './repositories/notification-template.repository';
+export {
+  PrismaAuthSubjectLookup,
+  PrismaNotificationHistoryRepository,
+} from './repositories/notification-history.repository';
+export { PrismaNotificationSweepRepository } from './repositories/notification-sweep.repository';
+export type { NotifiableEntitlement } from './repositories/notification-sweep.repository';

@@ -113,6 +113,7 @@ model Account {
   payouts                      Payout[]                     @relation("PayoutCreator")
   paidPayouts                  Payout[]                     @relation("PayoutPayer")
   resolvedOperationsReviews    OperationsReview[]           @relation("OperationsReviewResolver")
+  notifications                NotificationDelivery[]       @relation("NotificationRecipient")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -1348,4 +1349,93 @@ model OperationsReview {
   @@index([status, createdAt])
   @@index([orderId])
   @@map("operations_reviews")
+}
+
+// ============================================================================
+// 購入者への知らせ（実運営 指示書 P0-4）
+// ============================================================================
+
+/// 知らせの文面。
+///
+/// ⚠️ **文面をコードへ書かない。** 直すたびにデプロイが要る作りにすると、
+/// 文言の修正という最も頻度の高い運用が、毎回開発待ちになる。
+///
+/// ⚠️ **公開した版は書き換えない。** 送信履歴がこの版を指しているため、
+/// 書き換えると「そのとき何と書いて送ったか」が復元できなくなる。
+/// 直すときは新しい版を作る。
+///
+/// ⚠️ **削除の口を作らない。** 参照している履歴が孤児になる。
+model NotificationTemplate {
+  id                 String    @id @default(uuid()) @db.Uuid
+  /// 知らせの種別。⚠️ CHECK で語彙を縛っている。
+  eventType          String    @map("event_type")
+  /// 版。⚠️ 種別ごとに 1 から採番する。
+  version            Int
+  subject            String
+  body               String
+  /// `draft` / `published`。⚠️ CHECK で縛っている。
+  status             String    @default("draft")
+  publishedAt        DateTime? @map("published_at") @db.Timestamptz(6)
+  createdByAccountId String?   @map("created_by_account_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([eventType, version], map: "notification_templates_event_version_unique")
+  @@index([eventType, status])
+  @@map("notification_templates")
+}
+
+/// 送信待ちと送信履歴。
+///
+/// ⚠️ **積むのは業務更新と同一トランザクション、送るのはコミットのあと。**
+/// 先に送ると、業務側が巻き戻ったときに「起きていないこと」を知らせる。
+/// あとから積むと、そのあいだに落ちた注文が誰にも知らされずに残る。
+///
+/// ⚠️ **宛先の平文を持たない**（`UD-503`）。送るときに認証基盤から取り直し、
+/// ここへ残すのは伏せた表記と照合用のハッシュだけ（決定 2026-08-20）。
+///
+/// ⚠️ **本文は積んだ時点で確定させる。** 送るたびに作り直すと、そのあいだに
+/// 文面を直した場合、1 通目と 2 通目で違う内容が同じ知らせとして送られる。
+model NotificationDelivery {
+  id                String    @id @default(uuid()) @db.Uuid
+  eventType         String    @map("event_type")
+  /// `order` / `entitlement` / `refund`。⚠️ CHECK で縛っている。
+  subjectType       String    @map("subject_type")
+  subjectId         String    @map("subject_id") @db.Uuid
+  /// 宛先の本人。⚠️ アドレスそのものは持たない。
+  accountId         String    @map("account_id") @db.Uuid
+  /// 焼き付けた文面。⚠️ 送信時に組み立て直さない。
+  renderedSubject   String    @map("rendered_subject")
+  renderedBody      String    @map("rendered_body")
+  /// 使った文面の版。⚠️ あとから何を送ったかを辿る鍵。
+  templateVersion   Int       @map("template_version")
+  /// PENDING / PROCESSING / SENT / FAILED / DEAD / SKIPPED。CHECK で縛る。
+  status            String    @default("PENDING")
+  attemptCount      Int       @default(0) @map("attempt_count")
+  maxAttempts       Int       @default(5) @map("max_attempts")
+  nextRetryAt       DateTime  @default(now()) @map("next_retry_at") @db.Timestamptz(6)
+  /// 伏せた宛先（`t*****@e******.jp`）。⚠️ ここから元へは戻せない。
+  maskedRecipient   String?   @map("masked_recipient")
+  /// 照合用のハッシュ。⚠️ 鍵付き（`EMAIL_LOOKUP_PEPPER`）。素のハッシュにしない。
+  recipientHash     String?   @map("recipient_hash")
+  /// 送信事業者が採番した識別子。⚠️ 問い合わせのときに伝える値。
+  providerMessageId String?   @map("provider_message_id")
+  lastErrorCode     String?   @map("last_error_code")
+  /// ⚠️ 応答本文をそのまま入れない（宛先が混ざりうる）。
+  lastErrorMessage  String?   @map("last_error_message")
+  /// 送らずに閉じた理由。⚠️ 失敗と混ぜない。
+  skippedReasonCode String?   @map("skipped_reason_code")
+  correlationId     String?   @map("correlation_id")
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account Account @relation("NotificationRecipient", fields: [accountId], references: [id], onDelete: Restrict)
+
+  /// ★ 重複送信を止める最後の砦。同じ種別・同じ対象は 1 通だけ。
+  @@unique([eventType, subjectType, subjectId], map: "notification_deliveries_event_subject_unique")
+  @@index([status, nextRetryAt])
+  @@index([accountId, createdAt])
+  @@index([subjectId])
+  @@map("notification_deliveries")
 }

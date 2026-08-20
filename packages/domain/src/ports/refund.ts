@@ -212,6 +212,14 @@ export interface RevocationPayloadConflict {
 /** 返金の判定に要る、注文の「いまの姿」を DB から集めたもの。 */
 export interface RefundContext {
   readonly orderId: string;
+  /**
+   * 買った方と注文番号。
+   *
+   * ⚠️ **知らせのために持つ**（P0-4）。判定には使わない。
+   * ⚠️ メールアドレスは持たない（`UD-503`）。宛先は送るときに取り直す。
+   */
+  readonly accountId: string;
+  readonly orderNumber: string;
   readonly totalAmount: number;
   readonly currency: string;
   readonly refundableUntil: Date | null;

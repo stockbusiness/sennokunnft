@@ -54,6 +54,9 @@ export class PrismaRefundRepository implements RefundRepository {
       where: { id: orderId },
       select: {
         id: true,
+        // ⚠️ 知らせの宛先の本人（P0-4）。アドレスそのものは持たない。
+        accountId: true,
+        orderNumber: true,
         totalAmount: true,
         totalCurrency: true,
         paymentStatus: true,
@@ -94,6 +97,8 @@ export class PrismaRefundRepository implements RefundRepository {
 
     return {
       orderId: order.id,
+      accountId: order.accountId,
+      orderNumber: order.orderNumber,
       totalAmount: order.totalAmount,
       currency: order.totalCurrency,
       refundableUntil: order.refundableUntil,

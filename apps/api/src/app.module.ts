@@ -47,7 +47,13 @@ import type {
   ProbeOutcome,
   OperationsReviewRepository,
   RevocationReconcileRepository,
+  MailSenderPort,
+  NotificationHistoryPort,
+  NotificationOutboxPort,
+  NotificationTemplateRepository,
+  RecipientResolverPort,
 } from '@sengoku/domain';
+import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
@@ -122,6 +128,12 @@ import { WalletRevokePlanner } from './claim/revoke.planner';
 import { RevocationReconcileService } from './claim/revocation-reconcile.service';
 import { OperationsReviewController } from './operations/operations-review.controller';
 import { OperationsReviewService } from './operations/operations-review.service';
+import { NotificationController } from './notification/notification.controller';
+import { NotificationAdminService } from './notification/notification-admin.service';
+import { NotificationService, NOTIFICATION_CONFIG } from './notification/notification.service';
+import { NotificationSendService } from './notification/send.service';
+import { BuyerNotifier } from './notification/buyer-notifier';
+import { NotificationSweepService } from './notification/sweep.service';
 import {
   AdminSettlementController,
   SETTLEMENT_CONFIG,
@@ -394,6 +406,47 @@ export interface AppDependencies {
     readonly outbox: WalletDeliveryOutboxPort;
     readonly logger: Logger;
   };
+  /**
+   * 購入者への知らせ（P0-4）。
+   *
+   * ⚠️ **省略できない。** 省略できるようにすると、知らせの無い配備が
+   * 「正常」に見える。買った方から見ると、何も届かないのは異常である。
+   */
+  readonly notification: {
+    readonly templates: NotificationTemplateRepository;
+    readonly outbox: NotificationOutboxPort;
+    readonly history: NotificationHistoryPort;
+    /**
+     * 知らせを**作る**か。
+     *
+     * ⚠️ **送るかどうかとは別の軸。** まとめると、送信だけ止めたい場面で
+     * 生成まで止まり、止めていたあいだの注文が永久に知らされなくなる。
+     */
+    readonly generationEnabled: boolean;
+    readonly siteName: string;
+    readonly siteUrl: string;
+    /**
+     * 実際に送る側。
+     *
+     * ⚠️ **`undefined` は「まだ送らない」を意味する。** 積むところまでは
+     * 動かし、送信だけを止められるようにしてある。
+     */
+    readonly delivery?: {
+      readonly recipients: RecipientResolverPort;
+      readonly mailer: MailSenderPort;
+    };
+    /**
+     * 「届いた」「止まっている」を数え上げる口。
+     *
+     * ⚠️ **省略できる。** 数え上げなくても、注文・決済・返金の知らせは
+     * 従来どおり積まれる。ここが無いのはお届け結果の知らせだけ。
+     */
+    readonly sweepSource?: {
+      listDeliveredWithoutNotice(limit: number): Promise<readonly NotifiableEntitlementRow[]>;
+      listStalledWithoutNotice(limit: number): Promise<readonly NotifiableEntitlementRow[]>;
+    };
+    readonly logger: Logger;
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -517,6 +570,8 @@ export class AppModule implements NestModule {
         ...(claim === undefined ? [] : [ClaimController, ClaimReissueController]),
         // 運用確認キュー（M3a）。⚠️ 積む口は無く、読むのと印を付けるだけ。
         OperationsReviewController,
+        // 知らせの文面と送信履歴（P0-4）。⚠️ 積む口も送る口もここには無い。
+        NotificationController,
       ],
       providers: [
         {
@@ -628,7 +683,8 @@ export class AppModule implements NestModule {
                ときは、送信の直前で断る（黙って成功にしない）。
           */
           provide: RefundService,
-          useFactory: () =>
+          inject: [BuyerNotifier],
+          useFactory: (notifier: BuyerNotifier) =>
             new RefundService(
               deps.refunds,
               payments?.gateway ?? null,
@@ -654,6 +710,8 @@ export class AppModule implements NestModule {
               */
               deps.revocation?.generationEnabled === true ? revokePlanner.plan : null,
               deps.operationsReviews,
+              // ご返金の受付と完了を買った方へ知らせる（P0-4）。
+              notifier,
             ),
         },
         {
@@ -662,6 +720,91 @@ export class AppModule implements NestModule {
           useFactory: () =>
             new OperationsReviewService(deps.operationsReviews, deps.clock, deps.audit),
         },
+        /*
+          購入者への知らせ（P0-4）。
+          ⚠️ **設定を `Symbol` で注入する。** interface は実行時に消えるので、
+             Nest は型では解決できない。
+        */
+        {
+          provide: NOTIFICATION_CONFIG,
+          useValue: {
+            generationEnabled: deps.notification.generationEnabled,
+            siteName: deps.notification.siteName,
+            siteUrl: deps.notification.siteUrl,
+          },
+        },
+        {
+          provide: NotificationService,
+          useFactory: () =>
+            new NotificationService(
+              deps.notification.templates,
+              deps.notification.outbox,
+              deps.ids,
+              deps.clock,
+              deps.notification.logger,
+              {
+                generationEnabled: deps.notification.generationEnabled,
+                siteName: deps.notification.siteName,
+                siteUrl: deps.notification.siteUrl,
+              },
+            ),
+        },
+        {
+          provide: BuyerNotifier,
+          inject: [NotificationService],
+          useFactory: (notifications: NotificationService): BuyerNotifier =>
+            new BuyerNotifier(notifications, {
+              siteUrl: deps.notification.siteUrl,
+            }),
+        },
+        ...(deps.notification.sweepSource === undefined
+          ? []
+          : [
+              {
+                provide: NotificationSweepService,
+                inject: [BuyerNotifier],
+                useFactory: (notifier: BuyerNotifier): NotificationSweepService =>
+                  new NotificationSweepService(deps.notification.sweepSource!, notifier),
+              },
+            ]),
+        {
+          provide: NotificationAdminService,
+          useFactory: () =>
+            new NotificationAdminService(
+              deps.notification.templates,
+              deps.notification.history,
+              deps.notification.outbox,
+              deps.clock,
+              deps.audit,
+            ),
+        },
+        /*
+          実際に送る側。
+          ⚠️ **送らない配備では provider ごと作らない。** 作っておいて中で
+             握りつぶすと、「止めたはずのものが動く」余地が残る。
+             口（cron）は生やしたまま 0 件を返す。
+        */
+        ...(deps.notification.delivery === undefined
+          ? []
+          : [
+              {
+                provide: NotificationSendService,
+                inject: [{ token: NotificationSweepService, optional: true }],
+                useFactory: (
+                  sweep: NotificationSweepService | undefined,
+                ): NotificationSendService =>
+                  new NotificationSendService(
+                    deps.notification.outbox,
+                    deps.notification.delivery!.recipients,
+                    deps.notification.delivery!.mailer,
+                    deps.emailHasher,
+                    deps.clock,
+                    deps.audit,
+                    deps.notification.logger,
+                    sweep ?? null,
+                  ),
+              },
+            ]),
         /*
           取消の取りこぼしを埋める処理（M3a）。
           ⚠️ **生成フラグが無効なら provider ごと作らない。** 作っておいて
@@ -707,7 +850,8 @@ export class AppModule implements NestModule {
         },
         {
           provide: OrderService,
-          useFactory: () =>
+          inject: [BuyerNotifier],
+          useFactory: (notifier: BuyerNotifier) =>
             new OrderService(
               deps.orders.repository,
               deps.listings,
@@ -724,6 +868,8 @@ export class AppModule implements NestModule {
                 resolveEffectiveTerms: deps.orders.resolveEffectiveTerms,
                 reservationMinutes: deps.orders.reservationMinutes,
               },
+              // ご注文を承った知らせ（P0-4）。
+              notifier,
             ),
         },
         ...(internalJobToken === undefined || internalJobToken === ''
@@ -739,10 +885,12 @@ export class AppModule implements NestModule {
                 inject: [
                   { token: WalletAutoDeliveryService, optional: true },
                   { token: RevocationReconcileService, optional: true },
+                  { token: NotificationSendService, optional: true },
                 ],
                 useFactory: (
                   autoDelivery: WalletAutoDeliveryService | undefined,
                   revocationReconcile: RevocationReconcileService | undefined,
+                  notificationSend: NotificationSendService | undefined,
                 ): InternalJobConfig => ({
                   token: internalJobToken,
                   /*
@@ -753,6 +901,7 @@ export class AppModule implements NestModule {
                   */
                   autoDelivery: autoDelivery ?? null,
                   revocationReconcile: revocationReconcile ?? null,
+                  notificationSend: notificationSend ?? null,
                 }),
               },
             ]),
@@ -797,11 +946,13 @@ export class AppModule implements NestModule {
                   EntitlementIssuanceService,
                   // ⚠️ Wallet へ繋いでいない配備では存在しない。
                   { token: WalletAutoDeliveryService, optional: true },
+                  BuyerNotifier,
                 ],
                 useFactory: (
                   refundService: RefundService,
                   issuanceService: EntitlementIssuanceService,
                   autoDelivery: WalletAutoDeliveryService | undefined,
+                  notifier: BuyerNotifier,
                 ) =>
                   new PaymentWebhookService(
                     payments.gateway,
@@ -823,6 +974,8 @@ export class AppModule implements NestModule {
                     // ⚠️ 登録済みの方には、その場で届けにいく（P0-2）。
                     //    ⚠️ 見つからない依存に Nest が渡すのは `undefined`。
                     autoDelivery ?? null,
+                    // 決済の結果を買った方へ知らせる（P0-4）。
+                    notifier,
                   ),
               },
             ]),

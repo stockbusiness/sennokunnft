@@ -59,12 +59,28 @@ export function createTestClient(): PrismaClient {
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   const settlement = await prisma.settlementSettings.findMany();
+  /*
+    ⚠️ **知らせの文面は「基準データ」で、試験ごとの汚れではない。**
+       `accounts` の TRUNCATE が CASCADE で連れていくので、退避して戻す。
+       戻さないと、文面が無いために知らせが 1 通も積まれず、
+       通知まわりの試験がすべて**空振りしたまま緑になる**。
+  */
+  /*
+    ⚠️ **文面は消さない。** 版 1 はマイグレーションが入れる「基準の文面」で、
+       試験ごとの汚れではない。消してしまうと、文面が無いために知らせが
+       1 通も積まれず、通知まわりの試験が**空振りしたまま緑になる**。
+       試験が作った版（2 以降）だけを片づける。
+    ⚠️ `notification_templates` は `accounts` への外部キーを持たないので、
+       下の TRUNCATE ... CASCADE では消えない。
+  */
+  await prisma.notificationTemplate.deleteMany({ where: { version: { gt: 1 } } });
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       nft_tokens, mint_jobs, entitlements, inventory_reservations, order_lines, payout_lines, payouts, refunds, payments,
       orders, wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
       webhook_events, outbox_events, audit_logs, legal_consents, legal_document_versions,
-      payment_credentials, settlement_settings
+      payment_credentials, settlement_settings,
+      notification_deliveries
     RESTART IDENTITY CASCADE
   `);
 

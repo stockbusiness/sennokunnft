@@ -155,6 +155,14 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 404 ではない。「見つからない」ではなく「この配備では引けない」。
   //    直すのは配備の設定で、探し直しても結果は変わらない。
   EMAIL_LOOKUP_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+
+  // --- 購入者への知らせ（P0-4）---
+  NOTIFICATION_TEMPLATE_INVALID: HttpStatus.BAD_REQUEST,
+  NOTIFICATION_TEMPLATE_UNKNOWN_VARIABLE: HttpStatus.BAD_REQUEST,
+  // ⚠️ 400 ではない。書いた人の入力ではなく、こちらの差し込み漏れ。
+  NOTIFICATION_RENDER_INCOMPLETE: HttpStatus.INTERNAL_SERVER_ERROR,
+  NOTIFICATION_TEMPLATE_NOT_PUBLISHED: HttpStatus.CONFLICT,
+  NOTIFICATION_NOT_RESENDABLE: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -311,6 +319,20 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   // ⚠️ 「見つかりません」と書かない。引けていないだけで、注文はあるかもしれない。
   EMAIL_LOOKUP_UNAVAILABLE:
     'この環境ではメールアドレスからのお調べができません。注文番号や期間でお探しください。',
+
+  // --- 購入者への知らせ（P0-4）---
+  NOTIFICATION_TEMPLATE_INVALID:
+    'この文面では保存できません。件名と本文が空でないこと、件名が 1 行であることをご確認ください。',
+  // ⚠️ **どの語が使えるかは画面が持っている。** ここで列挙すると、
+  //    語彙を増やしたときに 2 か所を直すことになり、片方だけ古くなる。
+  NOTIFICATION_TEMPLATE_UNKNOWN_VARIABLE:
+    'この知らせでは使えない差し込み語が含まれています。使える語の一覧をご確認ください。',
+  NOTIFICATION_RENDER_INCOMPLETE:
+    '文面に差し込む値がそろわなかったため、送信を見合わせました。運営へお知らせください。',
+  NOTIFICATION_TEMPLATE_NOT_PUBLISHED: 'この知らせの文面がまだ公開されていません。',
+  // ⚠️ 「できません」で終わらせず、どの状態なら送り直せるかを書く。
+  NOTIFICATION_NOT_RESENDABLE:
+    'この知らせは送り直せません。送り直せるのは、送信に失敗した知らせだけです。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

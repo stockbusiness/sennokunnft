@@ -22,6 +22,7 @@ import {
   type ReleasedReservation,
 } from '@sengoku/domain';
 import { DomainErrorException } from '../common/domain-error.filter';
+import { BuyerNotifier, NULL_NOTIFIER } from '../notification/buyer-notifier';
 
 export interface OrderServiceConfig {
   /**
@@ -89,6 +90,8 @@ export class OrderService {
     private readonly random: RandomPort,
     private readonly audit: AuditLogPort,
     private readonly config: OrderServiceConfig,
+    /** 購入者への知らせ（P0-4）。⚠️ 例外を投げない実装を渡す。 */
+    private readonly notifier: BuyerNotifier = NULL_NOTIFIER,
   ) {}
 
   async create(input: {
@@ -214,6 +217,25 @@ export class OrderService {
         ...(reused ? {} : { reservationExpiresAt: command.reservationExpiresAt.toISOString() }),
       },
     });
+
+    /*
+      ご注文を承った知らせ（P0-4）。
+
+      ⚠️ **同じ冪等キーで作り直された注文には送らない。** 送ると、
+         通信をやり直しただけの方に同じ知らせが 2 通届く。
+      ⚠️ **失敗しても注文は返す。** 知らせが積めないことを理由に
+         注文を落とすと、決済の前段で買えなくなる。
+    */
+    if (!reused) {
+      await this.notifier.orderPlaced({
+        orderId: outcome.value.order.id,
+        accountId: input.accountId,
+        orderNumber: outcome.value.order.orderNumber,
+        totalAmount: outcome.value.order.totalAmount,
+        currency: outcome.value.order.currency,
+        expiresAt: command.reservationExpiresAt,
+      });
+    }
 
     return { order: toBuyerView(outcome.value.order), reused };
   }

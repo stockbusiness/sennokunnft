@@ -50,6 +50,11 @@ import {
   PrismaClaimRepository,
   PrismaNonceStore,
   type PrismaClient,
+  PrismaAuthSubjectLookup,
+  PrismaNotificationHistoryRepository,
+  PrismaNotificationOutboxRepository,
+  PrismaNotificationSweepRepository,
+  PrismaNotificationTemplateRepository,
 } from '@sengoku/database';
 import {
   DevTokenVerifier,
@@ -75,6 +80,8 @@ import {
   ReachabilityProbe,
   probeStripeAccount,
   HmacEmailHasher,
+  ResendMailSender,
+  SupabaseRecipientResolver,
 } from '@sengoku/integrations';
 import { acceptingGeneration, CREDENTIAL_VERIFICATION_LIMIT } from '@sengoku/domain';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
@@ -600,6 +607,58 @@ async function bootstrap(): Promise<void> {
     appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
   });
 
+  /*
+    購入者への知らせ（P0-4）。
+    ⚠️ **送るための道具がそろっていなければ起動を拒否する。** 起動させると、
+       知らせだけが全件溜まり、利用者にも運営にも「送れていない」ことが
+       見えないまま日が過ぎる。
+    ⚠️ **鍵の値をログへ出さない。** 出すのは「どの変数が欠けているか」まで。
+  */
+  let notificationDelivery:
+    | { readonly recipients: SupabaseRecipientResolver; readonly mailer: ResendMailSender }
+    | undefined;
+  if (env.NOTIFICATION_DELIVERY_ENABLED) {
+    const missing: string[] = [];
+    if (env.MAIL_PROVIDER === 'none') missing.push('MAIL_PROVIDER');
+    if (env.RESEND_API_KEY === undefined) missing.push('RESEND_API_KEY');
+    if (env.MAIL_FROM_ADDRESS === undefined) missing.push('MAIL_FROM_ADDRESS');
+    if (env.SUPABASE_SERVICE_ROLE_KEY === undefined) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+    if (env.SUPABASE_URL === undefined) missing.push('SUPABASE_URL');
+    if (missing.length > 0) {
+      logger.fatal(
+        { variables: missing },
+        '知らせを送る設定が足りないため起動を中止しました（NOTIFICATION_DELIVERY_ENABLED が有効です）',
+      );
+      process.exit(1);
+    }
+    /*
+      ⚠️ **生成が無効なのに送信だけ有効、という組み合わせを許さない。**
+         積まれないので 1 通も送られない。設定した人は「有効にした」と
+         思っているので、誰も異常に気づけない。
+    */
+    if (!env.NOTIFICATION_GENERATION_ENABLED) {
+      logger.fatal(
+        { variable: 'NOTIFICATION_GENERATION_ENABLED' },
+        '知らせを作らない設定のまま送信だけを有効にはできません',
+      );
+      process.exit(1);
+    }
+    notificationDelivery = {
+      recipients: new SupabaseRecipientResolver(
+        {
+          url: env.SUPABASE_URL!,
+          serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
+        },
+        new PrismaAuthSubjectLookup(prisma),
+      ),
+      mailer: new ResendMailSender({
+        apiKey: env.RESEND_API_KEY!,
+        from: env.MAIL_FROM_ADDRESS!,
+        replyTo: env.MAIL_REPLY_TO,
+      }),
+    };
+  }
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -613,6 +672,24 @@ async function bootstrap(): Promise<void> {
       issuance: issuanceRepository,
       // ご自分が受け取ったもの（P0-3）。⚠️ 絞り込みはリポジトリが必ず行う。
       collectibles: new PrismaCollectibleRepository(prisma),
+      /*
+        購入者への知らせ（P0-4）。
+        ⚠️ **省略できない。** 省略できると、知らせの無い配備が「正常」に
+           見える。買った方から見ると、何も届かないのは異常である。
+      */
+      notification: {
+        templates: new PrismaNotificationTemplateRepository(prisma),
+        outbox: new PrismaNotificationOutboxRepository(prisma),
+        history: new PrismaNotificationHistoryRepository(prisma),
+        generationEnabled: env.NOTIFICATION_GENERATION_ENABLED,
+        siteName: env.NOTIFICATION_SITE_NAME,
+        // ⚠️ 末尾のスラッシュを落とす。文面の中で二重にならないように。
+        siteUrl: env.NOTIFICATION_SITE_URL.replace(/\/+$/, ''),
+        delivery: notificationDelivery,
+        // 「届いた」「止まっている」を状態から数え上げる（P0-4）。
+        sweepSource: new PrismaNotificationSweepRepository(prisma),
+        logger,
+      },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),
       // 作家さまの表示名（決定 2026-08-20）。
