@@ -24,6 +24,19 @@ export const ACTIONS = [
   'order.create',
   'order.view',
   'order.view_any',
+  // --- 問い合わせ対応（`UD-121`）---
+  /**
+   * 聞き取ったメールアドレスから注文を辿る。
+   *
+   * ⚠️ **`order.view_any` と分けてある。** 一覧を見ることと、
+   * 「このアドレスの方が買ったか」を確かめられることは別の力である。
+   * 後者は、注文の有無そのものを人に紐づけて答えられることを意味する。
+   * ⚠️ **広げるのは簡単、狭めるのは難しい**（`ADMIN_OPERATIONS_GAP.md` §5）。
+   * まず `operator` だけに置く。`auditor` へ広げるかは未決（`UD-121`）。
+   */
+  'order.lookup_buyer',
+  /** 対応メモを書く。⚠️ 追記のみ。直す口も消す口も無い。 */
+  'order.note',
   'checkout.create',
   'claim.inspect',
   'claim.accept',
@@ -136,6 +149,9 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'listing.manage_own',
     'order.view',
     'order.view_any',
+    // ⚠️ 問い合わせ対応（`UD-121`）。`auditor` には渡していない。
+    'order.lookup_buyer',
+    'order.note',
     'collection.view',
     'mint_job.retry',
     'audit_log.view',

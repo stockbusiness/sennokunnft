@@ -134,12 +134,57 @@ export const adminOrderListResponseSchema = z.object({
 });
 export type AdminOrderListResponse = z.infer<typeof adminOrderListResponseSchema>;
 
+/**
+ * 運営の注文検索（`UD-121`）。
+ *
+ * ⚠️ **メールアドレスをここに置かない。** URL の問い合わせ文字列は
+ * アクセスログ・ブラウザの履歴・共有されたリンクに残る。平文を持たないと
+ * 決めた値（`UD-503`）を、保持しない代わりにログへ撒くことになる。
+ * メールからの照合は `POST .../search` で本文として受け取る。
+ */
 export const adminOrderListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
   status: z.enum(ORDER_STATUS_VALUES).optional(),
+  paymentStatus: z.enum(ORDER_PAYMENT_STATUS_VALUES).optional(),
+  /** 完全一致、または末尾 8 文字。電話で聞き取れるのは末尾だけのことが多い。 */
+  orderNumber: z.string().max(64).optional(),
+  /**
+   * 期間。**JST の日付**（`YYYY-MM-DD`）。
+   *
+   * ⚠️ **時刻を受け取らない。** 探す人が見ているのは日付であって、
+   * 何時何分ではない。境界（その日の始まりと終わり）の解釈は
+   * ドメイン側に 1 か所だけ置く（`normalizeOrderSearch`）。
+   * ⚠️ 「から」が「まで」より後なら 400 で返す。
+   */
+  createdFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  createdTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  /** 金額（円の整数）。⚠️ 小数を受け取らない。 */
+  minTotalAmount: z.coerce.number().int().nonnegative().optional(),
+  maxTotalAmount: z.coerce.number().int().nonnegative().optional(),
+  /** 注文時点の作品名の部分一致。⚠️ マスタを引き直さない。 */
+  artworkTitle: z.string().max(100).optional(),
 });
 export type AdminOrderListQuery = z.infer<typeof adminOrderListQuerySchema>;
+
+/**
+ * メールアドレスから注文を辿る要求（`UD-121`）。
+ *
+ * ⚠️ **本文で受け取る。** URL に置くとアクセスログへ残る。
+ * ⚠️ **サーバー側で照合値へ変換し、平文は保存もログ出力もしない**（`UD-503`）。
+ */
+export const adminOrderEmailLookupSchema = z.object({
+  email: z.string().min(3).max(254),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+});
+export type AdminOrderEmailLookup = z.infer<typeof adminOrderEmailLookupSchema>;
 
 /** 期限切れ解放ジョブの結果。⚠️ 注文IDは返すが、購入者は返さない。 */
 export const releaseExpiredResponseSchema = z.object({
@@ -228,3 +273,66 @@ export const adminOrderDetailSchema = adminOrderViewSchema.extend({
   payments: adminOrderPaymentsSchema.optional(),
 });
 export type AdminOrderDetail = z.infer<typeof adminOrderDetailSchema>;
+
+// ---------------------------------------------------------------------------
+// 問い合わせ対応（`UD-121`）
+// ---------------------------------------------------------------------------
+
+export const ORDER_TIMELINE_KIND_VALUES = [
+  'order_created',
+  'checkout_created',
+  'checkout_expires',
+  'payment_succeeded',
+  'order_paid',
+  'webhook_received',
+  'webhook_processed',
+  'reservation_consumed',
+  'reservation_released',
+  'reservation_expires',
+  'support_note',
+] as const;
+
+/**
+ * 注文の経過 1 行ぶん。
+ *
+ * ⚠️ **`detail` に購入者の個人情報・秘匿値を入れない。** 経過は
+ * 問い合わせのたびに開かれ、画面のまま読み上げられることもある。
+ */
+export const orderTimelineEntrySchema = z.object({
+  kind: z.enum(ORDER_TIMELINE_KIND_VALUES),
+  at: z.string(),
+  detail: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+});
+export type OrderTimelineEntryView = z.infer<typeof orderTimelineEntrySchema>;
+
+export const adminOrderTimelineResponseSchema = z.object({
+  entries: z.array(orderTimelineEntrySchema),
+});
+export type AdminOrderTimelineResponse = z.infer<typeof adminOrderTimelineResponseSchema>;
+
+/** 対応メモの本文の上限。ドメインの `ORDER_NOTE_MAX_LENGTH` と同じ値。 */
+export const ORDER_NOTE_MAX_LENGTH = 2000;
+
+/**
+ * 対応メモの追加。
+ *
+ * ⚠️ **更新・削除の契約を作らない。** 追記のみ（`UD-121`）。
+ */
+export const createOrderNoteRequestSchema = z.object({
+  body: z.string().min(1).max(ORDER_NOTE_MAX_LENGTH),
+});
+export type CreateOrderNoteRequest = z.infer<typeof createOrderNoteRequestSchema>;
+
+export const orderNoteViewSchema = z.object({
+  id: z.string(),
+  /** ⚠️ 氏名やメールではなくアカウントID。誰かの特定は運営側の名簿で行う。 */
+  authorAccountId: z.string(),
+  body: z.string(),
+  createdAt: z.string(),
+});
+export type OrderNoteView = z.infer<typeof orderNoteViewSchema>;
+
+export const adminOrderNotesResponseSchema = z.object({
+  notes: z.array(orderNoteViewSchema),
+});
+export type AdminOrderNotesResponse = z.infer<typeof adminOrderNotesResponseSchema>;

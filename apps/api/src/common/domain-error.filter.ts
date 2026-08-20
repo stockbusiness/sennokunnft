@@ -108,6 +108,12 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PAYMENT_CREDENTIAL_CHECK_REQUIRED: HttpStatus.CONFLICT,
   PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: HttpStatus.CONFLICT,
   PAYMENT_CREDENTIAL_IN_USE: HttpStatus.CONFLICT,
+  // --- 注文の検索と問い合わせ対応（`UD-121`）---
+  ORDER_SEARCH_INVALID: HttpStatus.BAD_REQUEST,
+  ORDER_NOTE_INVALID: HttpStatus.BAD_REQUEST,
+  // ⚠️ 404 ではない。「見つからない」ではなく「この配備では引けない」。
+  //    直すのは配備の設定で、探し直しても結果は変わらない。
+  EMAIL_LOOKUP_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -212,6 +218,13 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   PAYMENT_CREDENTIAL_NOT_ACTIVATABLE: 'この世代は有効化できません。状態をご確認ください。',
   PAYMENT_CREDENTIAL_IN_USE:
     'この世代はいま新規のお支払いを受け付けています。先に切り替えてください。',
+  ORDER_SEARCH_INVALID:
+    '検索の条件をご確認ください。期間や金額の範囲が逆になっていないでしょうか。',
+  ORDER_NOTE_INVALID:
+    'この内容では保存できません。空でないこと、2000 文字以内であること、メールアドレスを書かないことをご確認ください。',
+  // ⚠️ 「見つかりません」と書かない。引けていないだけで、注文はあるかもしれない。
+  EMAIL_LOOKUP_UNAVAILABLE:
+    'この環境ではメールアドレスからのお調べができません。注文番号や期間でお探しください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

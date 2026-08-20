@@ -49,16 +49,16 @@
 
 ### 3.1 `accounts` — アカウント
 
-| 列                          | 型          | 制約                        | 説明                                                              |
-| --------------------------- | ----------- | --------------------------- | ----------------------------------------------------------------- |
-| `id`                        | UUID        | PK                          | 内部ID                                                            |
-| `auth_provider`             | TEXT        | NOT NULL                    | 認証プロバイダ識別子（例: `supabase`）                            |
-| `auth_subject`              | TEXT        | NOT NULL                    | プロバイダ側のユーザーID（Supabase の `sub`）                     |
-| `email_hash`                | TEXT        | NULL                        | 照合用のメールハッシュ。**平文メールは保持しない**（🟡 `UD-503`） |
-| `display_name`              | TEXT        | NULL                        | 表示名                                                            |
-| `role`                      | TEXT        | NOT NULL DEFAULT `'buyer'`  | `buyer` / `operator` / `auditor`                                  |
-| `status`                    | TEXT        | NOT NULL DEFAULT `'active'` | `active` / `suspended`                                            |
-| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                    |                                                                   |
+| 列                          | 型          | 制約                        | 説明                                                                                                                                                                                                                   |
+| --------------------------- | ----------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                        | UUID        | PK                          | 内部ID                                                                                                                                                                                                                 |
+| `auth_provider`             | TEXT        | NOT NULL                    | 認証プロバイダ識別子（例: `supabase`）                                                                                                                                                                                 |
+| `auth_subject`              | TEXT        | NOT NULL                    | プロバイダ側のユーザーID（Supabase の `sub`）                                                                                                                                                                          |
+| `email_hash`                | TEXT        | NULL                        | 照合用のメール値。**平文メールは保持しない**（🟡 `UD-503`）。⚠️ **素のハッシュではなく鍵付き HMAC**（`EMAIL_LOOKUP_PEPPER`）。素だと、よくあるアドレスを並べた表で元に戻せる。鍵の無い配備では NULL のまま（`UD-121`） |
+| `display_name`              | TEXT        | NULL                        | 表示名                                                                                                                                                                                                                 |
+| `role`                      | TEXT        | NOT NULL DEFAULT `'buyer'`  | `buyer` / `operator` / `auditor`                                                                                                                                                                                       |
+| `status`                    | TEXT        | NOT NULL DEFAULT `'active'` | `active` / `suspended`                                                                                                                                                                                                 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL                    |                                                                                                                                                                                                                        |
 
 - `UNIQUE (auth_provider, auth_subject)`
 

@@ -41,6 +41,11 @@ model Account {
   authProvider String        @map("auth_provider")
   authSubject  String        @map("auth_subject")
   /// 照合用のハッシュ。平文のメールアドレスは保持しない（UD-503）。
+  /// 照合用のメールハッシュ。⚠️ 平文は持たない（`UD-503`）。
+  /// ⚠️ 素のハッシュではなく鍵付き（`EMAIL_LOOKUP_PEPPER`）。理由は
+  /// ドメインの `EmailHashPort` を参照。
+  /// ⚠️ 索引は**部分索引**なので、Prisma では表せない。
+  /// `20260820090000_order_support` の手書きマイグレーションにある。
   emailHash    String?       @map("email_hash")
   displayName  String?       @map("display_name")
   /// ロールの正は本テーブル。JWT のクレームからは読まない（権限昇格を防ぐ）。
@@ -63,37 +68,39 @@ model Account {
   /// ⚠️ UNIQUE にしない。同一人物が別の認証手段で 2 アカウントを持つと、
   /// どちらも同じ common_user_id へ解決されうる。UNIQUE にすると
   /// 「正しい解決」が保存できずに落ちる。
-  commonUserId        String?   @map("common_user_id")
-  commonUserStatus    String    @default("UNRESOLVED") @map("common_user_status")
-  commonUserLinkedAt  DateTime? @map("common_user_linked_at") @db.Timestamptz(6)
+  commonUserId            String?   @map("common_user_id")
+  commonUserStatus        String    @default("UNRESOLVED") @map("common_user_status")
+  commonUserLinkedAt      DateTime? @map("common_user_linked_at") @db.Timestamptz(6)
   /// 失敗の理由。⚠️ 応答本文をそのまま入れない（個人情報が混ざりうる）。
-  commonUserLastError String?   @map("common_user_last_error")
+  commonUserLastError     String?   @map("common_user_last_error")
   /// 再試行の状態。指示書は 4 列だが、バックオフには回数と次回時刻が要る。
   commonUserAttemptCount  Int       @default(0) @map("common_user_attempt_count")
   commonUserNextAttemptAt DateTime? @map("common_user_next_attempt_at") @db.Timestamptz(6)
 
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  orders               Order[]
+  orders                       Order[]
   /// 自分が出品者として受けた注文（1 注文 1 クリエイター）。
-  createdOrders        Order[]              @relation("OrderCreator")
-  createdOrderLines    OrderLine[]          @relation("OrderLineCreator")
-  entitlements         Entitlement[]        @relation("EntitlementPurchaser")
-  claimedEntitlements  Entitlement[]        @relation("EntitlementClaimer")
-  auditLogs            AuditLog[]
-  idempotencyKeys      IdempotencyKey[]
-  createdArtworks      Artwork[]            @relation("ArtworkCreator")
-  sentInvitations      StaffInvitation[]    @relation("StaffInvitationInviter")
-  acceptedInvitations  StaffInvitation[]    @relation("StaffInvitationAcceptor")
-  integrationSettings  IntegrationSetting[] @relation("IntegrationSettingEditor")
-  integrationSecrets   IntegrationSecret[]  @relation("IntegrationSecretCreator")
-  integrationChecks    IntegrationConnectionCheck[] @relation("IntegrationCheckExecutor")
-  createdLegalVersions   LegalDocumentVersion[] @relation("LegalVersionAuthor")
-  publishedLegalVersions LegalDocumentVersion[] @relation("LegalVersionPublisher")
-  legalConsents          LegalConsent[]
-  registeredPaymentCredentials PaymentCredential[] @relation("PaymentCredentialRegistrar")
-  activatedPaymentCredentials  PaymentCredential[] @relation("PaymentCredentialActivator")
+  createdOrders                Order[]                      @relation("OrderCreator")
+  createdOrderLines            OrderLine[]                  @relation("OrderLineCreator")
+  /// 自分が書いた対応メモ（`UD-121`）。⚠️ 消せない。
+  orderNotes                   OrderNote[]                  @relation("OrderNoteAuthor")
+  entitlements                 Entitlement[]                @relation("EntitlementPurchaser")
+  claimedEntitlements          Entitlement[]                @relation("EntitlementClaimer")
+  auditLogs                    AuditLog[]
+  idempotencyKeys              IdempotencyKey[]
+  createdArtworks              Artwork[]                    @relation("ArtworkCreator")
+  sentInvitations              StaffInvitation[]            @relation("StaffInvitationInviter")
+  acceptedInvitations          StaffInvitation[]            @relation("StaffInvitationAcceptor")
+  integrationSettings          IntegrationSetting[]         @relation("IntegrationSettingEditor")
+  integrationSecrets           IntegrationSecret[]          @relation("IntegrationSecretCreator")
+  integrationChecks            IntegrationConnectionCheck[] @relation("IntegrationCheckExecutor")
+  createdLegalVersions         LegalDocumentVersion[]       @relation("LegalVersionAuthor")
+  publishedLegalVersions       LegalDocumentVersion[]       @relation("LegalVersionPublisher")
+  legalConsents                LegalConsent[]
+  registeredPaymentCredentials PaymentCredential[]          @relation("PaymentCredentialRegistrar")
+  activatedPaymentCredentials  PaymentCredential[]          @relation("PaymentCredentialActivator")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -274,8 +281,8 @@ model LegalDocumentVersion {
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  createdBy   Account  @relation("LegalVersionAuthor", fields: [createdByAccountId], references: [id], onDelete: Restrict)
-  publishedBy Account? @relation("LegalVersionPublisher", fields: [publishedByAccountId], references: [id], onDelete: Restrict)
+  createdBy   Account        @relation("LegalVersionAuthor", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+  publishedBy Account?       @relation("LegalVersionPublisher", fields: [publishedByAccountId], references: [id], onDelete: Restrict)
   consents    LegalConsent[]
   orders      Order[]        @relation("OrderTermsVersion")
 
@@ -305,7 +312,7 @@ model LegalConsent {
   consentedAt DateTime @default(now()) @map("consented_at") @db.Timestamptz(6)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  account        Account              @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  account         Account              @relation(fields: [accountId], references: [id], onDelete: Restrict)
   documentVersion LegalDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
 
   /// 同じ版へ二重に押しても増やさない。
@@ -313,7 +320,6 @@ model LegalConsent {
   @@index([accountId, kind, version(sort: Desc)])
   @@map("legal_consents")
 }
-
 
 /// 決済資格情報の世代（`UD-118`・`docs/PAYMENT_CREDENTIAL_ROTATION.md`）。
 ///
@@ -360,9 +366,9 @@ model PaymentCredential {
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  registeredBy Account        @relation("PaymentCredentialRegistrar", fields: [registeredByAccountId], references: [id], onDelete: Restrict)
-  activatedBy  Account?       @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
-  payments     Payment[]
+  registeredBy  Account        @relation("PaymentCredentialRegistrar", fields: [registeredByAccountId], references: [id], onDelete: Restrict)
+  activatedBy   Account?       @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
+  payments      Payment[]
   webhookEvents WebhookEvent[]
 
   @@unique([provider, environment, generation])
@@ -386,36 +392,36 @@ enum ArtworkStatus {
 /// CHECK 制約は Prisma のスキーマ言語で表現できないため、
 /// マイグレーション生成時に手書きで追加する（DATABASE_DESIGN.md §3.2）。
 model Artwork {
-  id            String        @id @default(uuid()) @db.Uuid
+  id               String        @id @default(uuid()) @db.Uuid
   /// 登録した人（UD-102 決定変更 2026-08-18: 作家の自己出品を行う）。
   /// ⚠️ NULL を許さない。持ち主の決まらない作品を作ると、誰が触ってよいかを
   /// 判定できない行が生まれる。判定できない行は「とりあえず通す」に倒れやすい。
   /// ⚠️ ON DELETE を CASCADE にしない。アカウントを消したときに、
   /// 売れた作品まで消えると注文の履歴と食い違う。Restrict にして、
   /// 「作品を持ったままのアカウントは消せない」を DB に守らせる。
-  creatorAccountId String     @map("creator_account_id") @db.Uuid
-  creator       Account       @relation("ArtworkCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
-  slug          String        @unique
-  title         String
-  description   String        @default("")
+  creatorAccountId String        @map("creator_account_id") @db.Uuid
+  creator          Account       @relation("ArtworkCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  slug             String        @unique
+  title            String
+  description      String        @default("")
   /// ストレージ上のキー。公開URLは実行時に解決する（保存先は Cloudflare R2、UD-508）。
   /// アップロード時にランダム生成する。**利用者が送ったファイル名は使わない。**
-  imageKey         String?    @map("image_key")
+  imageKey         String?       @map("image_key")
   /// サーバー側で中身を検査して判定した MIME タイプ。拡張子は信用しない。
-  imageContentType String?    @map("image_content_type")
-  imageByteSize    Int?       @map("image_byte_size")
+  imageContentType String?       @map("image_content_type")
+  imageByteSize    Int?          @map("image_byte_size")
   /// 画像の内容ハッシュ（`sha256:<hex>`）。保存時に**中身から**計算する。
   /// Wallet の Holding 表示情報の同一性確認に使う（PR-NW04 §23）。
   /// ⚠️ ファイル名や URL から導出しない。差し替えを検出できなくなる。
-  imageHash        String?    @map("image_hash")
-  maxSupply     Int           @map("max_supply")
+  imageHash        String?       @map("image_hash")
+  maxSupply        Int           @map("max_supply")
   /// 決済待ちの注文が押さえている数。
-  reservedCount Int           @default(0) @map("reserved_count")
+  reservedCount    Int           @default(0) @map("reserved_count")
   /// 受取権として発行済みの数。
-  issuedCount   Int           @default(0) @map("issued_count")
-  status        ArtworkStatus @default(draft)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  issuedCount      Int           @default(0) @map("issued_count")
+  status           ArtworkStatus @default(draft)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   listings     Listing[]
   orderLines   OrderLine[]
@@ -496,49 +502,49 @@ enum OrderSource {
 }
 
 model Order {
-  id             String      @id @default(uuid()) @db.Uuid
+  id                 String      @id @default(uuid()) @db.Uuid
   /// 人が読み上げ、問い合わせで使う番号。⚠️ 参照の正は `id` のまま。
-  orderNumber    String      @unique @map("order_number")
-  accountId      String      @map("account_id") @db.Uuid
+  orderNumber        String      @unique @map("order_number")
+  accountId          String      @map("account_id") @db.Uuid
   /// 共通顧客ID。まだ解決できていない購入者があるため NULL を許す。
-  commonUserId   String?     @map("common_user_id")
+  commonUserId       String?     @map("common_user_id")
   /// ⚠️ 1 注文 1 クリエイター（指示書 §3-4）。明細と必ず一致させる。
-  creatorAccountId String    @map("creator_account_id") @db.Uuid
-  status         OrderStatus @default(pending)
+  creatorAccountId   String      @map("creator_account_id") @db.Uuid
+  status             OrderStatus @default(pending)
   /// 出自。既定は購入。Fixture だけが `STAGING_FIXTURE` を入れる。
-  source         OrderSource @default(PURCHASE)
+  source             OrderSource @default(PURCHASE)
   /// 商品の税込価格（単価 × 数量）。
-  subtotalAmount Int         @map("subtotal_amount")
+  subtotalAmount     Int         @map("subtotal_amount")
   /// 値引額。⚠️ 今回は常に 0。列と計算だけ先に用意してある。
-  discountAmount Int         @default(0) @map("discount_amount")
+  discountAmount     Int         @default(0) @map("discount_amount")
   /// 購入者が支払う額。`subtotal - discount` と CHECK 制約で一致させる。
-  totalAmount    Int         @map("total_amount")
-  totalCurrency  String      @map("total_currency") @db.Char(3)
+  totalAmount        Int         @map("total_amount")
+  totalCurrency      String      @map("total_currency") @db.Char(3)
   /// 注文時点の手数料率。⚠️ **bps（1/100 %）の整数**。
   /// 率を小数で持つと、金額に掛けた瞬間に誤差が入る。
-  platformFeeRateBps Int     @default(0) @map("platform_fee_rate_bps")
-  platformFeeAmount  Int     @default(0) @map("platform_fee_amount")
+  platformFeeRateBps Int         @default(0) @map("platform_fee_rate_bps")
+  platformFeeAmount  Int         @default(0) @map("platform_fee_amount")
   /// クリエイター配分額。`total - platformFee` と CHECK 制約で一致させる。
-  creatorAmount      Int     @map("creator_amount")
+  creatorAmount      Int         @map("creator_amount")
   /// ⚠️ 4 つの状態を 1 本に詰め込まない（指示書 §7）。
   /// 「決済は成功したが付与に失敗した」を表せなくなる。
-  paymentStatus     String   @default("not_started") @map("payment_status")
-  fulfillmentStatus String   @default("not_started") @map("fulfillment_status")
-  refundStatus      String   @default("none") @map("refund_status")
+  paymentStatus      String      @default("not_started") @map("payment_status")
+  fulfillmentStatus  String      @default("not_started") @map("fulfillment_status")
+  refundStatus       String      @default("none") @map("refund_status")
   /// 二重注文を防ぐ冪等キー。アプリの重複チェックではなく UNIQUE 制約で担保する。
-  idempotencyKey String      @map("idempotency_key")
+  idempotencyKey     String      @map("idempotency_key")
   /// 注文時点で施行されていた利用規約の版（`UD-126`）。
   /// ⚠️ **同意の記録ではない。** 「何が表示されていたか」の記録で、
   /// 価格・手数料率と同じスナップショット原則。改定しても過去の注文は動かない。
   /// ⚠️ 規約を公開していない時期の注文があるため NULL を許す。
   /// 無いことを、無いまま残す。
-  termsVersionId String?     @map("terms_version_id") @db.Uuid
-  termsVersion   Int?        @map("terms_version")
+  termsVersionId     String?     @map("terms_version_id") @db.Uuid
+  termsVersion       Int?        @map("terms_version")
   /// 在庫の仮引当の期限。過ぎたらワーカーが解放する。
-  reservedUntil  DateTime?   @map("reserved_until") @db.Timestamptz(6)
-  paidAt         DateTime?   @map("paid_at") @db.Timestamptz(6)
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reservedUntil      DateTime?   @map("reserved_until") @db.Timestamptz(6)
+  paidAt             DateTime?   @map("paid_at") @db.Timestamptz(6)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   account       Account                @relation(fields: [accountId], references: [id])
   creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
@@ -548,6 +554,7 @@ model Order {
   entitlements  Entitlement[]
   reservations  InventoryReservation[]
   webhookEvents WebhookEvent[]
+  notes         OrderNote[]
 
   /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
   /// アプリの重複チェックではなく、DB の制約で担保する。
@@ -556,6 +563,11 @@ model Order {
   @@index([accountId, createdAt])
   @@index([creatorAccountId, createdAt(sort: Desc)])
   @@index([paymentStatus, createdAt(sort: Desc)])
+  /// 問い合わせ対応の検索（`UD-121`）。期間と金額から辿る。
+  /// ⚠️ 注文番号の末尾一致と作品名の部分一致には索引を張っていない。
+  /// `LIKE '%...'` は B-Tree で絞れないため（マイグレーションの注記参照）。
+  @@index([createdAt(sort: Desc)])
+  @@index([totalAmount])
   /// Fixture 由来の行を洗い出して掃除するため。
   @@index([source, createdAt])
   @@map("orders")
@@ -588,6 +600,28 @@ model OrderLine {
   /// `order_id` だけの UNIQUE が「明細は 1 本まで」を DB に守らせる。
   @@unique([orderId], map: "order_lines_single_item_per_order")
   @@map("order_lines")
+}
+
+/// 問い合わせの対応メモ（`UD-121`）。
+///
+/// ⚠️ **追記のみ。** 更新も削除もアプリから行わない。書き換えられる
+/// 記録は、揉めたときに何の役にも立たない。訂正は新しいメモで行う。
+///
+/// ⚠️ **購入者の平文メールを書かない**（`UD-503`）。ドメインの
+/// `validateOrderNote` がアドレスらしき並びを弾く。
+model OrderNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  orderId         String   @map("order_id") @db.Uuid
+  /// 書いた運営スタッフ。⚠️ 氏名やメールではなくアカウントIDで持つ。
+  authorAccountId String   @map("author_account_id") @db.Uuid
+  body            String
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order  Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  author Account @relation("OrderNoteAuthor", fields: [authorAccountId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@map("order_notes")
 }
 
 /// 在庫の仮引当（決済 Phase P0・P1・指示書 §5.3）。
@@ -639,40 +673,40 @@ enum PaymentStatus {
 /// 本テーブルは Webhook で受け取った事実の写像であり、
 /// 本システム側から状態を推測して進めない。
 model Payment {
-  id                 String        @id @default(uuid()) @db.Uuid
-  orderId            String        @map("order_id") @db.Uuid
-  provider           String
+  id                     String        @id @default(uuid()) @db.Uuid
+  orderId                String        @map("order_id") @db.Uuid
+  provider               String
   /// Stripe Checkout Session（Phase P2 で埋める）。
-  providerSessionRef String?       @map("provider_session_ref")
+  providerSessionRef     String?       @map("provider_session_ref")
   /// Stripe Payment Intent（Phase P2 で埋める）。
-  providerPaymentRef String?       @map("provider_payment_ref")
+  providerPaymentRef     String?       @map("provider_payment_ref")
   /// Stripe Charge（Phase P2 で埋める）。
-  providerChargeRef  String?       @map("provider_charge_ref")
+  providerChargeRef      String?       @map("provider_charge_ref")
   /// 決済事業者へ渡す冪等キー。⚠️ 業務の冪等キーとは別物。
-  providerIdempotencyKey String?   @map("provider_idempotency_key")
-  status             PaymentStatus @default(pending)
-  amount             Int
-  currency           String        @db.Char(3)
-  amountRefunded     Int           @default(0) @map("amount_refunded")
-  paidAt             DateTime?     @map("paid_at") @db.Timestamptz(6)
+  providerIdempotencyKey String?       @map("provider_idempotency_key")
+  status                 PaymentStatus @default(pending)
+  amount                 Int
+  currency               String        @db.Char(3)
+  amountRefunded         Int           @default(0) @map("amount_refunded")
+  paidAt                 DateTime?     @map("paid_at") @db.Timestamptz(6)
   /// 支払い口が閉じる時刻。⚠️ お取り置きの期限を超えない。
-  expiresAt          DateTime?     @map("expires_at") @db.Timestamptz(6)
+  expiresAt              DateTime?     @map("expires_at") @db.Timestamptz(6)
   /// 利用者を送る先。⚠️ **管理画面へ出さない。** これを持つ人は誰でも
   /// その注文を支払える。運用に要るのは識別子までで、URL は要らない。
-  checkoutUrl        String?       @map("checkout_url")
-  failureCode        String?       @map("failure_code")
+  checkoutUrl            String?       @map("checkout_url")
+  failureCode            String?       @map("failure_code")
   /// ⚠️ 外部の応答本文をそのまま入れない。運用が読むための短い要約だけ。
-  failureMessageSafe String?       @map("failure_message_safe")
-  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  failureMessageSafe     String?       @map("failure_message_safe")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   /// この決済をどの世代の鍵で処理したか（`UD-118`）。
   /// ⚠️ **返金と照会はこの世代の鍵で行う。** 無いと、運営会社の切り替え後に
   /// 「どの鍵で返せばよいか」を誰も判断できない。
   /// ⚠️ 移行のため NULL を許す。既存行を埋めたあとに締める。
-  credentialId  String?        @map("credential_id") @db.Uuid
+  credentialId String? @map("credential_id") @db.Uuid
 
-  order         Order          @relation(fields: [orderId], references: [id])
+  order         Order              @relation(fields: [orderId], references: [id])
   credential    PaymentCredential? @relation(fields: [credentialId], references: [id], onDelete: Restrict)
   webhookEvents WebhookEvent[]
 
@@ -763,39 +797,39 @@ enum EntitlementStatus {
 /// claimed への遷移は条件付き UPDATE（WHERE status = 'issued'）で行い、
 /// 更新行数が 1 の場合のみ成功とする。同時 Claim でも 1 回しか成功しない。
 model Entitlement {
-  id                   String            @id @default(uuid()) @db.Uuid
-  orderId              String            @map("order_id") @db.Uuid
-  orderLineId          String            @map("order_line_id") @db.Uuid
-  artworkId            String            @map("artwork_id") @db.Uuid
+  id                    String            @id @default(uuid()) @db.Uuid
+  orderId               String            @map("order_id") @db.Uuid
+  orderLineId           String            @map("order_line_id") @db.Uuid
+  artworkId             String            @map("artwork_id") @db.Uuid
   /// 購入者。Claim の本人照合はこの値と認証アカウントの一致で行う。
-  accountId            String            @map("account_id") @db.Uuid
-  serialNo             Int               @map("serial_no")
+  accountId             String            @map("account_id") @db.Uuid
+  serialNo              Int               @map("serial_no")
   /// Claim トークンのハッシュ。**平文は保存しない。**
-  claimTokenHash       String            @map("claim_token_hash")
-  status               EntitlementStatus @default(issued)
+  claimTokenHash        String            @map("claim_token_hash")
+  status                EntitlementStatus @default(issued)
   /// Claim 期限。null は無期限（UD-505 で未決定のため MVP は null）。
-  expiresAt            DateTime?         @map("expires_at") @db.Timestamptz(6)
-  claimedByAccountId   String?           @map("claimed_by_account_id") @db.Uuid
-  claimedAt            DateTime?         @map("claimed_at") @db.Timestamptz(6)
+  expiresAt             DateTime?         @map("expires_at") @db.Timestamptz(6)
+  claimedByAccountId    String?           @map("claimed_by_account_id") @db.Uuid
+  claimedAt             DateTime?         @map("claimed_at") @db.Timestamptz(6)
   /// Wallet 経由で受け取った本人の `common_user_id`。
   /// ⚠️ 受取時点の値を**そのまま残す**。あとでマスタが変わっても遡って書き換えない。
-  claimedByCommonUserId String?          @map("claimed_by_common_user_id")
+  claimedByCommonUserId String?           @map("claimed_by_common_user_id")
   /// Wallet への配送状態。not_started / pending / delivered。
   /// ⚠️ `delivered` へ進めてよいのは、Wallet が 2xx を返し、
   ///    それが Holding の永続化を意味する場合のみ（PR-NW04 §21）。
-  walletDeliveryStatus String            @default("not_started") @map("wallet_delivery_status")
+  walletDeliveryStatus  String            @default("not_started") @map("wallet_delivery_status")
   /// 配送が完了した時刻。`walletDeliveryStatus = 'delivered'` と必ず同時に入る。
-  walletDeliveredAt    DateTime?         @map("wallet_delivered_at") @db.Timestamptz(6)
-  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  walletDeliveredAt     DateTime?         @map("wallet_delivered_at") @db.Timestamptz(6)
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  order           Order     @relation(fields: [orderId], references: [id])
-  orderLine       OrderLine @relation(fields: [orderLineId], references: [id])
-  artwork         Artwork   @relation(fields: [artworkId], references: [id])
-  purchaser       Account   @relation("EntitlementPurchaser", fields: [accountId], references: [id])
-  claimedByAccount Account? @relation("EntitlementClaimer", fields: [claimedByAccountId], references: [id])
-  mintJob         MintJob?
-  nftToken        NftToken?
+  order            Order                  @relation(fields: [orderId], references: [id])
+  orderLine        OrderLine              @relation(fields: [orderLineId], references: [id])
+  artwork          Artwork                @relation(fields: [artworkId], references: [id])
+  purchaser        Account                @relation("EntitlementPurchaser", fields: [accountId], references: [id])
+  claimedByAccount Account?               @relation("EntitlementClaimer", fields: [claimedByAccountId], references: [id])
+  mintJob          MintJob?
+  nftToken         NftToken?
   walletDeliveries WalletDeliveryOutbox[]
 
   /// 同一作品内でシリアル番号が重複しないことを物理的に担保する。
@@ -943,14 +977,14 @@ enum WalletDeliveryOutboxStatus {
 /// 相手の冪等キーがこの値なので、作り直すと再試行のたびに
 /// 別のイベントとして扱われ、Holding が重複しうる。
 model WalletDeliveryOutbox {
-  id            String                     @id @default(uuid()) @db.Uuid
+  id               String                     @id @default(uuid()) @db.Uuid
   /// 送信側が採番するイベントID。**相手の Idempotency-Key と同じ値**。
   /// UNIQUE が二重配送を防ぐ最後の砦（アプリの重複チェックは競合で破れる）。
-  eventId       String                     @unique @map("event_id")
-  eventType     String                     @map("event_type")
-  entitlementId String                     @map("entitlement_id") @db.Uuid
+  eventId          String                     @unique @map("event_id")
+  eventType        String                     @map("event_type")
+  entitlementId    String                     @map("entitlement_id") @db.Uuid
   /// 宛先の識別子。現状は `ovew-wallet` のみ。
-  targetSiteKey String                     @map("target_site_key")
+  targetSiteKey    String                     @map("target_site_key")
   /// 送信する本文の **JSON テキストそのもの**。
   ///
   /// ⚠️ **jsonb ではなく文字列で持つ。**
@@ -962,23 +996,23 @@ model WalletDeliveryOutbox {
   /// 送信時点のスナップショットであり、あとでマスタが変わっても
   /// 再試行の内容は変わらない（§24）。
   /// ⚠️ 個人情報を入れない。入れてよいのは `common_user_id` まで。
-  payload       String
+  payload          String
   /// 本文の内容ハッシュ（`sha256:<hex>`）。`payload` の文字列に対して計算する。
-  payloadHash   String                     @map("payload_hash")
-  status        WalletDeliveryOutboxStatus @default(PENDING)
-  attemptCount  Int                        @default(0) @map("attempt_count")
-  maxAttempts   Int                        @default(5) @map("max_attempts")
+  payloadHash      String                     @map("payload_hash")
+  status           WalletDeliveryOutboxStatus @default(PENDING)
+  attemptCount     Int                        @default(0) @map("attempt_count")
+  maxAttempts      Int                        @default(5) @map("max_attempts")
   /// バックオフ後の実行予定時刻。
-  nextRetryAt   DateTime                   @default(now()) @map("next_retry_at") @db.Timestamptz(6)
+  nextRetryAt      DateTime                   @default(now()) @map("next_retry_at") @db.Timestamptz(6)
   /// 失敗理由の分類コード。外部の生メッセージを入れない。
-  lastErrorCode String?                    @map("last_error_code")
+  lastErrorCode    String?                    @map("last_error_code")
   /// 運用が読むための要約。⚠️ 応答本文をそのまま入れない（秘匿値が混ざりうる）。
-  lastErrorMessage String?                 @map("last_error_message")
+  lastErrorMessage String?                    @map("last_error_message")
   /// Claim から配送まで同じ値を引き継ぐ（§17）。
-  correlationId String                     @map("correlation_id")
-  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deliveredAt   DateTime?                  @map("delivered_at") @db.Timestamptz(6)
+  correlationId    String                     @map("correlation_id")
+  createdAt        DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deliveredAt      DateTime?                  @map("delivered_at") @db.Timestamptz(6)
 
   entitlement Entitlement @relation(fields: [entitlementId], references: [id])
 

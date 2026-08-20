@@ -1,6 +1,10 @@
 import { notFound } from 'next/navigation';
 import { EmptyState, Notice, PageHeader, PriceTag, StatusBadge } from '@sengoku/ui';
-import { fetchAdminOrder } from '../../../../src/admin-client';
+import {
+  fetchAdminOrder,
+  fetchAdminOrderNotes,
+  fetchAdminOrderTimeline,
+} from '../../../../src/admin-client';
 import { ADMIN_COPY } from '../../../../src/admin-copy';
 import {
   ORDER_COPY,
@@ -14,7 +18,11 @@ import {
   reservationStatusLabel,
   attemptStatusLabel,
   webhookStatusLabel,
+  timelineKindLabel,
+  timelineDetailText,
+  shortId,
 } from '../../../../src/order-copy';
+import { OrderNoteForm } from './note-form';
 
 /**
  * 注文の詳細（指示書 §9.2）。
@@ -28,7 +36,15 @@ export default async function AdminOrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const result = await fetchAdminOrder(id);
+  /*
+    ⚠️ 3 本まとめて引く。順番に待つと、詳細が出るまでの待ち時間が
+       そのぶん伸びる。どれか 1 本が落ちても、残りは出す。
+  */
+  const [result, timeline, notes] = await Promise.all([
+    fetchAdminOrder(id),
+    fetchAdminOrderTimeline(id),
+    fetchAdminOrderNotes(id),
+  ]);
 
   if (!result.ok) {
     if (result.reason === 'not_found') {
@@ -251,6 +267,59 @@ export default async function AdminOrderDetailPage({
           )}
         </>
       )}
+
+      {/*
+        経過（`UD-121`）。決済の試行と受信記録を 1 列にしたもの。
+        ⚠️ **古い順。** 一覧は新しい順だが、経過は「何が起きて次に何が
+           起きたか」を読むもので、逆順だと因果が逆に読める。
+      */}
+      <h2 className="sengoku-section-heading">{ORDER_COPY.timelineHeading}</h2>
+      <p className="sengoku-form__hint">{ORDER_COPY.timelineHint}</p>
+      {!timeline.ok || timeline.data.entries.length === 0 ? (
+        <EmptyState title={ORDER_COPY.timelineEmpty} hint="" />
+      ) : (
+        <ol className="sengoku-timeline">
+          {timeline.data.entries.map((entry, index) => (
+            <li
+              className="sengoku-timeline__entry"
+              key={`${entry.kind}-${entry.at}-${String(index)}`}
+            >
+              <p className="sengoku-timeline__at">{formatDateTime(entry.at)}</p>
+              <p className="sengoku-timeline__kind">{timelineKindLabel(entry.kind)}</p>
+              {/*
+                ⚠️ **必ず文字として描く。** `dangerouslySetInnerHTML` を
+                   使わない。対応メモは運営の自由文で、`<` を含む文が
+                   普通に入ってくる（ドメイン側で HTML を弾いていない）。
+              */}
+              {entry.kind === 'support_note' ? (
+                <p className="sengoku-timeline__detail">{String(entry.detail.body ?? '')}</p>
+              ) : (
+                <p className="sengoku-timeline__detail">{timelineDetailText(entry)}</p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {/* 対応メモ（`UD-121`）。⚠️ 追記のみ。直す口も消す口も無い。 */}
+      <h2 className="sengoku-section-heading">{ORDER_COPY.notesHeading}</h2>
+      {!notes.ok || notes.data.notes.length === 0 ? (
+        <EmptyState title={ORDER_COPY.notesEmpty} hint="" />
+      ) : (
+        <ul className="sengoku-note-list">
+          {notes.data.notes.map((note) => (
+            <li className="sengoku-note" key={note.id}>
+              <p className="sengoku-note__meta">
+                {formatDateTime(note.createdAt)} ／ {ORDER_COPY.notesAuthorLabel}:{' '}
+                <span className="sengoku-code-inline">{shortId(note.authorAccountId)}</span>
+              </p>
+              {/* ⚠️ 文字として描く。HTML として解釈しない。 */}
+              <p className="sengoku-note__body">{note.body}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <OrderNoteForm orderId={id} />
 
       <p className="sengoku-back-link">
         <a href="/admin/orders">{ORDER_COPY.backToOrders}</a>

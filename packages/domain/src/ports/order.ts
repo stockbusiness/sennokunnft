@@ -8,6 +8,8 @@ import type {
 } from '../order/order-status';
 import type { ReservationStatus } from '../order/reservation';
 import type { OrderAmounts } from '../order/pricing';
+import type { OrderSearchCriteria } from '../order/search';
+import type { OrderNoteEntry } from '../order/timeline';
 
 /**
  * 注文の永続化境界（決済 Phase P0・P1）。
@@ -153,8 +155,14 @@ export interface ReleasedReservation {
 export interface OrderListQuery {
   readonly limit: number;
   readonly cursor?: string | undefined;
-  readonly status?: OrderStatus | undefined;
   readonly accountId?: string | undefined;
+  /**
+   * 絞り込みの条件（`UD-121`）。
+   *
+   * ⚠️ **ここへ平文のメールアドレスを持ち込まない**（`UD-503`）。
+   * 変換は API の入口で 1 回だけ行い、以降は照合値だけを運ぶ。
+   */
+  readonly criteria?: OrderSearchCriteria | undefined;
 }
 
 export interface OrderListPage {
@@ -384,4 +392,30 @@ export interface PaymentRepository {
     readonly sessionRef: string | null;
     readonly now: Date;
   }): Promise<boolean>;
+}
+
+/**
+ * 対応メモの保管（`UD-121`）。
+ *
+ * ⚠️ **書き換えと削除の口を作らない。** 用意した瞬間に「間違えたから
+ * 消しておいて」が始まり、揉めたときに参照できる記録が残らなくなる。
+ * 訂正は新しいメモで行う。
+ */
+export interface OrderNoteRepository {
+  /** その注文のメモを**古い順**に返す。経過へそのまま差し込むため。 */
+  listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]>;
+
+  /**
+   * メモを 1 件足す。
+   *
+   * ⚠️ 実装は本文をログへ出さないこと。運営の自由文で、
+   * 何が書かれているかを前提にできない。
+   */
+  append(input: {
+    readonly id: string;
+    readonly orderId: string;
+    readonly authorAccountId: string;
+    readonly body: string;
+    readonly now: Date;
+  }): Promise<OrderNoteEntry>;
 }

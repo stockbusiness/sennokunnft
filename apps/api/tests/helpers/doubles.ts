@@ -53,6 +53,9 @@ import type {
   DomainError,
   OrderListPage,
   OrderListQuery,
+  OrderNoteEntry,
+  OrderNoteRepository,
+  OrderSearchCriteria,
   OrderRepository,
   OrderView,
   RandomPort,
@@ -84,7 +87,20 @@ import {
   PAYMENT_API_ENDPOINT,
   TOKUSHOHO_FIELD_KEYS,
 } from '@sengoku/domain';
-import { contentHash, FakePaymentGateway, InMemoryStorage } from '@sengoku/integrations';
+import {
+  contentHash,
+  FakePaymentGateway,
+  HmacEmailHasher,
+  InMemoryStorage,
+} from '@sengoku/integrations';
+
+/**
+ * 試験で使う照合用の鍵。
+ *
+ * ⚠️ **本物の鍵をここへ書かない。** これは試験のためだけの値で、
+ * 配備で使う鍵は Secret から来る（`EMAIL_LOOKUP_PEPPER`）。
+ */
+export const TEST_EMAIL_PEPPER = 'test-email-lookup-pepper-0123456789abcdef';
 import type { Logger } from '@sengoku/observability';
 
 /**
@@ -261,7 +277,11 @@ export class InMemoryAccountRepository implements AccountLookupPort {
   seed(
     subject: string,
     role: Role,
-    options: { status?: AccountRecord['status']; isOwner?: boolean } = {},
+    options: {
+      status?: AccountRecord['status'];
+      isOwner?: boolean;
+      emailHash?: string | null;
+    } = {},
   ): AccountRecord {
     const record: AccountRecord = {
       id: `account-${subject}`,
@@ -270,6 +290,7 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       role,
       status: options.status ?? 'active',
       isOwner: options.isOwner ?? false,
+      emailHash: options.emailHash ?? null,
     };
     this.items.set(`dev:${subject}`, record);
     return record;
@@ -280,7 +301,7 @@ export class InMemoryAccountRepository implements AccountLookupPort {
   }
 
   /** 初回アクセスで作られるロールは常に buyer。 */
-  provision(provider: string, subject: string): Promise<AccountRecord> {
+  provision(provider: string, subject: string, emailHash: string | null): Promise<AccountRecord> {
     const record: AccountRecord = {
       id: `account-${subject}`,
       authProvider: provider,
@@ -288,9 +309,23 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       role: 'buyer',
       status: 'active',
       isOwner: false,
+      emailHash,
     };
     this.items.set(`${provider}:${subject}`, record);
     return Promise.resolve(record);
+  }
+
+  /** ⚠️ `null` では消さない（本番実装と同じ向き）。 */
+  rememberEmailHash(accountId: string, emailHash: string | null): Promise<void> {
+    if (emailHash === null) {
+      return Promise.resolve();
+    }
+    for (const [key, record] of this.items) {
+      if (record.id === accountId) {
+        this.items.set(key, { ...record, emailHash });
+      }
+    }
+    return Promise.resolve();
   }
 
   /** アカウントIDで引く。スタッフ側の代替実装が同じ保管庫を共有するため。 */
@@ -1252,6 +1287,42 @@ function byLatestThenFailureFirst(a: ConnectionCheckRecord, b: ConnectionCheckRe
  * ⚠️ 排他は再現できない（単一スレッドなので割り込みが起きない）。
  * 同時実行の検証は実 PostgreSQL の結合テストが受け持つ。
  */
+/**
+ * 対応メモの代替実装（`UD-121`）。
+ *
+ * ⚠️ 本番実装と同じく、更新と削除のメソッドを持たない。
+ * 試験の都合で足すと、そのうち本番にも生える。
+ */
+export class InMemoryOrderNotes implements OrderNoteRepository {
+  listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]> {
+    return Promise.resolve(
+      this.byOrder
+        .filter((entry) => entry.orderId === orderId)
+        .map((entry) => entry.note)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    );
+  }
+
+  append(input: {
+    readonly id: string;
+    readonly orderId: string;
+    readonly authorAccountId: string;
+    readonly body: string;
+    readonly now: Date;
+  }): Promise<OrderNoteEntry> {
+    const note: OrderNoteEntry = {
+      id: input.id,
+      authorAccountId: input.authorAccountId,
+      body: input.body,
+      createdAt: input.now,
+    };
+    this.byOrder.push({ orderId: input.orderId, note });
+    return Promise.resolve(note);
+  }
+
+  private readonly byOrder: { readonly orderId: string; readonly note: OrderNoteEntry }[] = [];
+}
+
 export class InMemoryOrderRepository implements OrderRepository {
   private readonly orders = new Map<string, OrderView>();
   /**
@@ -1268,7 +1339,17 @@ export class InMemoryOrderRepository implements OrderRepository {
   private readonly byIdempotency = new Map<string, string>();
   private readonly sequence: string[] = [];
 
-  constructor(private readonly artworks: InMemoryArtworkRepository) {}
+  constructor(
+    private readonly artworks: InMemoryArtworkRepository,
+    /**
+     * 照合値から購入者を引くための名簿（`UD-121`）。
+     *
+     * ⚠️ 本番では DB の結合が担う。ここでは代替実装どうしを繋いでおく。
+     * 省略すると、メールからの照合が**常に 0 件**になり、
+     * 「通っているつもり」の緑になる。
+     */
+    private readonly accounts?: InMemoryAccountRepository,
+  ) {}
 
   async createWithReservation(
     command: CreateOrderCommand,
@@ -1424,11 +1505,12 @@ export class InMemoryOrderRepository implements OrderRepository {
   }
 
   list(query: OrderListQuery): Promise<OrderListPage> {
+    const criteria = query.criteria;
     const all = this.sequence
       .map((id) => this.orders.get(id))
       .filter((item): item is OrderView => item !== undefined)
-      .filter((item) => query.status === undefined || item.status === query.status)
-      .filter((item) => query.accountId === undefined || item.accountId === query.accountId);
+      .filter((item) => query.accountId === undefined || item.accountId === query.accountId)
+      .filter((item) => criteria === undefined || this.matches(item, criteria));
     const start = query.cursor === undefined ? 0 : Number.parseInt(query.cursor, 10);
     const page = all.slice(start, start + query.limit);
     const nextIndex = start + query.limit;
@@ -1436,6 +1518,38 @@ export class InMemoryOrderRepository implements OrderRepository {
       items: page,
       nextCursor: nextIndex < all.length ? String(nextIndex) : null,
     });
+  }
+
+  /** 検索条件の当てはめ（`UD-121`）。本番は Prisma の `where` が担う。 */
+  private matches(order: OrderView, criteria: OrderSearchCriteria): boolean {
+    if (criteria.status !== null && order.status !== criteria.status) return false;
+    if (criteria.paymentStatus !== null && order.paymentStatus !== criteria.paymentStatus) {
+      return false;
+    }
+    if (criteria.orderNumber !== null) {
+      const matched =
+        criteria.orderNumber.kind === 'exact'
+          ? order.orderNumber === criteria.orderNumber.value
+          : order.orderNumber.endsWith(criteria.orderNumber.value);
+      if (!matched) return false;
+    }
+    if (criteria.createdFrom !== null && order.createdAt < criteria.createdFrom) return false;
+    if (criteria.createdTo !== null && order.createdAt > criteria.createdTo) return false;
+    if (criteria.minTotalAmount !== null && order.totalAmount < criteria.minTotalAmount) {
+      return false;
+    }
+    if (criteria.maxTotalAmount !== null && order.totalAmount > criteria.maxTotalAmount) {
+      return false;
+    }
+    if (criteria.artworkTitle !== null) {
+      const title = order.item?.titleSnapshot ?? '';
+      if (!title.toLowerCase().includes(criteria.artworkTitle.toLowerCase())) return false;
+    }
+    if (criteria.emailHash !== null) {
+      const account = this.accounts?.byId(order.accountId);
+      if (account?.emailHash !== criteria.emailHash) return false;
+    }
+    return true;
   }
 
   async releaseExpiredReservations(
@@ -1868,7 +1982,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const deliveries = new InMemoryWalletDeliveries();
   const auditLogReader = new InMemoryAuditLogReader(audit);
   const artworks = new InMemoryArtworkRepository(listings);
-  const orderRepository = new InMemoryOrderRepository(artworks);
+  const orderRepository = new InMemoryOrderRepository(artworks, accounts);
+  const orderNotes = new InMemoryOrderNotes();
   const commonUserLinks = new InMemoryCommonUserLinks();
   const paymentRepository = new InMemoryPaymentRepository(orderRepository);
   const paymentGateway = new FakePaymentGateway(
@@ -1916,6 +2031,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     },
     integrationRepository,
     tokenVerifier,
+    // ⚠️ 試験でも鍵付きで動かす。鍵無しを既定にすると、照合が使えない
+    //    ことに気付かないまま緑になる。
+    emailHasher: new HmacEmailHasher(TEST_EMAIL_PEPPER),
     clock,
     ids: new SequentialIds(),
     storage: new InMemoryStorage(),
@@ -1958,6 +2076,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     },
     orders: {
       repository: orderRepository,
+      notes: orderNotes,
       commonUserLinks,
       random: new SequentialRandom(),
       // ✅ 承認済み 2026-08-19（UD-109）: 20% = 2000。

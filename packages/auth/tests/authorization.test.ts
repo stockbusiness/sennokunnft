@@ -39,6 +39,10 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'order.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'order.view': { anonymous: false, buyer: true, operator: true, auditor: true },
   'order.view_any': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // 問い合わせ対応（`UD-121`）。⚠️ auditor には渡していない。
+  // 一覧を見ることと、人に紐づけて注文の有無を答えられることは別の力。
+  'order.lookup_buyer': { anonymous: false, buyer: false, operator: true, auditor: false },
+  'order.note': { anonymous: false, buyer: false, operator: true, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },

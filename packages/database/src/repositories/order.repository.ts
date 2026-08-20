@@ -8,7 +8,10 @@ import {
   type DomainError,
   type OrderListPage,
   type OrderListQuery,
+  type OrderNoteEntry,
+  type OrderNoteRepository,
   type OrderRepository,
+  type OrderSearchCriteria,
   type OrderView,
   type ReleasedReservation,
   type Result,
@@ -172,8 +175,8 @@ export class PrismaOrderRepository implements OrderRepository {
     const limit = Math.min(Math.max(query.limit, 1), MAX_PAGE_SIZE);
     const cursor = decodeCursor(query.cursor);
     const filters = {
-      ...(query.status === undefined ? {} : { status: query.status }),
       ...(query.accountId === undefined ? {} : { accountId: query.accountId }),
+      ...searchFilters(query.criteria),
     };
 
     const rows = await this.prisma.order.findMany({
@@ -268,4 +271,113 @@ export class PrismaOrderRepository implements OrderRepository {
       }));
     });
   }
+}
+
+/**
+ * 検索条件を Prisma の絞り込みへ移す（`UD-121`）。
+ *
+ * ⚠️ **条件が無いものは `where` へ入れない。** `undefined` を並べても
+ * 動くが、条件の有無が読み取れなくなる。
+ */
+function searchFilters(criteria: OrderSearchCriteria | undefined): Prisma.OrderWhereInput {
+  if (criteria === undefined) {
+    return {};
+  }
+
+  const createdAt =
+    criteria.createdFrom === null && criteria.createdTo === null
+      ? undefined
+      : {
+          ...(criteria.createdFrom === null ? {} : { gte: criteria.createdFrom }),
+          ...(criteria.createdTo === null ? {} : { lte: criteria.createdTo }),
+        };
+
+  const totalAmount =
+    criteria.minTotalAmount === null && criteria.maxTotalAmount === null
+      ? undefined
+      : {
+          ...(criteria.minTotalAmount === null ? {} : { gte: criteria.minTotalAmount }),
+          ...(criteria.maxTotalAmount === null ? {} : { lte: criteria.maxTotalAmount }),
+        };
+
+  return {
+    ...(criteria.status === null ? {} : { status: criteria.status }),
+    ...(criteria.paymentStatus === null ? {} : { paymentStatus: criteria.paymentStatus }),
+    ...(criteria.orderNumber === null
+      ? {}
+      : criteria.orderNumber.kind === 'exact'
+        ? { orderNumber: criteria.orderNumber.value }
+        : // ⚠️ 末尾一致は索引が効かない。件数が増えたら `pg_trgm` へ
+          //    （マイグレーション `20260820090000_order_support` の注記）。
+          { orderNumber: { endsWith: criteria.orderNumber.value } }),
+    ...(createdAt === undefined ? {} : { createdAt }),
+    ...(totalAmount === undefined ? {} : { totalAmount }),
+    ...(criteria.artworkTitle === null
+      ? {}
+      : {
+          // ⚠️ **注文時点の名前で引く。** マスタ（`artworks.title`）を
+          //    引き直すと、あとで改題された作品が検索から消える。
+          lines: {
+            some: {
+              artworkTitleSnapshot: { contains: criteria.artworkTitle, mode: 'insensitive' },
+            },
+          },
+        }),
+    ...(criteria.emailHash === null
+      ? {}
+      : // ⚠️ 平文ではなく照合値で引く（`UD-503`）。
+        { account: { emailHash: criteria.emailHash } }),
+  };
+}
+
+/**
+ * 対応メモの Prisma 実装（`UD-121`）。
+ *
+ * ⚠️ **更新と削除のメソッドを足さない。** 足した瞬間に「間違えたから
+ * 消しておいて」が始まる。訂正は新しいメモで行う。
+ */
+export class PrismaOrderNoteRepository implements OrderNoteRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async listByOrder(orderId: string): Promise<readonly OrderNoteEntry[]> {
+    const rows = await this.prisma.orderNote.findMany({
+      where: { orderId },
+      // ⚠️ 古い順。経過は「起きた順」に読むもの。
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toNoteEntry);
+  }
+
+  async append(input: {
+    readonly id: string;
+    readonly orderId: string;
+    readonly authorAccountId: string;
+    readonly body: string;
+    readonly now: Date;
+  }): Promise<OrderNoteEntry> {
+    const row = await this.prisma.orderNote.create({
+      data: {
+        id: input.id,
+        orderId: input.orderId,
+        authorAccountId: input.authorAccountId,
+        body: input.body,
+        createdAt: input.now,
+      },
+    });
+    return toNoteEntry(row);
+  }
+}
+
+function toNoteEntry(row: {
+  id: string;
+  authorAccountId: string;
+  body: string;
+  createdAt: Date;
+}): OrderNoteEntry {
+  return {
+    id: row.id,
+    authorAccountId: row.authorAccountId,
+    body: row.body,
+    createdAt: row.createdAt,
+  };
 }

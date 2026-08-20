@@ -32,6 +32,12 @@ import {
   type AdminListingListResponse,
   adminOrderListResponseSchema,
   adminOrderDetailSchema,
+  adminOrderTimelineResponseSchema,
+  adminOrderNotesResponseSchema,
+  orderNoteViewSchema,
+  type AdminOrderTimelineResponse,
+  type AdminOrderNotesResponse,
+  type OrderNoteView,
   paymentCredentialListResponseSchema,
   type PaymentCredentialListResponse,
   type RegisterPaymentCredentialRequest,
@@ -516,19 +522,102 @@ export function discardIntegrationSecret(
  * 注文の削除は API 側に存在しない（指示書 §9.3）。呼び出し側だけ用意すると、
  * 「画面にはあるのに動かない」操作が生まれる。
  */
+export interface AdminOrderSearchQuery {
+  readonly limit?: number;
+  readonly status?: string;
+  readonly paymentStatus?: string;
+  readonly orderNumber?: string;
+  readonly createdFrom?: string;
+  readonly createdTo?: string;
+  readonly minTotalAmount?: string;
+  readonly maxTotalAmount?: string;
+  readonly artworkTitle?: string;
+}
+
+/**
+ * 一覧と検索（`UD-121`）。
+ *
+ * ⚠️ **メールアドレスをここへ渡さない。** 問い合わせ文字列はアクセスログや
+ * ブラウザ履歴に残る。メールからの照合は `lookupAdminOrdersByEmail` を使う。
+ */
 export function fetchAdminOrders(
-  query: { readonly limit?: number; readonly status?: string } = {},
+  query: AdminOrderSearchQuery = {},
 ): Promise<AdminResult<AdminOrderListResponse>> {
   const params = new URLSearchParams();
   params.set('limit', String(query.limit ?? 20));
-  if (query.status !== undefined && query.status !== '') {
-    params.set('status', query.status);
+  const optional: readonly (readonly [string, string | undefined])[] = [
+    ['status', query.status],
+    ['paymentStatus', query.paymentStatus],
+    ['orderNumber', query.orderNumber],
+    ['createdFrom', query.createdFrom],
+    ['createdTo', query.createdTo],
+    ['minTotalAmount', query.minTotalAmount],
+    ['maxTotalAmount', query.maxTotalAmount],
+    ['artworkTitle', query.artworkTitle],
+  ];
+  for (const [key, value] of optional) {
+    if (value !== undefined && value !== '') {
+      params.set(key, value);
+    }
   }
   return callAdmin(`/api/v1/admin/orders?${params.toString()}`, adminOrderListResponseSchema);
 }
 
+/**
+ * 聞き取ったメールアドレスから注文を辿る（`UD-121`）。
+ *
+ * ⚠️ **本文で送る。** URL へ置くとアクセスログに残る。平文を保持しない
+ * 決定（`UD-503`）を、保持しない代わりにログへ撒くことになる。
+ */
+export function lookupAdminOrdersByEmail(
+  email: string,
+  limit = 20,
+): Promise<AdminResult<AdminOrderListResponse>> {
+  return callAdmin(
+    '/api/v1/admin/orders/search',
+    adminOrderListResponseSchema,
+    json({ email, limit }, 'POST'),
+  );
+}
+
 export function fetchAdminOrder(orderId: string): Promise<AdminResult<AdminOrderDetail>> {
   return callAdmin(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, adminOrderDetailSchema);
+}
+
+/** 注文の経過（`UD-121`）。⚠️ 古い順に並んでいる。 */
+export function fetchAdminOrderTimeline(
+  orderId: string,
+): Promise<AdminResult<AdminOrderTimelineResponse>> {
+  return callAdmin(
+    `/api/v1/admin/orders/${encodeURIComponent(orderId)}/timeline`,
+    adminOrderTimelineResponseSchema,
+  );
+}
+
+export function fetchAdminOrderNotes(
+  orderId: string,
+): Promise<AdminResult<AdminOrderNotesResponse>> {
+  return callAdmin(
+    `/api/v1/admin/orders/${encodeURIComponent(orderId)}/notes`,
+    adminOrderNotesResponseSchema,
+  );
+}
+
+/**
+ * 対応メモを足す（`UD-121`）。
+ *
+ * ⚠️ **直す口も消す口もここへ足さない。** API 側に存在しない。
+ * 呼び出し側だけ用意すると「画面にはあるのに動かない」操作が生まれる。
+ */
+export function addAdminOrderNote(
+  orderId: string,
+  body: string,
+): Promise<AdminResult<OrderNoteView>> {
+  return callAdmin(
+    `/api/v1/admin/orders/${encodeURIComponent(orderId)}/notes`,
+    orderNoteViewSchema,
+    json({ body }, 'POST'),
+  );
 }
 
 // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）------------------

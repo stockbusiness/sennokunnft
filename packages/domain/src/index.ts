@@ -456,6 +456,7 @@ export type {
   AuditEntry,
   AuditLogPort,
   AuditLogReadPort,
+  EmailHashPort,
 } from './ports/index';
 
 export {
@@ -523,10 +524,36 @@ export {
   type ReservationStatus,
 } from './order/reservation';
 
+export {
+  EMPTY_ORDER_SEARCH,
+  hasSearchCriteria,
+  normalizeOrderSearch,
+  type OrderNumberMatch,
+  type OrderSearchCriteria,
+  type OrderSearchInput,
+} from './order/search';
+
+export {
+  ORDER_TIMELINE_KINDS,
+  buildOrderTimeline,
+  type OrderNoteEntry,
+  type OrderTimelineEntry,
+  type OrderTimelineInput,
+  type OrderTimelineKind,
+} from './order/timeline';
+
+export {
+  ORDER_NOTE_MAX_LENGTH,
+  validateOrderNote,
+  type OrderNoteDraft,
+  type ValidatedOrderNote,
+} from './order/note';
+
 export type { RandomPort } from './ports/index';
 
 export type {
   OrderRepository,
+  OrderNoteRepository,
   CreateOrderCommand,
   CreateOrderOutcome,
   OrderItemCommand,

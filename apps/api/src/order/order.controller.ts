@@ -11,11 +11,16 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  adminOrderEmailLookupSchema,
   adminOrderListQuerySchema,
+  createOrderNoteRequestSchema,
   createOrderRequestSchema,
   type AdminOrderListResponse,
   type AdminOrderDetail,
+  type AdminOrderNotesResponse,
+  type AdminOrderTimelineResponse,
   type CheckoutSessionResponse,
+  type OrderNoteView,
   type OrderView,
 } from '@sengoku/contracts';
 import { currentRequestId } from '@sengoku/observability';
@@ -24,6 +29,7 @@ import { CurrentActor, RequireAction } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
 import { OrderService } from './order.service';
 import { CheckoutService } from './checkout.service';
+import { OrderSupportService } from './order-support.service';
 
 /**
  * 購入者向けの注文。
@@ -96,19 +102,74 @@ export class CheckoutController {
   }
 }
 
-/** 運営向けの注文一覧・詳細（指示書 §9.1・§9.2）。 */
+/** 運営向けの注文一覧・詳細（指示書 §9.1・§9.2 と `UD-121`）。 */
 @Controller('api/v1/admin/orders')
 export class AdminOrderController {
-  constructor(private readonly orders: OrderService) {}
+  constructor(
+    private readonly orders: OrderService,
+    private readonly support: OrderSupportService,
+  ) {}
 
+  /**
+   * 一覧と検索（`UD-121`）。
+   *
+   * ⚠️ **メールアドレスをここで受け取らない。** 問い合わせ文字列は
+   * アクセスログ・ブラウザ履歴・共有されたリンクに残る。
+   * メールからの照合は下の `POST search` が担う。
+   */
   @Get()
   @RequireAction('order.view_any')
   async list(@Query() rawQuery: unknown): Promise<AdminOrderListResponse> {
     const query = parseOrThrow(adminOrderListQuerySchema, rawQuery);
+    const criteria = this.support.normalizeSearch({
+      status: query.status,
+      paymentStatus: query.paymentStatus,
+      orderNumber: query.orderNumber,
+      // ⚠️ 日付のまま渡す。その日の始まり／終わりへの読み替えは
+      //    ドメインが行う（JST で区切る。`normalizeOrderSearch`）。
+      createdFrom: query.createdFrom,
+      createdTo: query.createdTo,
+      minTotalAmount: query.minTotalAmount,
+      maxTotalAmount: query.maxTotalAmount,
+      artworkTitle: query.artworkTitle,
+    });
     const page = await this.orders.listForAdmin({
       limit: query.limit,
       cursor: query.cursor,
-      status: query.status,
+      criteria,
+    });
+    return { items: [...page.items], nextCursor: page.nextCursor };
+  }
+
+  /**
+   * 聞き取ったメールアドレスから注文を辿る（`UD-121`）。
+   *
+   * ⚠️ **`POST` なのは、本文に入れて URL へ残さないため。** 副作用は
+   * 監査ログの 1 行だけで、注文は何も変わらない。
+   * ⚠️ **平文はここから先へ渡らない。** 照合値へ変換し、平文は捨てる。
+   * ⚠️ **`order.view_any` とは別の権限**（`order.lookup_buyer`）。
+   * 一覧を見ることと、人に紐づけて注文の有無を答えられることは別。
+   */
+  @Post('search')
+  @RequireAction('order.lookup_buyer')
+  @HttpCode(HttpStatus.OK)
+  async searchByEmail(
+    @CurrentActor() actor: Actor,
+    @Body() rawBody: unknown,
+  ): Promise<AdminOrderListResponse> {
+    const body = parseOrThrow(adminOrderEmailLookupSchema, rawBody);
+    // ⚠️ 鍵の無い配備ではここで `EMAIL_LOOKUP_UNAVAILABLE` になる。
+    //    「見つからない」に丸めない。
+    const emailHash = this.support.hashEmailForLookup(body.email);
+    const criteria = this.support.normalizeSearch({ emailHash });
+    const page = await this.orders.listForAdmin({
+      limit: body.limit,
+      cursor: body.cursor,
+      criteria,
+    });
+    await this.support.recordEmailLookup({
+      actorAccountId: requireAccountId(actor),
+      matchedCount: page.items.length,
     });
     return { items: [...page.items], nextCursor: page.nextCursor };
   }
@@ -121,6 +182,54 @@ export class AdminOrderController {
       throw new NotFoundException();
     }
     return order;
+  }
+
+  /** 注文の経過（`UD-121`）。⚠️ 古い順。決済の試行と受信記録を 1 列にする。 */
+  @Get(':id/timeline')
+  @RequireAction('order.view_any')
+  async timeline(@Param('id') id: string): Promise<AdminOrderTimelineResponse> {
+    const timeline = await this.support.timeline(id);
+    if (timeline === null) {
+      throw new NotFoundException();
+    }
+    return timeline;
+  }
+
+  @Get(':id/notes')
+  @RequireAction('order.view_any')
+  async notes(@Param('id') id: string): Promise<AdminOrderNotesResponse> {
+    const notes = await this.support.listNotes(id);
+    if (notes === null) {
+      throw new NotFoundException();
+    }
+    return notes;
+  }
+
+  /**
+   * 対応メモを足す（`UD-121`）。
+   *
+   * ⚠️ **更新と削除の口を作らない。** 追記のみ。書き間違えたら
+   * 訂正のメモを足す。
+   */
+  @Post(':id/notes')
+  @RequireAction('order.note')
+  @HttpCode(HttpStatus.CREATED)
+  async addNote(
+    @CurrentActor() actor: Actor,
+    @Param('id') id: string,
+    @Body() rawBody: unknown,
+  ): Promise<OrderNoteView> {
+    const body = parseOrThrow(createOrderNoteRequestSchema, rawBody);
+    const note = await this.support.addNote({
+      orderId: id,
+      // ⚠️ 書いた人はトークンから取る。本文からは受け取らない。
+      authorAccountId: requireAccountId(actor),
+      body: body.body,
+    });
+    if (note === null) {
+      throw new NotFoundException();
+    }
+    return note;
   }
 }
 

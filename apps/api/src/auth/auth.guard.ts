@@ -17,7 +17,7 @@ import {
   type Actor,
   type TokenVerifierPort,
 } from '@sengoku/auth';
-import type { ClockPort } from '@sengoku/domain';
+import type { ClockPort, EmailHashPort } from '@sengoku/domain';
 
 export const PUBLIC_KEY = 'sengoku:public';
 export const REQUIRED_ACTION_KEY = 'sengoku:required-action';
@@ -112,6 +112,13 @@ export class AuthGuard implements CanActivate {
      * かのどちらかしか試せない。
      */
     private readonly clock: ClockPort,
+    /**
+     * 照合用のメール値を作る口（`UD-121`）。
+     *
+     * ⚠️ **平文をここから先へ持ち出さない。** 変換した値だけをアカウントへ
+     * 残す。鍵の無い配備では `null` が返り、照合値は付かない（`UD-503`）。
+     */
+    private readonly emailHasher: EmailHashPort,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -205,9 +212,18 @@ export class AuthGuard implements CanActivate {
     // 招待の突き合わせにだけ使う。認可には渡さない（`AuthenticatedRequest` 参照）。
     request.verifiedEmail = verified.identity.email;
     request.tokenIssuedAt = verified.identity.issuedAt;
+    // ⚠️ ここで平文から照合値へ変換し、以後は平文を触らない（`UD-121`）。
+    const emailHash =
+      verified.identity.email === undefined ? null : this.emailHasher.hash(verified.identity.email);
     const existing = await this.accounts.findByAuthSubject(provider, subject);
     // 初回アクセスならここで作る。作られるロールは常に buyer。
-    const account = existing ?? (await this.accounts.provision(provider, subject));
+    const account = existing ?? (await this.accounts.provision(provider, subject, emailHash));
+    // ⚠️ **変わったときだけ書く。** 毎回書くと、読むだけの要求まで
+    //    書き込みになり、負荷も監査も膨らむ。
+    //    ⚠️ 消さない側へ倒す（`rememberEmailHash` の注記）。
+    if (emailHash !== null && account.emailHash !== emailHash) {
+      await this.accounts.rememberEmailHash(account.id, emailHash);
+    }
 
     return {
       // ロールは DB の値。トークンのクレームは使わない。

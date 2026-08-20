@@ -34,6 +34,7 @@ import {
   PrismaListingRepository,
   PrismaIdempotencyStore,
   PrismaOrderRepository,
+  PrismaOrderNoteRepository,
   PrismaPaymentRepository,
   PrismaPlatformFeeRateReader,
   PrismaCommonUserLinkRepository,
@@ -63,6 +64,7 @@ import {
   parseEncryptionKeys,
   ReachabilityProbe,
   probeStripeAccount,
+  HmacEmailHasher,
 } from '@sengoku/integrations';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
 import type { PaymentGatewayPort } from '@sengoku/domain';
@@ -520,6 +522,7 @@ async function bootstrap(): Promise<void> {
             },
       orders: {
         repository: new PrismaOrderRepository(prisma),
+        notes: new PrismaOrderNoteRepository(prisma),
         commonUserLinks: new PrismaCommonUserLinkRepository(prisma),
         random: new CryptoRandom(),
         resolvePlatformFeeRateBps,
@@ -538,6 +541,12 @@ async function bootstrap(): Promise<void> {
         internalJobToken: env.INTERNAL_JOB_TOKEN,
       },
       tokenVerifier,
+      /**
+       * 問い合わせでメールから注文を辿るための変換（`UD-121`）。
+       *
+       * ⚠️ 鍵が無ければ照合値は付かない。素のハッシュへは落とさない。
+       */
+      emailHasher: new HmacEmailHasher(env.EMAIL_LOOKUP_PEPPER ?? null),
       clock: new SystemClock(),
       ids: new UuidGenerator(),
       storage,

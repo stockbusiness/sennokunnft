@@ -82,6 +82,21 @@ const apiEnvObject = baseEnvObject.extend({
   AUTH_PROVIDER: z.enum(['dev', 'supabase']).default('dev'),
   AUTH_DEV_SECRET: z.string().min(8).optional(),
   /**
+   * 問い合わせでメールから注文を辿るための鍵（`UD-121`）。
+   *
+   * ⚠️ **平文のメールアドレスを保持するための設定ではない**（`UD-503`）。
+   * 保存するのは、この鍵で計算した照合値だけ。
+   *
+   * ⚠️ **既定値を持たせない。** 既定の鍵は鍵が無いのと同じで、
+   * その値を知る全員が「このアドレスの人が買ったか」を確かめられる。
+   * 未設定の配備では照合値が付かず、メールからの照合は使えないままになる。
+   * これは不具合ではなく、鍵の無い保護を装わないための挙動。
+   *
+   * ⚠️ **入れ替えると、それ以前の照合値は引けなくなる。** 手順は
+   * `docs/ADMIN_OPERATIONS_GAP.md` の `UD-121` の節を参照。
+   */
+  EMAIL_LOOKUP_PEPPER: z.string().min(32).optional(),
+  /**
    * 決済事業者（決済 Phase P2 で `stripe` を追加）。
    *
    * ⚠️ **既定は `fake` のまま。** 既定を `stripe` にすると、鍵を入れていない

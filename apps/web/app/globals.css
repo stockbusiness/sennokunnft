@@ -1153,3 +1153,114 @@ button {
   margin: 0 0 var(--sengoku-space-2);
   font-size: var(--sengoku-text-title);
 }
+
+/*
+  問い合わせ対応（UD-121）。
+
+  ⚠️ スマホ（420px 幅）を前提にする。運営は店頭や移動中に開く。
+     経過も対応メモも 1 列にしてあるのは、横スクロールの中に
+     半分が隠れる状態を作らないため。
+*/
+.sengoku-panel {
+  margin: var(--sengoku-space-5) 0;
+  padding: var(--sengoku-space-4);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-paper);
+}
+
+.sengoku-panel__title {
+  margin: 0 0 var(--sengoku-space-2);
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-title);
+  font-weight: 500;
+}
+
+.sengoku-panel .sengoku-form {
+  margin: var(--sengoku-space-3) 0 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  max-width: none;
+}
+
+.sengoku-section-heading {
+  margin: var(--sengoku-space-6) 0 var(--sengoku-space-2);
+  font-family: var(--sengoku-font-serif);
+  font-size: var(--sengoku-text-title);
+  font-weight: 500;
+}
+
+.sengoku-timeline {
+  margin: var(--sengoku-space-3) 0 0;
+  padding: 0 0 0 var(--sengoku-space-4);
+  border-left: 2px solid var(--sengoku-keisen);
+  list-style: none;
+  display: grid;
+  gap: var(--sengoku-space-4);
+}
+
+.sengoku-timeline__entry {
+  position: relative;
+}
+
+/* ⚠️ 印は装飾。読み上げには乗らないので、意味は文言側に持たせる。 */
+.sengoku-timeline__entry::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--sengoku-space-4) - 5px);
+  top: 0.7em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sengoku-sakura);
+}
+
+.sengoku-timeline__at {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.sengoku-timeline__kind {
+  margin: 0;
+  font-weight: 700;
+}
+
+.sengoku-timeline__detail {
+  margin: var(--sengoku-space-1) 0 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+  /* ⚠️ 対応メモは改行を含む。折り返しを潰さない。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sengoku-note-list {
+  margin: var(--sengoku-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sengoku-space-3);
+}
+
+.sengoku-note {
+  padding: var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-paper);
+}
+
+.sengoku-note__meta {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
+.sengoku-note__body {
+  margin: var(--sengoku-space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
