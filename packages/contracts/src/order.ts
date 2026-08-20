@@ -217,6 +217,28 @@ export const issueEntitlementsResponseSchema = z.object({
 });
 export type IssueEntitlementsResponse = z.infer<typeof issueEntitlementsResponseSchema>;
 
+/**
+ * Wallet への自動配送ジョブの結果（P0-2）。
+ *
+ * ⚠️ **受取権IDも購入者も返さない。** 時計が叩く口で、応答は監視の数値として
+ * 読まれる。人の情報を混ぜると、監視の記録が名簿になる。
+ */
+export const deliverEntitlementsResponseSchema = z.object({
+  /** 拾った受取権の数。 */
+  pickedCount: z.number().int().nonnegative(),
+  /** 行列へ載せた数。 */
+  deliveredCount: z.number().int().nonnegative(),
+  /**
+   * 今回は送らなかった数。
+   *
+   * ⚠️ **失敗ではない。** 受取用のウォレットがまだ結び付いていない方と、
+   * すでに受け取り済みの分がここに入る。
+   */
+  skippedCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+});
+export type DeliverEntitlementsResponse = z.infer<typeof deliverEntitlementsResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // 決済（決済 Phase P2）
 // ---------------------------------------------------------------------------

@@ -90,6 +90,19 @@ class FakeClaimRepository implements ClaimTokenRotationSource {
     });
   }
 
+  /** 自動配送の経路（P0-2）。⚠️ 材料は受取トークンから引いたときと同じ。 */
+  findForAutoDelivery(entitlementId: string): Promise<ClaimLookupResult | null> {
+    return entitlementId === this.row.id ? this.findByTokenHash(this.hash) : Promise.resolve(null);
+  }
+
+  listAutoDeliverable(limit: number): Promise<ClaimLookupResult[]> {
+    // ⚠️ 受取用のウォレットが結び付いている分だけ。実装と同じ条件にする。
+    if (limit < 1 || this.row.status !== 'issued' || this.row.purchaserCommonUserId === null) {
+      return Promise.resolve([]);
+    }
+    return this.findByTokenHash(this.hash).then((found) => (found === null ? [] : [found]));
+  }
+
   /** 実際に受取が成立した回数。二重受取が起きていないかを見る。 */
   claimCount = 0;
 
