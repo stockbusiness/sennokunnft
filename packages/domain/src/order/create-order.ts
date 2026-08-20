@@ -40,6 +40,14 @@ export interface OrderItemDraft {
   readonly creatorAccountId: string;
   /** ⚠️ 注文時点の作品名。**マスタを参照して表示しない。** */
   readonly titleSnapshot: string;
+  /**
+   * 注文時点の作家さまの表示名（決定 2026-08-20）。
+   *
+   * ⚠️ **マスタを引き直さない。** 改名しても過去のご注文の表示は変わらない
+   * （作品名・価格・手数料率と同じスナップショット原則）。
+   * ⚠️ まだ登録していなければ `null`。**推測で埋めない。**
+   */
+  readonly creatorNameSnapshot: string | null;
   /** ⚠️ 注文時点の単価。あとで値段が変わっても、この注文には影響させない。 */
   readonly unitPrice: Money;
   readonly quantity: number;
@@ -150,6 +158,8 @@ export function createOrder(input: CreateOrderInput): Result<OrderDraft, DomainE
         creatorAccountId: input.creatorAccountId,
         // スナップショット。あとで作品名や価格が変わっても注文は動かない。
         titleSnapshot: artwork.title,
+        // ⚠️ そのときの表示名。あとで引き直さない。
+        creatorNameSnapshot: artwork.creatorDisplayName,
         unitPrice: listing.price,
         quantity,
         totalAmount: subtotal.value.amountMinor,

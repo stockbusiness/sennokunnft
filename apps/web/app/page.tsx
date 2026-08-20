@@ -44,6 +44,7 @@ export default async function HomePage() {
                 maxSupply={artwork.maxSupply}
                 purchasable={artwork.purchasable}
                 statusLabel={displayStateLabel(artwork.displayState)}
+                creatorName={artwork.creatorDisplayName}
               />
             </li>
           ))}

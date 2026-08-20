@@ -404,6 +404,23 @@ button {
   flex: 1;
 }
 
+/*
+  出品された方のお名前。
+
+  ⚠️ **作品名より小さく、控えめに置く。** 主役は作品で、名前はその出どころ。
+     同じ大きさで並べると、どちらを読めばよいのか分からなくなる。
+  ⚠️ **長い名前で桁が崩れないよう省略する。** 40文字まで入る。
+*/
+.sengoku-artwork-card__creator {
+  color: var(--sengoku-sumi-soft);
+  font-size: var(--sengoku-text-small);
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sengoku-artwork-card__supply {
   color: var(--sengoku-sumi-soft);
   font-size: var(--sengoku-text-small);

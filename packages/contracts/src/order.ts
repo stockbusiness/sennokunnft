@@ -67,6 +67,14 @@ export const orderItemViewSchema = z.object({
   listingId: z.string(),
   /** ⚠️ 注文時点の作品名。マスタを引き直して表示しない。 */
   titleSnapshot: z.string(),
+  /**
+   * ⚠️ **注文時点の出品者のお名前。** 作品名・価格と同じく、注文の記録は
+   * 「そのとき何が表示されていたか」を残す。出品者があとから改名しても、
+   * この注文の表示は動かない。
+   *
+   * ⚠️ お名前を登録していない方から買った注文は `null`。
+   */
+  creatorNameSnapshot: z.string().nullable(),
   unitPriceAmount: z.number().int().nonnegative(),
   currency: z.string().regex(/^[A-Z]{3}$/),
   quantity: z.number().int().positive(),

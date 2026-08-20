@@ -83,6 +83,7 @@ import type {
 } from '@sengoku/domain';
 import {
   canManuallyResend,
+  domainError,
   err,
   ok,
   refundStatusAfter,
@@ -91,6 +92,8 @@ import {
   TOKUSHOHO_FIELD_KEYS,
 } from '@sengoku/domain';
 import type {
+  CreatorProfile,
+  CreatorProfileRepository,
   EntitlementStatus,
   MintJobStatus,
   PayoutCandidate,
@@ -106,6 +109,7 @@ import type {
   RefundSettlement,
   SettleRefundCommand,
   StartRefundCommand,
+  ValidatedDisplayName,
 } from '@sengoku/domain';
 import {
   contentHash,
@@ -1526,6 +1530,35 @@ export class InMemoryRefunds implements RefundRepository {
  * 通るのに本番で落ちる経路ができる。1 作家さま × 1 期間 = 1 行、確定済みは
  * 置き換えない、二重払いをしない——この 3 つはここでも同じに保つ。
  */
+/**
+ * 作家さまの表示名（決定 2026-08-20）。
+ *
+ * ⚠️ **重複は本物と同じところで断る。** 「代替実装だから通す」を作ると、
+ * 手元では通るのに本番で落ちる経路ができる。**鍵の一致**で見る——生の
+ * 文字列で見ると、見た目が同じ名前を通してしまう。
+ */
+export class InMemoryCreatorProfiles implements CreatorProfileRepository {
+  private readonly names = new Map<string, { value: string; key: string }>();
+
+  find(accountId: string): Promise<CreatorProfile | null> {
+    const row = this.names.get(accountId);
+    return Promise.resolve({ accountId, displayName: row?.value ?? null });
+  }
+
+  saveDisplayName(
+    accountId: string,
+    name: ValidatedDisplayName,
+  ): Promise<Result<CreatorProfile, DomainError>> {
+    for (const [otherId, row] of this.names) {
+      if (otherId !== accountId && row.key === name.key) {
+        return Promise.resolve(err(domainError('DISPLAY_NAME_TAKEN', 'already taken')));
+      }
+    }
+    this.names.set(accountId, { value: name.value, key: name.key });
+    return Promise.resolve(ok({ accountId, displayName: name.value }));
+  }
+}
+
 export class InMemoryPayouts implements PayoutRepository {
   private readonly payouts = new Map<string, PayoutView>();
   private readonly lines = new Map<string, PayoutLineView[]>();
@@ -1846,6 +1879,7 @@ export class InMemoryOrderRepository implements OrderRepository {
         artworkId: command.item.artworkId,
         creatorAccountId: command.item.creatorAccountId,
         titleSnapshot: command.item.titleSnapshot,
+        creatorNameSnapshot: command.item.creatorNameSnapshot,
         unitPriceAmount: command.item.unitPriceAmount,
         unitPriceCurrency: command.item.unitPriceCurrency,
         quantity: command.item.quantity,
@@ -2274,6 +2308,7 @@ export interface TestHarness extends AppDependencies {
   readonly refunds: InMemoryRefunds;
   /** ⚠️ 精算の対象を差し替えるため、実体の型で持つ。 */
   readonly payouts: InMemoryPayouts;
+  readonly profiles: InMemoryCreatorProfiles;
 }
 
 /**
@@ -2453,6 +2488,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const settlementSettings = new InMemorySettlementSettings();
   const refunds = new InMemoryRefunds(orderRepository);
   const payouts = new InMemoryPayouts();
+  const profiles = new InMemoryCreatorProfiles();
   const commonUserLinks = new InMemoryCommonUserLinks();
   const paymentRepository = new InMemoryPaymentRepository(orderRepository);
   const paymentGateway = new FakePaymentGateway(
@@ -2482,6 +2518,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     refunds,
     // 精算（`UD-119`）。⚠️ 対象の注文は試験ごとに差し替える。
     payouts,
+    // 作家さまの表示名（決定 2026-08-20）。
+    profiles,
     idempotency: new InMemoryIdempotencyStore(),
     accounts,
     staffMembers,
@@ -2589,6 +2627,8 @@ export function sampleArtwork(overrides: Partial<Artwork> = {}): Artwork {
   return {
     id: 'artwork-1',
     creatorAccountId: 'account-operator',
+    // ⚠️ 既定は未登録。表示名を確かめる試験だけが上書きする。
+    creatorDisplayName: null,
     slug: 'sample-artwork',
     title: 'サンプル作品',
     description: '説明文',

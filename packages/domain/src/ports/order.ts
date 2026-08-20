@@ -31,6 +31,8 @@ export interface OrderItemCommand {
   readonly artworkId: string;
   readonly creatorAccountId: string;
   readonly titleSnapshot: string;
+  /** 注文時点の作家さまの表示名。⚠️ マスタを引き直さない。 */
+  readonly creatorNameSnapshot: string | null;
   readonly unitPriceAmount: number;
   readonly unitPriceCurrency: string;
   readonly quantity: number;
@@ -117,6 +119,8 @@ export interface OrderItemView {
   readonly artworkId: string;
   readonly creatorAccountId: string;
   readonly titleSnapshot: string;
+  /** 注文時点の作家さまの表示名。⚠️ マスタを引き直さない。 */
+  readonly creatorNameSnapshot: string | null;
   readonly unitPriceAmount: number;
   readonly unitPriceCurrency: string;
   readonly quantity: number;

@@ -31,6 +31,7 @@ function artwork(overrides: Partial<Artwork> = {}): Artwork {
   return {
     id: 'artwork-1',
     creatorAccountId: 'account-creator',
+    creatorDisplayName: null,
     slug: 'sample-artwork',
     title: '作品名',
     description: '説明',

@@ -31,6 +31,7 @@ import type {
   SettlementSettingsRepository,
   RefundRepository,
   PayoutRepository,
+  CreatorProfileRepository,
   PaymentRepository,
   PaymentGatewayPort,
   CommonUserLinkRepository,
@@ -108,6 +109,11 @@ import {
   type SettlementConfig,
 } from './settlement/settlement.controller';
 import { AdminPayoutController } from './settlement/payout.controller';
+import {
+  CreatorProfileController,
+  PROFILE_CONFIG,
+  type ProfileConfig,
+} from './catalog/profile.controller';
 import { PAYOUT_CONFIG, PayoutService, type PayoutConfig } from './settlement/payout.service';
 import { CheckoutService } from './order/checkout.service';
 import { PaymentWebhookService } from './order/webhook.service';
@@ -316,6 +322,13 @@ export interface AppDependencies {
    * お支払いが記録として残らない。
    */
   readonly payouts: PayoutRepository;
+  /**
+   * 作家さまの表示名（決定 2026-08-20）。
+   *
+   * ⚠️ **省略できない。** 無いと名乗れず、公開ページで作家さまが
+   * 匿名のままになる。
+   */
+  readonly profiles: CreatorProfileRepository;
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -414,6 +427,8 @@ export class AppModule implements NestModule {
         // 返金と精算の設定（`UD-104` / `UD-119`）。⚠️ 変更はオーナー限定。
         AdminSettlementController,
         AdminPayoutController,
+        // 自分の表示名（決定 2026-08-20）。⚠️ 自分の分しか触れない。
+        CreatorProfileController,
         ...(internalJobToken === undefined || internalJobToken === ''
           ? []
           : [InternalJobsController]),
@@ -476,6 +491,13 @@ export class AppModule implements NestModule {
             // ⚠️ 環境はプロセスに固定する。要求から受け取れるようにすると、
             //    本番から staging を書き換えられる。
             appEnvironment: deps.integrations?.appEnvironment ?? 'staging',
+            audit: deps.audit,
+          }),
+        },
+        {
+          provide: PROFILE_CONFIG,
+          useFactory: (): ProfileConfig => ({
+            repository: deps.profiles,
             audit: deps.audit,
           }),
         },

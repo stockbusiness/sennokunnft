@@ -113,14 +113,21 @@ const SEEDED_SETTLEMENT_SETTINGS = [
   },
 ] as const;
 
-/** PostgreSQL のエラーコードを取り出す（制約違反の種別を確かめるため）。 */
+/**
+ * PostgreSQL のエラーコードを取り出す（制約違反の種別を確かめるため）。
+ *
+ * ⚠️ **`meta.code` を先に見る。** `$executeRaw` が落ちたとき、Prisma は外側の
+ * `code` を自前の `P2010`（raw query failed）にし、PostgreSQL の本当のコード
+ * （`23505` など）を `meta.code` へ入れる。外側を先に読むと、生の SQL で
+ * 起こした一意制約違反が**ただの実行時エラーに見えてしまう**。
+ */
 export function pgErrorCode(error: unknown): string | undefined {
   const candidate = error as { code?: unknown; meta?: { code?: unknown } };
-  if (typeof candidate.code === 'string') {
-    return candidate.code;
-  }
   if (typeof candidate.meta?.code === 'string') {
     return candidate.meta.code;
+  }
+  if (typeof candidate.code === 'string') {
+    return candidate.code;
   }
   return undefined;
 }

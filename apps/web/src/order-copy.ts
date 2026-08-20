@@ -17,6 +17,11 @@ export const ORDER_COPY = {
   checkoutTitle: 'ご注文内容の確認',
   checkoutDescription: '内容をお確かめのうえ、下のボタンをお押しください。',
   checkoutItemHeading: 'お申し込みの品',
+  /*
+    ⚠️ **注文時点のお名前に付ける見出し。** 「出品者」だけだと、
+       いまのお名前を出しているように読める。買われた時点の記録である。
+  */
+  creatorNameLabel: '出品者（ご購入時のお名前）',
   checkoutPriceLabel: 'お支払い金額',
   checkoutTaxNote: '（税込）',
   checkoutQuantityLabel: '数量',

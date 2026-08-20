@@ -282,3 +282,11 @@ export {
   type PayoutListResponse,
   type PayoutViewDto,
 } from './payout';
+
+export {
+  DISPLAY_NAME_MAX,
+  creatorProfileSchema,
+  updateCreatorProfileRequestSchema,
+  type CreatorProfileView,
+  type UpdateCreatorProfileRequest,
+} from './profile';

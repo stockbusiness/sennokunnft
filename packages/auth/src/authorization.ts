@@ -125,6 +125,17 @@ export const ACTIONS = [
    * という状態を作れてしまう。締める人と、払ったと宣言する人を分ける。
    */
   'payout.mark_paid',
+  /**
+   * 自分の表示名を決める（決定 2026-08-20）。
+   *
+   * ⚠️ **`_own` である。** 他人の表示名を書き換える口は作らない。名乗る
+   * 名前は本人のもので、運営が勝手に変えるものではない。なりすましへの
+   * 対応は、名前の書き換えではなくアカウントの停止（`status`）で行う。
+   *
+   * ⚠️ **会員なら誰でも持つ。** 出品する前に名前を決めたい方がいる。
+   * 「作品を 1 つ作らないと名乗れない」という順序を強いない。
+   */
+  'profile.manage_own',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -186,6 +197,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'claim.reissue',
     'collection.view',
     'legal.consent',
+    // ⚠️ 自分の分だけ。他人の表示名は書き換えられない。
+    'profile.manage_own',
   ],
   operator: [
     'artwork.view_public',
@@ -234,6 +247,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'payout.manage',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'payout.mark_paid',
+    // 運営も自分名義で出品できる（`artwork.create_own` と同じ考え方）。
+    'profile.manage_own',
   ],
   auditor: [
     'artwork.view_public',

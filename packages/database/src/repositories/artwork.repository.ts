@@ -16,14 +16,28 @@ const MAX_PAGE_SIZE = 100;
 export class PrismaArtworkRepository implements ArtworkRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  /*
+    ⚠️ **出品者の表示名を一緒に引く。** 画面が作品と作家さまを別々に
+       問い合わせる形にすると、一覧で N+1 になる。ここで結合しておく。
+  */
+  private static readonly WITH_CREATOR = {
+    creator: { select: { displayName: true } },
+  } as const;
+
   async findById(id: string): Promise<Artwork | null> {
-    const row = await this.prisma.artwork.findUnique({ where: { id } });
-    return row === null ? null : toArtwork(row);
+    const row = await this.prisma.artwork.findUnique({
+      where: { id },
+      include: PrismaArtworkRepository.WITH_CREATOR,
+    });
+    return row === null ? null : toArtwork(row, row.creator.displayName);
   }
 
   async findBySlug(slug: string): Promise<Artwork | null> {
-    const row = await this.prisma.artwork.findUnique({ where: { slug } });
-    return row === null ? null : toArtwork(row);
+    const row = await this.prisma.artwork.findUnique({
+      where: { slug },
+      include: PrismaArtworkRepository.WITH_CREATOR,
+    });
+    return row === null ? null : toArtwork(row, row.creator.displayName);
   }
 
   /** 公開中の作品のみ。非公開を混ぜないことがこのメソッドの責務。 */
@@ -57,8 +71,9 @@ export class PrismaArtworkRepository implements ArtworkRepository {
         issuedCount: artwork.issuedCount,
         status: artwork.status,
       },
+      include: PrismaArtworkRepository.WITH_CREATOR,
     });
-    return toArtwork(row);
+    return toArtwork(row, row.creator.displayName);
   }
 
   async update(artwork: Artwork): Promise<Artwork> {
@@ -76,8 +91,9 @@ export class PrismaArtworkRepository implements ArtworkRepository {
         maxSupply: artwork.maxSupply,
         status: artwork.status,
       },
+      include: PrismaArtworkRepository.WITH_CREATOR,
     });
-    return toArtwork(row);
+    return toArtwork(row, row.creator.displayName);
   }
 
   /**
@@ -98,8 +114,9 @@ export class PrismaArtworkRepository implements ArtworkRepository {
       const row = await tx.artwork.update({
         where: { id: artwork.id },
         data: { status: artwork.status },
+        include: PrismaArtworkRepository.WITH_CREATOR,
       });
-      return toArtwork(row);
+      return toArtwork(row, row.creator.displayName);
     });
   }
 
@@ -149,6 +166,7 @@ export class PrismaArtworkRepository implements ArtworkRepository {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       // 次ページの有無を知るために 1 件多く取る。
       take: limit + 1,
+      include: PrismaArtworkRepository.WITH_CREATOR,
     });
 
     const hasMore = rows.length > limit;
@@ -156,7 +174,11 @@ export class PrismaArtworkRepository implements ArtworkRepository {
     const last = page.at(-1);
 
     return {
-      items: page.map(toArtwork),
+      /*
+        ⚠️ **`map(toArtwork)` と書かない。** `Array.map` は 2 番目に
+           添字を渡すので、表示名の引数に数値が入る。
+      */
+      items: page.map((row) => toArtwork(row, row.creator.displayName)),
       nextCursor:
         hasMore && last !== undefined
           ? encodeCursor({ createdAt: last.createdAt, id: last.id })

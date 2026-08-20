@@ -202,6 +202,19 @@ export const DOMAIN_ERROR_CODES = [
   'PAYOUT_NOT_EDITABLE',
   /** その精算は見つからない。 */
   'PAYOUT_NOT_FOUND',
+  // --- 作家さまの表示名（決定 2026-08-20）---
+  /** 表示名として受け付けられない（長さ・見えない文字など）。 */
+  'DISPLAY_NAME_INVALID',
+  /**
+   * すでに使われている表示名。
+   *
+   * ⚠️ **`DISPLAY_NAME_INVALID` と分ける。** 直し方が違う——前者は書き方を
+   * 直す、こちらは別の名前を考える。まとめると、本人が同じ名前を
+   * 何度も試すことになる。
+   */
+  'DISPLAY_NAME_TAKEN',
+  /** 運営を名乗る表示名。⚠️ なりすましを止めるため。 */
+  'DISPLAY_NAME_RESERVED',
   /**
    * 返金は決められたが、決済事業者へ届かなかった（`UD-120`）。
    *

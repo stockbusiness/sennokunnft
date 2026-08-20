@@ -8,6 +8,7 @@
  *
  * 冪等にしてあるので、何度実行しても増殖しない。
  */
+import { validateDisplayName } from '@sengoku/domain';
 import { PrismaClient } from '../generated/client';
 
 const APP_ENV = process.env.APP_ENV ?? 'local';
@@ -23,6 +24,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  /*
+    シードの作る表示名も、アプリと同じ検証を通す。
+
+    ⚠️ **ここで生の文字列を直接書き込まない。** 表示名は「値」と
+       「重複判定の鍵」の対で入れる決まりで、片方だけだと CHECK
+       （`accounts_display_name_paired`）が止める。
+    ⚠️ **アプリが断る名前をシードが作れる状態にしない。** 作れると、
+       手元のデータだけが本番で有り得ない形になり、確認の意味が薄れる。
+       「運営」「公式」などを含む名前はアプリ側で断られるため、ここでも通らない。
+  */
+  const seedName = validateDisplayName('開発用の出品者');
+  if (!seedName.ok) {
+    console.error('✗ シードの表示名が検証を通りません。');
+    process.exit(1);
+  }
+
   const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
 
   try {
@@ -34,7 +51,8 @@ async function main(): Promise<void> {
       create: {
         authProvider: 'dev',
         authSubject: 'seed-operator',
-        displayName: '開発用の運営',
+        displayName: seedName.value.value,
+        displayNameKey: seedName.value.key,
         role: 'operator',
         /*
           ⚠️ **オーナーの印を付けてある。** 手元では、これが無いと
@@ -45,7 +63,17 @@ async function main(): Promise<void> {
         */
         isOwner: true,
       },
-      update: { role: 'operator', isOwner: true },
+      /*
+        ⚠️ **流し直したときも表示名を入れ直す。** この列を足す移行が既存の
+           値を落としているため、入れ直さないと 2 回目以降のシードで
+           出品者名が空のままになる。
+      */
+      update: {
+        role: 'operator',
+        isOwner: true,
+        displayName: seedName.value.value,
+        displayNameKey: seedName.value.key,
+      },
     });
 
     const samples = [

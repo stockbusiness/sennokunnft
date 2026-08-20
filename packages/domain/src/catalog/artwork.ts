@@ -22,6 +22,14 @@ export interface Artwork extends SupplyCounters {
    * 変わるということ。取引の履歴と食い違う。
    */
   readonly creatorAccountId: string;
+  /**
+   * 出品者の表示名（決定 2026-08-20）。
+   *
+   * ⚠️ **まだ登録していなければ `null`。** 「（表示名の登録前）」のような
+   * 代わりの文言をここで作らない。文言は画面が決める——この層で決めると、
+   * 管理画面と公開ページで違う言い方をしたくなったときに直せない。
+   */
+  readonly creatorDisplayName: string | null;
   readonly slug: string;
   readonly title: string;
   readonly description: string;
@@ -101,6 +109,12 @@ export function createArtworkDraft(input: CreateArtworkInput): Result<Artwork, D
   return ok({
     id: input.id,
     creatorAccountId: input.creatorAccountId,
+    /*
+      ⚠️ **作るときは常に `null`。** 表示名はアカウントに属する値で、
+         作品に属する値ではない。ここで写すと、あとで改名したときに
+         **どちらが正なのか**が分からなくなる。読み出すときに引く。
+    */
+    creatorDisplayName: null,
     slug: input.slug,
     title: input.title.trim(),
     description: input.description ?? '',

@@ -130,6 +130,8 @@ export class PrismaOrderRepository implements OrderRepository {
           artworkId: command.item.artworkId,
           creatorAccountId: command.item.creatorAccountId,
           artworkTitleSnapshot: command.item.titleSnapshot,
+          // ⚠️ 注文時点の表示名。改名しても過去のご注文は動かない。
+          creatorNameSnapshot: command.item.creatorNameSnapshot,
           unitPriceAmount: command.item.unitPriceAmount,
           unitPriceCurrency: command.item.unitPriceCurrency,
           quantity: command.item.quantity,

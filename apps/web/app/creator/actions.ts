@@ -9,6 +9,7 @@ import {
   createListing,
   publishArtwork,
   suspendListing,
+  updateMyProfile,
   uploadArtworkImage,
   type CreatorResult,
 } from '../../src/creator-client';
@@ -29,6 +30,8 @@ import { creatorErrorMessage } from '../../src/creator-copy';
 
 export interface ActionState {
   readonly error?: string;
+  /** 成功したときだけ立てる。⚠️ 何も言わないと「押せたのか」が分からない。 */
+  readonly done?: boolean;
 }
 
 /** 画像として受け取ってよい種別。判定は API 側が中身で行う（ここは足切り）。 */
@@ -40,7 +43,8 @@ function text(form: FormData, name: string): string {
 }
 
 function fail<T>(result: CreatorResult<T>): ActionState {
-  return { error: result.ok ? undefined : creatorErrorMessage(result.reason) };
+  // ⚠️ 符号も渡す。渡さないと、直し方の違う失敗が同じ言葉になる。
+  return { error: result.ok ? undefined : creatorErrorMessage(result.reason, result.code) };
 }
 
 export async function createArtworkAction(
@@ -182,4 +186,32 @@ export async function suspendListingAction(
   revalidatePath(`/creator/artworks/${text(form, 'artworkId')}`);
   revalidatePath('/');
   return {};
+}
+
+/**
+ * 作品ページに出すお名前を決める・変える。
+ *
+ * ⚠️ **誰の分かをフォームから受け取らない。** API がトークンから決める。
+ * 受け取れる形にすると、そこが他人の名前を書き換える道になる。
+ *
+ * ⚠️ **「使われているか」を先に確かめない。** 確かめてから書くと、同時に
+ * 登録した 2 人が両方通る。書いてみて、断られたら伝える。
+ */
+export async function updateDisplayNameAction(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const result = await updateMyProfile(text(form, 'displayName'));
+  if (!result.ok) {
+    return fail(result);
+  }
+  revalidatePath('/creator');
+  /*
+    ⚠️ **作品ページも作り直す。** 名前は作品の隣に出る。ここを忘れると、
+       改名したのに古い名前が出たままになる。`'page'` を付けて
+       **その形の全ページ**を対象にする（1 枚ずつ指定できない）。
+  */
+  revalidatePath('/');
+  revalidatePath('/artworks/[slug]', 'page');
+  return { done: true };
 }

@@ -1,13 +1,24 @@
 import { EmptyState, Notice, PageHeader, StatusBadge } from '@sengoku/ui';
-import { fetchMyArtworks } from '../../src/creator-client';
+import { fetchMyArtworks, fetchMyProfile } from '../../src/creator-client';
+import { DisplayNameForm } from './profile-form';
 import { CREATOR_COPY, creatorErrorMessage } from '../../src/creator-copy';
 import { artworkStatusLabel } from '../../src/admin-copy';
 import { isLoggedIn } from '../../src/auth/current';
 import { LOGIN_COPY } from '../../src/auth/copy';
 
 export default async function CreatorHomePage() {
-  const result = await fetchMyArtworks();
-  const loggedIn = await isLoggedIn();
+  const [result, profile, loggedIn] = await Promise.all([
+    fetchMyArtworks(),
+    fetchMyProfile(),
+    isLoggedIn(),
+  ]);
+
+  /*
+    ⚠️ **読めなかったときは、フォームごと出さない。** 空欄を初期値にすると、
+       登録済みの方が押した拍子に**別の名前へ書き換わる**。読めていないことと
+       「登録されていない」ことは違う。
+  */
+  const displayName = profile.ok ? profile.data.displayName : null;
 
   return (
     <>
@@ -33,6 +44,28 @@ export default async function CreatorHomePage() {
           </button>
         </form>
       ) : null}
+
+      {/*
+        お名前。⚠️ **作品の一覧より前に置く。** 作品ページに出るので、
+        並べる前に決めていただくほうがよい。
+      */}
+      <section className="sengoku-panel">
+        <h2 className="sengoku-panel__title">{CREATOR_COPY.profileTitle}</h2>
+        <p className="sengoku-form__hint">{CREATOR_COPY.profileDescription}</p>
+        {!profile.ok ? (
+          <Notice tone="alert" title={creatorErrorMessage(profile.reason, profile.code)} />
+        ) : (
+          <>
+            {displayName === null ? (
+              <Notice
+                title={CREATOR_COPY.displayNameMissingNotice}
+                hint={CREATOR_COPY.displayNameMissingHint}
+              />
+            ) : null}
+            <DisplayNameForm current={displayName} />
+          </>
+        )}
+      </section>
 
       <p className="sengoku-creator-actions">
         <a className="sengoku-button" href="/creator/artworks/new">

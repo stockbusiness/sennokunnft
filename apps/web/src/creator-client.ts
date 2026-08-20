@@ -1,9 +1,11 @@
 import {
   adminArtworkSchema,
   adminListingSchema,
+  creatorProfileSchema,
   uploadImageResponseSchema,
   type CreatorArtwork,
   type CreatorListing,
+  type CreatorProfileView,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
@@ -44,11 +46,22 @@ async function creatorToken(): Promise<string | null> {
   return token === undefined || token === '' ? null : token;
 }
 
+export type CreatorFailureReason = 'unauthorized' | 'not_found' | 'rejected' | 'unavailable';
+
 export type CreatorResult<T> =
   | { readonly ok: true; readonly data: T }
   | {
       readonly ok: false;
-      readonly reason: 'unauthorized' | 'not_found' | 'rejected' | 'unavailable';
+      readonly reason: CreatorFailureReason;
+      /**
+       * `{ error: { code } }` の符号。
+       *
+       * ⚠️ **画面へ出す言葉は web 側で決める。** API の `message` は読まない。
+       * 本文をそのまま流すと、いつか内部の詳細が画面に出る。符号だけを見て、
+       * 直し方の違う失敗（「すでに使われている」と「運営とまぎらわしい」）を
+       * 区別する。
+       */
+      readonly code?: string;
     };
 
 /** 出品者向け一覧の形。件数が増えたときの続きは `nextCursor` で辿る。 */
@@ -95,7 +108,8 @@ async function call<T>(
   }
   // 入力の誤りと、こちら側の不調を分ける。利用者に見せる言葉が違うため。
   if (response.status >= 400 && response.status < 500) {
-    return { ok: false, reason: 'rejected' };
+    // ⚠️ エラー本文はそのまま画面へ出さない。符号だけを取り出す。
+    return { ok: false, reason: 'rejected', ...(await errorCodeOf(response)) };
   }
   if (!response.ok) {
     // ⚠️ エラー本文をそのまま画面へ出さない。内部情報が混ざりうる。
@@ -109,9 +123,25 @@ async function call<T>(
   return { ok: true, data: parsed.data };
 }
 
-function json(body: unknown): RequestInit {
+/**
+ * `{ error: { code } }` の符号だけを取り出す。
+ *
+ * ⚠️ **`message` は読まない。** 画面へ出す言葉は web 側で決める。
+ * 見つからなければ何も足さない（`code` の欄自体を作らない）。
+ */
+async function errorCodeOf(response: Response): Promise<{ code?: string }> {
+  try {
+    const body: unknown = await response.json();
+    const error = (body as { error?: { code?: unknown } }).error;
+    return typeof error?.code === 'string' ? { code: error.code } : {};
+  } catch {
+    return {};
+  }
+}
+
+function json(body: unknown, method: 'POST' | 'PUT' = 'POST'): RequestInit {
   return {
-    method: 'POST',
+    method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   };
@@ -199,4 +229,21 @@ export function suspendListing(id: string): Promise<CreatorResult<CreatorListing
   return call(`/api/v1/creator/listings/${encodeURIComponent(id)}/suspend`, adminListingSchema, {
     method: 'POST',
   });
+}
+
+// --- 自分のプロフィール（決定 2026-08-20）--------------------------------
+
+/**
+ * 自分の表示名を読む。
+ *
+ * ⚠️ **誰の分かを渡さない。** API はトークンから決める。渡せる形にすると、
+ * そこが他人の名前を書き換える道になる。
+ */
+export function fetchMyProfile(): Promise<CreatorResult<CreatorProfileView>> {
+  return call('/api/v1/creator/profile', creatorProfileSchema);
+}
+
+/** 自分の表示名を決める・変える。 */
+export function updateMyProfile(displayName: string): Promise<CreatorResult<CreatorProfileView>> {
+  return call('/api/v1/creator/profile', creatorProfileSchema, json({ displayName }, 'PUT'));
 }

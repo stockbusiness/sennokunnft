@@ -32,6 +32,7 @@ function order(overrides: Partial<OrderView> = {}): OrderView {
       artworkId: 'artwork-1',
       creatorAccountId: 'creator-1',
       titleSnapshot: '春の宵',
+      creatorNameSnapshot: '戦国工房',
       unitPriceAmount: 12000,
       unitPriceCurrency: 'JPY',
       quantity: 1,

@@ -47,6 +47,16 @@ export default async function ArtworkDetailPage({ params }: { params: Promise<{ 
         <p className="sengoku-artwork-detail__description">{artwork.description}</p>
 
         <dl className="sengoku-facts">
+          {/*
+            ⚠️ **未登録なら行ごと出さない。** 空欄の「出品者」を置くと、
+               読み上げでも見た目でも、抜けているように見える。
+          */}
+          {artwork.creatorDisplayName === null ? null : (
+            <>
+              <dt>{SITE_COPY.creatorLabel}</dt>
+              <dd>{artwork.creatorDisplayName}</dd>
+            </>
+          )}
           <dt>{SITE_COPY.supplyLabel}</dt>
           <dd>
             残り {artwork.availableSupply} 点 / 全 {artwork.maxSupply} 点
