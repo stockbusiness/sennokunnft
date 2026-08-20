@@ -233,6 +233,27 @@ export class OrderService {
     return toBuyerView(order);
   }
 
+  /**
+   * ご自分のご注文の一覧（P0-3）。
+   *
+   * ⚠️ **アカウントIDを必ず条件へ入れる。** 省略できる形にすると、
+   * 省略した呼び出しが全員分を返す。管理側の一覧（`listForAdmin`）と
+   * 別の関数にしてあるのはそのため——同じ関数に絞り込みの有無を
+   * 引数で持たせると、片方の都合でいつか既定が緩む。
+   */
+  async listForBuyer(query: {
+    readonly accountId: string;
+    readonly limit: number;
+    readonly cursor?: string | undefined;
+  }): Promise<{
+    readonly items: readonly OrderViewResponse[];
+    readonly nextCursor: string | null;
+  }> {
+    const page = await this.orders.list(query);
+    // ⚠️ 買った方の応答に手数料とクリエイター配分を載せない（`toBuyerView`）。
+    return { items: page.items.map(toBuyerView), nextCursor: page.nextCursor };
+  }
+
   async findForAdmin(orderId: string): Promise<AdminOrderDetail | null> {
     const order = await this.orders.findById(orderId);
     if (order === null) {
@@ -342,6 +363,8 @@ function toBuyerView(order: OrderView): OrderViewResponse {
     status: order.status,
     paymentStatus: order.paymentStatus,
     fulfillmentStatus: order.fulfillmentStatus,
+    // ⚠️ ご自分の返金なので、買った方にも返す（P0-3）。金額は返さない。
+    refundStatus: order.refundStatus,
     currency: order.currency,
     subtotalAmount: order.subtotalAmount,
     discountAmount: order.discountAmount,
@@ -367,7 +390,6 @@ function toBuyerView(order: OrderView): OrderViewResponse {
 function toAdminView(order: OrderView): AdminOrderView {
   return {
     ...toBuyerView(order),
-    refundStatus: order.refundStatus,
     platformFeeRateBps: order.platformFeeRateBps,
     platformFeeAmount: order.platformFeeAmount,
     creatorAmount: order.creatorAmount,

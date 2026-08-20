@@ -4,6 +4,7 @@ import { SiteFooter, SiteHeader } from '@sengoku/ui';
 import './globals.css';
 import { getWebEnv } from '../src/env';
 import { resolveSiteName, SITE_COPY } from '../src/site';
+import { isLoggedIn } from '../src/auth/current';
 
 /**
  * ⚠️ **サイト名は 1 か所からしか取らない。**
@@ -35,8 +36,14 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
   const name = siteName();
+  /*
+    ⚠️ **ここを読むと、この段より下がすべて動的になる。** 店先の一覧を
+       ビルド時に固めたい場合は、ヘッダだけを切り出して境界を下げる。
+       いまは全ページが `force-dynamic` か、実質そうなので影響が無い。
+  */
+  const loggedIn = await isLoggedIn();
   return (
     <html lang="ja">
       <body>
@@ -52,7 +59,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           ためで、押せる場所が無いほうが困るから。中身が空であることは
           そのページ自身が正直に伝える。
         */}
-        <SiteHeader siteName={name} />
+        {/*
+          ⚠️ **マイページはログインしている方にだけ出す。** 出しっぱなしに
+             すると、ログインしていない方が押してログイン画面へ飛ばされる。
+             押した先で拒まれるのは、押せなかったより悪い。
+        */}
+        <SiteHeader
+          siteName={name}
+          navItems={loggedIn ? [{ href: '/account', label: SITE_COPY.accountLink }] : []}
+        />
         <main id="main">{children}</main>
         <SiteFooter
           siteName={name}

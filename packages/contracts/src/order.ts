@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PUBLIC_CLAIM_STATUSES } from '@sengoku/domain';
 
 /**
  * 注文 API の契約（決済 Phase P0・P1）。
@@ -94,6 +95,15 @@ export const orderViewSchema = z.object({
   status: z.enum(ORDER_STATUS_VALUES),
   paymentStatus: z.enum(ORDER_PAYMENT_STATUS_VALUES),
   fulfillmentStatus: z.enum(ORDER_FULFILLMENT_STATUS_VALUES),
+  /**
+   * ご返金の状態（P0-3）。
+   *
+   * ⚠️ **買った方にも返す。** ご自分の返金であり、隠す理由が無い。
+   * 隠すと「返金されたはずなのに画面には何も出ない」になる。
+   * ⚠️ **金額は返さない。** 一部返金は自動処理しない決まりで、画面に出した
+   * 額と実際の額が食い違いうる。状態だけを伝える。
+   */
+  refundStatus: z.enum(ORDER_REFUND_STATUS_VALUES),
   currency: z.string().regex(/^[A-Z]{3}$/),
   subtotalAmount: z.number().int().nonnegative(),
   discountAmount: z.number().int().nonnegative(),
@@ -107,7 +117,6 @@ export type OrderView = z.infer<typeof orderViewSchema>;
 
 /** 運営向けの注文。⚠️ 内訳を含む。購入者向けの応答と混ぜない。 */
 export const adminOrderViewSchema = orderViewSchema.extend({
-  refundStatus: z.enum(ORDER_REFUND_STATUS_VALUES),
   platformFeeRateBps: z.number().int().nonnegative(),
   platformFeeAmount: z.number().int().nonnegative(),
   creatorAmount: z.number().int().nonnegative(),
@@ -141,6 +150,55 @@ export const adminOrderListResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 export type AdminOrderListResponse = z.infer<typeof adminOrderListResponseSchema>;
+
+/**
+ * 買った方のご注文一覧（P0-3）。
+ *
+ * ⚠️ **管理側の一覧（`adminOrderListResponseSchema`）と分ける。** あちらは
+ * 手数料・クリエイター配分・購入者IDまで載る。同じ形を使い回すと、画面に
+ * 出さないつもりの値が応答には載っている状態になる。
+ */
+export const buyerOrderListResponseSchema = z.object({
+  items: z.array(orderViewSchema),
+  nextCursor: z.string().nullable(),
+});
+export type BuyerOrderListResponse = z.infer<typeof buyerOrderListResponseSchema>;
+
+/**
+ * 受け取ったもの 1 枚（P0-3）。
+ *
+ * ⚠️ **金額も手数料も載せない。** 買った方が「何を持っているか」を見る画面で、
+ * いくらだったかは注文の側にある。
+ */
+export const collectibleViewSchema = z.object({
+  entitlementId: z.string(),
+  artworkId: z.string(),
+  artworkSlug: z.string(),
+  /** ⚠️ 注文時点の作品名。マスタを引き直さない。 */
+  artworkTitle: z.string(),
+  /** 出品者のお名前（注文時点）。⚠️ 未登録の時期に買われた分は `null`。 */
+  creatorName: z.string().nullable(),
+  /** ⚠️ サーバーが解決した URL。キーから組み立てない。 */
+  imageUrl: z.string().nullable(),
+  serialNo: z.number().int().positive(),
+  acquiredAt: z.string(),
+  /**
+   * 公開状態。
+   *
+   * ⚠️ **内部の状態をそのまま出さない。** `issued` / `claimed` は運営の言葉で、
+   * 買った方には「いま何が起きているか」が伝わらない。
+   */
+  status: z.enum(PUBLIC_CLAIM_STATUSES),
+  orderNumber: z.string(),
+  orderId: z.string(),
+});
+export type CollectibleView = z.infer<typeof collectibleViewSchema>;
+
+export const collectibleListResponseSchema = z.object({
+  items: z.array(collectibleViewSchema),
+  nextCursor: z.string().nullable(),
+});
+export type CollectibleListResponse = z.infer<typeof collectibleListResponseSchema>;
 
 /**
  * 運営の注文検索（`UD-121`）。
@@ -180,6 +238,23 @@ export const adminOrderListQuerySchema = z.object({
   artworkTitle: z.string().max(100).optional(),
 });
 export type AdminOrderListQuery = z.infer<typeof adminOrderListQuerySchema>;
+
+/**
+ * 買った方のご注文一覧の問い合わせ（P0-3）。
+ *
+ * ⚠️ **絞り込みの項目を持たせない。** ご自分の注文しか出ないので、
+ * 状態や期間で絞る必要が無い。項目を足すほど、そこへ他人を指す値が
+ * 混ざる余地ができる。**誰の分かは常にトークンから取る。**
+ */
+export const buyerOrderListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().optional(),
+});
+export type BuyerOrderListQuery = z.infer<typeof buyerOrderListQuerySchema>;
+
+/** 受け取ったものの一覧の問い合わせ（P0-3）。⚠️ 同上、絞り込みは持たせない。 */
+export const collectibleListQuerySchema = buyerOrderListQuerySchema;
+export type CollectibleListQuery = z.infer<typeof collectibleListQuerySchema>;
 
 /**
  * メールアドレスから注文を辿る要求（`UD-121`）。

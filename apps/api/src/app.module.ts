@@ -29,6 +29,7 @@ import type {
   OrderRepository,
   OrderNoteRepository,
   SettlementSettingsRepository,
+  CollectibleRepository,
   EntitlementIssuanceRepository,
   RefundRepository,
   PayoutRepository,
@@ -104,6 +105,11 @@ import {
 } from './order/order.controller';
 import { OrderService } from './order/order.service';
 import { OrderSupportService } from './order/order-support.service';
+import {
+  COLLECTIBLE_CONFIG,
+  CollectibleController,
+  type CollectibleConfig,
+} from './order/collectible.controller';
 import {
   EntitlementIssuanceService,
   ISSUANCE_CONFIG,
@@ -330,6 +336,12 @@ export interface AppDependencies {
    */
   readonly issuance: EntitlementIssuanceRepository;
   /**
+   * ご自分が受け取ったもの（P0-3）。
+   *
+   * ⚠️ **省略できない。** 無いと、買った方が自分の持ち物を確かめられない。
+   */
+  readonly collectibles: CollectibleRepository;
+  /**
    * 作家さまへの精算（`UD-119`）。
    *
    * ⚠️ **省略できない。** 無いと締めも確定もできず、作家さまへの
@@ -443,6 +455,8 @@ export class AppModule implements NestModule {
         AdminPayoutController,
         // 自分の表示名（決定 2026-08-20）。⚠️ 自分の分しか触れない。
         CreatorProfileController,
+        // ご自分が受け取ったもの（P0-3）。⚠️ 自分の分しか見えない。
+        CollectibleController,
         ...(internalJobToken === undefined || internalJobToken === ''
           ? []
           : [InternalJobsController]),
@@ -529,6 +543,20 @@ export class AppModule implements NestModule {
           }),
         },
         PayoutService,
+        {
+          /*
+            ご自分が受け取ったもの（P0-3）。
+
+            ⚠️ **管理側の読み取りモデルを流用していない。** あちらは購入者・
+               金額・手数料まで載る。流用すると、画面に出さないつもりの値が
+               応答には載っている状態になる。
+          */
+          provide: COLLECTIBLE_CONFIG,
+          useValue: {
+            repository: deps.collectibles,
+            storage: deps.storage,
+          } satisfies CollectibleConfig,
+        },
         {
           /*
             受取権の発行（P0-1）。

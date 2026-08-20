@@ -96,6 +96,9 @@ import {
   TOKUSHOHO_FIELD_KEYS,
 } from '@sengoku/domain';
 import type {
+  CollectibleListPage,
+  CollectibleRepository,
+  CollectibleView,
   EntitlementIssuanceRepository,
   IssuanceCandidate,
   IssuanceOutcome,
@@ -2322,6 +2325,7 @@ export interface TestHarness extends AppDependencies {
   readonly payouts: InMemoryPayouts;
   readonly profiles: InMemoryCreatorProfiles;
   readonly issuance: InMemoryEntitlementIssuance;
+  readonly collectibles: InMemoryCollectibles;
 }
 
 /**
@@ -2520,6 +2524,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   */
   legalRepository.seed(publishedTokushoho());
   const issuance = new InMemoryEntitlementIssuance();
+  const collectibles = new InMemoryCollectibles();
   const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
     version: '0.1.0',
@@ -2532,6 +2537,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     refunds,
     // 受取権の発行（P0-1）。⚠️ 対象の注文は試験ごとに `seedOrder` で置く。
     issuance,
+    // ご自分が受け取ったもの（P0-3）。⚠️ 試験ごとに `seed` で置く。
+    collectibles,
     // 精算（`UD-119`）。⚠️ 対象の注文は試験ごとに差し替える。
     payouts,
     // 作家さまの表示名（決定 2026-08-20）。
@@ -2869,5 +2876,51 @@ export class InMemoryEntitlementIssuance implements EntitlementIssuanceRepositor
         })),
       ),
     );
+  }
+}
+
+/**
+ * ご自分が受け取ったもの（P0-3）の代替実装。
+ *
+ * ⚠️ **絞り込みを本物と同じくこの中で行う。** 二重体だけが全件を返す形に
+ * すると、「他人の分が見えないこと」の試験が二重体の都合で通ってしまう。
+ */
+export class InMemoryCollectibles implements CollectibleRepository {
+  private readonly rows: CollectibleView[] = [];
+
+  seed(overrides: Partial<CollectibleView> & { accountId: string }): CollectibleView {
+    const index = this.rows.length + 1;
+    const row: CollectibleView = {
+      entitlementId: `ent-${String(index)}`,
+      artworkId: 'artwork-1',
+      artworkSlug: 'sample-artwork',
+      artworkTitle: '天下布武の陣羽織',
+      creatorName: '戦国工房',
+      imageKey: 'artworks/sample.png',
+      serialNo: index,
+      acquiredAt: TEST_NOW,
+      status: 'issued',
+      deliveryStatus: 'not_started',
+      orderNumber: `SNK-${String(index)}`,
+      orderId: `order-${String(index)}`,
+      ...overrides,
+    };
+    this.rows.push(row);
+    this.owners.set(row.entitlementId, overrides.accountId);
+    return row;
+  }
+
+  /** 受取権IDから持ち主を引く。⚠️ 応答には載せない値なので、ここだけで持つ。 */
+  private readonly owners = new Map<string, string>();
+
+  listForAccount(input: {
+    readonly accountId: string;
+    readonly limit: number;
+    readonly cursor?: string | undefined;
+  }): Promise<CollectibleListPage> {
+    // ⚠️ ここが唯一の絞り込み。外して呼べる形にしない。
+    const mine = this.rows.filter((row) => this.owners.get(row.entitlementId) === input.accountId);
+    const items = mine.slice(0, Math.max(input.limit, 1));
+    return Promise.resolve({ items, nextCursor: null });
   }
 }

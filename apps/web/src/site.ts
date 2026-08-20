@@ -30,6 +30,8 @@ export const SITE_COPY = {
     ⚠️ **「作家」と書かない。** ご自身を作家と呼ばない方も出品される。
        「出品者」なら、どなたにも当てはまる。
   */
+  /** ⚠️ ログインしている方にだけ出す。 */
+  accountLink: 'マイページ',
   creatorLabel: '出品者',
   supplyLabel: 'お求めいただける数',
   priceLabel: '価格',
