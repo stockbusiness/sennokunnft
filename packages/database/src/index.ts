@@ -110,3 +110,9 @@ export {
   PrismaCreatorProfileDetailRepository,
   PrismaPayoutAccountRepository,
 } from './repositories/creator.repository';
+
+// 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+export {
+  PrismaSalesReportRepository,
+  PrismaCreatorDirectoryRepository,
+} from './repositories/reporting.repository';

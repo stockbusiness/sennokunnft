@@ -76,6 +76,18 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   */
   'payout_account.view_full': { anonymous: false, buyer: false, operator: true, auditor: false },
   /*
+    ⚠️ **`auditor` は true。** いくら売れていくら返したかは監査の対象
+       そのもの。出るのは期間ごとの合計で、誰が買ったかは含まない。
+    ⚠️ **`buyer` は false。** ご自分の売上は `creator.earnings.view_own`。
+       ここに出るのは**場全体の数字**である。
+  */
+  'sales_report.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  /*
+    ⚠️ **`auditor` は true。** 誰にいくら払うことになっているかを追えないと
+       監査にならない。お振込先の値もご連絡先も含まれない。
+  */
+  'creator.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  /*
     ⚠️ **会員なら誰でも持つ。** 出品する前に名前を決めたい方がいる。
        「作品を 1 つ作らないと名乗れない」という順序を強いない。
     ⚠️ `auditor` には要らない。名乗る場ではない。

@@ -1019,3 +1019,31 @@ export type {
   PayoutAccountType,
   ValidatedPayoutAccount,
 } from './creator/payout-account';
+
+export {
+  SALES_REPORT_GRANULARITIES,
+  SALES_REPORT_DEFAULT_DAYS,
+  SALES_REPORT_DEFAULT_MONTHS,
+  SALES_REPORT_MAX_ROWS,
+  SALES_REPORT_CSV_COLUMNS,
+  defaultSalesReportPeriod,
+  salesReportPeriodKeys,
+  buildSalesReport,
+  salesReportTotals,
+  toSalesReportCsvRows,
+  buildSalesReportCsv,
+  formatPeriodKey,
+} from './reporting/sales';
+export type {
+  RefundAggregate,
+  SalesAggregate,
+  SalesReportGranularity,
+  SalesReportPeriod,
+  SalesReportRow,
+} from './reporting/sales';
+export type {
+  CreatorDirectoryPort,
+  CreatorDirectoryQuery,
+  CreatorDirectorySummary,
+  SalesReportPort,
+} from './ports/reporting';

@@ -105,6 +105,12 @@ import type {
   AccountNoteRecord,
   CustomerDirectoryPort,
   PayoutAccountCipherPort,
+  CreatorDirectoryPort,
+  CreatorDirectoryQuery,
+  CreatorDirectorySummary,
+  RefundAggregate,
+  SalesAggregate,
+  SalesReportPort,
   PayoutAccountPort,
   PayoutAccountRecord,
   RecipientResolverPort,
@@ -2812,6 +2818,8 @@ export interface TestHarness extends AppDependencies {
   readonly customerDirectory: InMemoryCustomerDirectory;
   readonly creatorProfileDetails: InMemoryCreatorProfileDetails;
   readonly payoutAccounts: InMemoryPayoutAccounts;
+  readonly salesReport: InMemorySalesReport;
+  readonly creatorDirectory: InMemoryCreatorDirectory;
   readonly creatorEarnings: InMemoryCreatorEarnings;
   readonly customerRecipients: InMemoryRecipientResolver;
   readonly accountNotes: InMemoryAccountNotes;
@@ -3034,6 +3042,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const customerDirectory = new InMemoryCustomerDirectory();
   const creatorProfileDetails = new InMemoryCreatorProfileDetails();
   const payoutAccounts = new InMemoryPayoutAccounts();
+  const salesReport = new InMemorySalesReport();
+  const creatorDirectory = new InMemoryCreatorDirectory();
   const creatorEarnings = new InMemoryCreatorEarnings();
   const customerRecipients = new InMemoryRecipientResolver();
   const accountNotes = new InMemoryAccountNotes();
@@ -3064,6 +3074,10 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     // 作家さま運営（P1-2）。⚠️ 保存した値を試験から覗くため、実体の型で持つ。
     creatorProfileDetails,
     payoutAccounts,
+    // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+    salesReport,
+    creatorDirectory,
+    reporting: { sales: salesReport, creators: creatorDirectory },
     creatorEarnings,
     creatorOperations: {
       profiles: creatorProfileDetails,
@@ -4338,5 +4352,47 @@ export class InMemoryCreatorEarnings implements CreatorEarningsPort {
 
   linesOf(payoutId: string): Promise<readonly PayoutLineDraft[]> {
     return Promise.resolve(this.lines.get(payoutId) ?? []);
+  }
+}
+
+/**
+ * 売上レポートの代役（`UD-123`）。
+ *
+ * ⚠️ **区切りごとの集計を、試験から直に置ける形にする。** SQL を模さない——
+ * 模すと、代役の側にもう 1 つの集計規則が生まれ、本物とずれる。
+ */
+export class InMemorySalesReport implements SalesReportPort {
+  sales: SalesAggregate[] = [];
+  refunds: RefundAggregate[] = [];
+
+  aggregateSales(): Promise<readonly SalesAggregate[]> {
+    return Promise.resolve(this.sales);
+  }
+
+  aggregateRefunds(): Promise<readonly RefundAggregate[]> {
+    return Promise.resolve(this.refunds);
+  }
+}
+
+/** 作家さまの一覧の代役（`UD-124` の一部）。 */
+export class InMemoryCreatorDirectory implements CreatorDirectoryPort {
+  readonly rows = new Map<string, CreatorDirectorySummary>();
+
+  list(query: CreatorDirectoryQuery): Promise<readonly CreatorDirectorySummary[]> {
+    const keyword = query.keyword?.trim() ?? '';
+    const all = [...this.rows.values()].filter(
+      (row) =>
+        keyword === '' ||
+        (row.displayName ?? '').includes(keyword) ||
+        (row.shopName ?? '').includes(keyword),
+    );
+    // ⚠️ 本物と同じ並び（売上の多い順）。並びが違うと画面の試験が当てにならない。
+    return Promise.resolve(
+      [...all].sort((a, b) => b.grossAmount - a.grossAmount).slice(0, query.limit),
+    );
+  }
+
+  find(accountId: string): Promise<CreatorDirectorySummary | null> {
+    return Promise.resolve(this.rows.get(accountId) ?? null);
   }
 }

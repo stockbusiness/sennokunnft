@@ -42,9 +42,15 @@ import {
   payoutListResponseSchema,
   payoutDetailResponseSchema,
   adminPayoutAccountResponseSchema,
+  salesReportResponseSchema,
+  creatorDirectoryResponseSchema,
+  creatorDirectoryDetailResponseSchema,
   payoutSchema,
   closePayoutPeriodResponseSchema,
   type AdminPayoutAccountResponse,
+  type CreatorDirectoryDetailResponse,
+  type CreatorDirectoryResponse,
+  type SalesReportResponse,
   type ClosePayoutPeriodResponse,
   type PayoutDetailResponse,
   type PayoutListResponse,
@@ -1120,3 +1126,90 @@ export function settleEmailChange(
 }
 
 const okResponseSchema = z.object({ ok: z.literal(true) });
+
+/**
+ * 運営の売上レポート（`UD-123` の一部）。
+ *
+ * ⚠️ **粒度以外の条件を受け取らない。** 期間は API 側が決める。画面から
+ * 自由に指定できるようにすると、全期間を舐める要求を作れてしまう。
+ */
+export function fetchSalesReport(
+  granularity: 'daily' | 'monthly',
+): Promise<AdminResult<SalesReportResponse>> {
+  return callAdmin(
+    `/api/v1/admin/sales-report?granularity=${granularity}`,
+    salesReportResponseSchema,
+  );
+}
+
+/** 作家さまの一覧（`UD-124` の一部）。⚠️ お振込先の値は返ってこない。 */
+export function fetchCreatorDirectory(
+  keyword: string,
+): Promise<AdminResult<CreatorDirectoryResponse>> {
+  const params = new URLSearchParams();
+  if (keyword !== '') {
+    params.set('keyword', keyword);
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/creators${query === '' ? '' : `?${query}`}`,
+    creatorDirectoryResponseSchema,
+  );
+}
+
+export function fetchCreatorDetail(
+  accountId: string,
+): Promise<AdminResult<CreatorDirectoryDetailResponse>> {
+  return callAdmin(
+    `/api/v1/admin/creators/${encodeURIComponent(accountId)}`,
+    creatorDirectoryDetailResponseSchema,
+  );
+}
+
+/**
+ * 売上レポートの CSV を受け取る。
+ *
+ * ⚠️ **`callAdmin` を通さない。** あちらは JSON を読む。CSV は本文を
+ * そのまま渡す（route handler がダウンロードとして返す）。
+ *
+ * ⚠️ **本文を画面へ埋め込まない。** 受け取ったものを、そのまま渡す。
+ */
+export async function fetchSalesReportCsv(
+  granularity: 'daily' | 'monthly',
+): Promise<AdminResult<{ body: string }>> {
+  const tokens = await credentials();
+  if (tokens.length === 0) {
+    return { ok: false, reason: 'unauthorized', message: '運営用の資格情報が設定されていません。' };
+  }
+
+  const { WEB_API_BASE_URL } = getWebEnv();
+  let lastReason: 'unauthorized' | 'not_found' | 'rejected' | 'unavailable' = 'unauthorized';
+
+  for (const token of tokens) {
+    let response: Response;
+    try {
+      response = await fetch(
+        `${WEB_API_BASE_URL}/api/v1/admin/sales-report/csv?granularity=${granularity}`,
+        {
+          headers: { authorization: `Bearer ${token}`, accept: 'text/csv' },
+          cache: 'no-store',
+        },
+      );
+    } catch {
+      return { ok: false, reason: 'unavailable' };
+    }
+
+    if (!response.ok) {
+      lastReason = reasonFor(response.status);
+      // 断られたときだけ次の資格情報を試す。それ以外は理由が変わらない。
+      if (lastReason === 'unauthorized') {
+        continue;
+      }
+      return { ok: false, reason: lastReason };
+    }
+
+    return { ok: true, data: { body: await response.text() } };
+  }
+
+  return { ok: false, reason: lastReason };
+}
