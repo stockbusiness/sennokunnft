@@ -33,6 +33,8 @@ import type {
   EntitlementIssuanceRepository,
   RefundRepository,
   PayoutRepository,
+  CreatorDirectoryPort,
+  SalesReportPort,
   CreatorProfileRepository,
   PaymentRepository,
   PaymentGatewayPort,
@@ -166,6 +168,15 @@ import {
   type SettlementConfig,
 } from './settlement/settlement.controller';
 import { AdminPayoutController } from './settlement/payout.controller';
+import {
+  AdminCreatorDirectoryController,
+  AdminSalesReportController,
+} from './reporting/reporting.controller';
+import {
+  REPORTING_CONFIG,
+  ReportingService,
+  type ReportingConfig,
+} from './reporting/reporting.service';
 import {
   CreatorProfileController,
   PROFILE_CONFIG,
@@ -393,6 +404,15 @@ export interface AppDependencies {
    * お支払いが記録として残らない。
    */
   readonly payouts: PayoutRepository;
+  /**
+   * 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+   *
+   * ⚠️ **読み取りだけの口である。** ここに「直す」実装を足さない。
+   */
+  readonly reporting: {
+    readonly sales: SalesReportPort;
+    readonly creators: CreatorDirectoryPort;
+  };
   /**
    * 作家さまの表示名（決定 2026-08-20）。
    *
@@ -652,6 +672,9 @@ export class AppModule implements NestModule {
         // 返金と精算の設定（`UD-104` / `UD-119`）。⚠️ 変更はオーナー限定。
         AdminSettlementController,
         AdminPayoutController,
+        // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+        AdminSalesReportController,
+        AdminCreatorDirectoryController,
         // 自分の表示名（決定 2026-08-20）。⚠️ 自分の分しか触れない。
         CreatorProfileController,
         // ご自分が受け取ったもの（P0-3）。⚠️ 自分の分しか見えない。
@@ -760,6 +783,20 @@ export class AppModule implements NestModule {
           }),
         },
         PayoutService,
+        {
+          // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+          provide: REPORTING_CONFIG,
+          useFactory: (): ReportingConfig => ({
+            sales: deps.reporting.sales,
+            creators: deps.reporting.creators,
+            // ⚠️ 紹介文とインボイス番号は作家さま運営の側から読む。
+            //    同じ表を 2 つの実装で読まない。
+            profiles: deps.creatorOperations.profiles,
+            payouts: deps.payouts,
+            clock: deps.clock,
+          }),
+        },
+        ReportingService,
         {
           /*
             ご自分が受け取ったもの（P0-3）。

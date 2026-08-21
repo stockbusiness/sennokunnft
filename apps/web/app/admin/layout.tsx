@@ -40,6 +40,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <a href="/admin/listings">販売</a>
         <a href="/admin/orders">注文</a>
         <a href="/admin/customers">お客さま</a>
+        {/* 運営が数字と作家さまを見る（`UD-123` / `UD-124` の一部）。 */}
+        <a href="/admin/creators">作家さま</a>
+        <a href="/admin/sales">売上</a>
         {/*
           ⚠️ 出しっぱなしでよい。開けるのはオーナーだけで、
              ほかの人には「権限がありません」と出る。隠すことは保護ではない。

@@ -43,6 +43,8 @@ import {
   PrismaEntitlementIssuanceRepository,
   PrismaRefundRepository,
   PrismaPayoutRepository,
+  PrismaSalesReportRepository,
+  PrismaCreatorDirectoryRepository,
   PrismaCreatorProfileRepository,
   PrismaPaymentRepository,
   PrismaPlatformFeeRateReader,
@@ -803,6 +805,14 @@ async function bootstrap(): Promise<void> {
       },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),
+      /*
+        運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
+        ⚠️ **読み取りだけ。** ここへ「直す」実装を足さない。
+      */
+      reporting: {
+        sales: new PrismaSalesReportRepository(prisma),
+        creators: new PrismaCreatorDirectoryRepository(prisma),
+      },
       // 作家さまの表示名（決定 2026-08-20）。
       profiles: new PrismaCreatorProfileRepository(prisma),
       // 運用確認キュー（M3a）。機械が決められなかったことを残す。
