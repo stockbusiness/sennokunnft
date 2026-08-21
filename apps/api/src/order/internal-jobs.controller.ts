@@ -13,17 +13,20 @@ import type {
   IssueEntitlementsResponse,
   ReconcileRevocationsResponse,
   ReleaseExpiredResponse,
+  EnqueueLegalNoticesResponse,
   SendNotificationsResponse,
 } from '@sengoku/contracts';
 import {
   AUTO_DELIVERY_BATCH_SIZE,
   ISSUANCE_BATCH_SIZE,
+  LEGAL_NOTICE_BATCH_SIZE,
   NOTIFICATION_BATCH_SIZE,
   RELEASE_BATCH_SIZE,
 } from '@sengoku/domain';
 import type { ClockPort } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
+import type { LegalRevisionNoticeService } from '../legal/legal-revision-notice.service';
 import {
   REVOCATION_RECONCILE_BATCH_SIZE,
   type RevocationReconcileService,
@@ -46,6 +49,7 @@ export const WATCHED_JOB_KEYS = [
   'deliver-entitlements',
   'reconcile-revocations',
   'send-notifications',
+  'enqueue-legal-notices',
 ] as const;
 
 /** 時計仕掛けの結果を記録する口。⚠️ 実装は `@sengoku/database`。 */
@@ -86,6 +90,14 @@ export interface InternalJobConfig {
    * 変えることになり、送り始めた日に設定漏れで動かない。
    */
   readonly notificationSend: NotificationSendService | null;
+  /**
+   * 法務文書の改定の知らせを積む処理（`UD-127`）。
+   *
+   * ⚠️ **`null` は「知らせの仕組みを繋いでいない」。** 繋がない配備でも
+   * 口だけは生やし、**呼ばれたら 0 件を返す**。口ごと消すと、時計の設定を
+   * 配備ごとに変えることになり、繋いだ日に設定漏れで動かない。
+   */
+  readonly legalRevisionNotices: LegalRevisionNoticeService | null;
   /**
    * 実行の結果を記録する先（P0-6）。
    *
@@ -305,6 +317,42 @@ export class InternalJobsController {
         };
       },
       (result) => result.pickedCount,
+    );
+  }
+
+  /**
+   * 法務文書の改定の知らせを積む（`UD-127`）。
+   *
+   * ⚠️ **これは取りこぼしの受け皿であって、主たる経路ではない。** ふだんは
+   * 公開の直後にその場で積まれる。ここが拾うのは、その直後にプロセスが
+   * 落ちた版だけ。**公開は取り消せない**ので、拾い直す口が要る。
+   *
+   * ⚠️ **重なって走っても二重に届かない。** 積む側の
+   * `UNIQUE(event_type, subject_type, subject_id, account_id)` が最終防壁。
+   */
+  @Post('enqueue-legal-notices')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async enqueueLegalNotices(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<EnqueueLegalNoticesResponse> {
+    this.assertAuthorized(token);
+    return this.record(
+      'enqueue-legal-notices',
+      async () => {
+        const notices = this.config.legalRevisionNotices;
+        if (notices === null) {
+          // 知らせを繋いでいない配備。⚠️ 黙って 0 を返す（異常ではない）。
+          return { versionCount: 0, enqueuedCount: 0 };
+        }
+        const result = await notices.sweep(LEGAL_NOTICE_BATCH_SIZE);
+        /*
+          ⚠️ **文書の題も宛先も返さない。** これは時計が叩く口で、
+             応答は監視の数値として読まれる。人の情報を混ぜない。
+        */
+        return { versionCount: result.versions, enqueuedCount: result.enqueued };
+      },
+      (result) => result.versionCount,
     );
   }
 

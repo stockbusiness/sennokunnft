@@ -45,6 +45,7 @@ function draft(
     effectiveFrom: null,
     requiresReconsent: false,
     publishedAt: null,
+    noticesEnqueuedAt: null,
     createdByAccountId: 'account-1',
     publishedByAccountId: null,
     createdAt: NOW,
@@ -235,6 +236,7 @@ describe('いま施行されている版を選ぶ', () => {
     status: 'published',
     effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
     publishedAt: NOW,
+    noticesEnqueuedAt: null,
   });
   const newer = draft('terms', {
     id: 'v2',
@@ -242,6 +244,7 @@ describe('いま施行されている版を選ぶ', () => {
     status: 'published',
     effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
     publishedAt: NOW,
+    noticesEnqueuedAt: null,
   });
   const scheduled = draft('terms', {
     id: 'v3',
@@ -249,6 +252,7 @@ describe('いま施行されている版を選ぶ', () => {
     status: 'published',
     effectiveFrom: new Date('2026-12-01T00:00:00.000Z'),
     publishedAt: NOW,
+    noticesEnqueuedAt: null,
   });
   const pending = draft('terms', { id: 'v4', version: 4 });
 

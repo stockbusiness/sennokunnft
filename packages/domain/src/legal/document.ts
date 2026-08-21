@@ -134,6 +134,13 @@ export interface LegalDocumentVersion {
    */
   readonly requiresReconsent: boolean;
   readonly publishedAt: Date | null;
+  /**
+   * 改定の知らせを積み終えた時刻（`UD-127`）。
+   *
+   * ⚠️ **公開は取り消せない。** 積むのは公開のあとなので、そのあいだに
+   * 落ちると誰にも届かない。掃き寄せが拾い直せるよう、印を版に持たせる。
+   */
+  readonly noticesEnqueuedAt: Date | null;
   readonly createdByAccountId: string;
   readonly publishedByAccountId: string | null;
   readonly createdAt: Date;

@@ -55,7 +55,7 @@ export class PrismaNotificationOutboxRepository implements NotificationOutboxPor
         ${input.templateVersion}, 'PENDING', ${input.now}, ${input.correlationId},
         ${input.now}, ${input.now}
       )
-      ON CONFLICT ("event_type", "subject_type", "subject_id") DO NOTHING
+      ON CONFLICT ("event_type", "subject_type", "subject_id", "account_id") DO NOTHING
       RETURNING "id"
     `);
 
@@ -66,10 +66,13 @@ export class PrismaNotificationOutboxRepository implements NotificationOutboxPor
 
     const existing = await db.notificationDelivery.findUnique({
       where: {
-        eventType_subjectType_subjectId: {
+        eventType_subjectType_subjectId_accountId: {
           eventType: input.eventType,
           subjectType: input.subjectType,
           subjectId: input.subjectId,
+          // ⚠️ **宛先まで含める**（`UD-127`）。1 つの版を大勢へ送る知らせが
+          //    あるため、対象だけを鍵にすると 1 人目しか積まれない。
+          accountId: input.accountId,
         },
       },
       select: { id: true },

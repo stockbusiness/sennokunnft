@@ -13,6 +13,7 @@ import {
   TEST_AUDIENCE,
   TEST_ISSUER,
   TEST_NOW,
+  TEST_INTERNAL_JOB_TOKEN,
   TEST_TOKEN_SECRET,
   type TestHarness,
 } from './helpers/doubles';
@@ -511,5 +512,145 @@ describe('規約への同意', () => {
     });
     const entry = harness.audit.entries.find((item) => item.action === 'legal.published');
     expect(entry?.summary).toMatchObject({ requiresReconsent: true });
+  });
+});
+
+/**
+ * 改定を既存の会員へ知らせる（`UD-127`）。
+ *
+ * ⚠️ **この組の主題は 3 つ。**
+ *  1. **送らない判断が効くこと**——誤字直しで全員へ送ると、次に本当に
+ *     大事な改定を送ったときに読まれなくなる
+ *  2. **知らせが積めなくても公開が巻き戻らないこと**——公開は取り消せない
+ *  3. **取りこぼしを cron が拾い直せること**
+ */
+describe('改定の知らせ', () => {
+  /** その版より前に同意した人を置く。⚠️ 本物は `legal_consents` を引く。 */
+  function seedConsenters(version: number, accountIds: string[]): void {
+    harness.legalRepository.consentedBefore.set(`terms:${String(version)}`, accountIds);
+  }
+
+  function noticesFor(): typeof harness.notifications.rows {
+    return harness.notifications.rows.filter((row) => row.record.eventType === 'legal.revised');
+  }
+
+  async function publishTerms(
+    token: string,
+    options: { requiresReconsent: boolean },
+  ): Promise<string> {
+    await saveTermsDraft(token);
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/legal/terms/publish')
+      .set(auth(token))
+      .send({ effectiveFrom: FUTURE, requiresReconsent: options.requiresReconsent })
+      .expect(201);
+    return response.body.id as string;
+  }
+
+  it('再同意が要る改定は、旧版に同意した人へ積まれる', async () => {
+    const token = actorToken('operator', 'owner-notice-1', { isOwner: true });
+    seedConsenters(1, ['account-a', 'account-b']);
+    await publishTerms(token, { requiresReconsent: true });
+
+    const notices = noticesFor();
+    expect(notices).toHaveLength(2);
+    expect(notices.map((row) => row.record.accountId).sort()).toEqual(['account-a', 'account-b']);
+  });
+
+  /*
+    ⚠️ **誤字直しで全員へ送らない。** 送るたびに開かれなくなり、
+       次に本当に大事な改定が読まれない。
+  */
+  it('再同意が要らない改定では積まれない', async () => {
+    const token = actorToken('operator', 'owner-notice-2', { isOwner: true });
+    seedConsenters(1, ['account-a']);
+    await publishTerms(token, { requiresReconsent: false });
+    expect(noticesFor()).toHaveLength(0);
+  });
+
+  /*
+    ⚠️ **一度も同意していない方へは送らない。** 再同意のしようが無く、
+       会員でない方へ届く形にもしない。
+  */
+  it('誰も同意していなければ、積まれない（それでも公開は通る）', async () => {
+    const token = actorToken('operator', 'owner-notice-3', { isOwner: true });
+    await publishTerms(token, { requiresReconsent: true });
+    expect(noticesFor()).toHaveLength(0);
+  });
+
+  /*
+    ⚠️ **本文をメールへ写さない。** 規約は長く、写すと版が 2 か所に増える。
+       食い違ったとき、どちらが約束なのか誰にも言えなくなる。
+  */
+  it('本文をメールへ写さない（読みに行く先を渡す）', async () => {
+    const token = actorToken('operator', 'owner-notice-4', { isOwner: true });
+    seedConsenters(1, ['account-a']);
+    await publishTerms(token, { requiresReconsent: true });
+
+    const notice = noticesFor()[0];
+    expect(notice?.record.renderedBody).not.toContain('第1条');
+    // ⚠️ 対象は「文書」ではなく「版」。改定ごとに 1 通ずつ届く。
+    expect(notice?.record.subjectType).toBe('legal_version');
+  });
+
+  /*
+    ⚠️ **これがいちばん大事。** 公開は取り消せない。知らせが積めなかった
+       ことを理由に例外にすると、公開した人には「失敗した」と見えるのに
+       文書は公開済み、という最も混乱する形になる。
+  */
+  it('知らせを積めなくても、公開は巻き戻らない', async () => {
+    const token = actorToken('operator', 'owner-notice-5', { isOwner: true });
+    seedConsenters(1, ['account-a']);
+    // ⚠️ 文面を取り下げて、積めない状態を作る。
+    harness.notificationTemplates.unpublish('legal.revised');
+
+    await publishTerms(token, { requiresReconsent: true });
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/v1/admin/legal/terms')
+      .set(auth(token))
+      .expect(200);
+    expect(listed.body.versions[0]).toMatchObject({ status: 'published' });
+    expect(noticesFor()).toHaveLength(0);
+  });
+
+  /*
+    ⚠️ **同じ版で二重に積まない。** 掃き寄せと公開の直後が重なっても
+       1 通しか届かない。
+  */
+  it('掃き寄せを回しても、同じ版で二重に積まれない', async () => {
+    const token = actorToken('operator', 'owner-notice-6', { isOwner: true });
+    seedConsenters(1, ['account-a']);
+    await publishTerms(token, { requiresReconsent: true });
+    expect(noticesFor()).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/internal/jobs/enqueue-legal-notices')
+      .set('x-internal-job-token', TEST_INTERNAL_JOB_TOKEN)
+      .expect(200);
+
+    expect(noticesFor()).toHaveLength(1);
+  });
+
+  /*
+    ⚠️ **取りこぼしを拾い直せること。** 公開の直後に落ちても、
+       誰にも届かないままにしない。
+  */
+  it('公開の直後に積めなかった版を、掃き寄せが拾い直す', async () => {
+    const token = actorToken('operator', 'owner-notice-7', { isOwner: true });
+    seedConsenters(1, ['account-a']);
+    harness.notificationTemplates.unpublish('legal.revised');
+    await publishTerms(token, { requiresReconsent: true });
+    expect(noticesFor()).toHaveLength(0);
+
+    // 文面を用意し直してから、掃き寄せを回す。
+    harness.notificationTemplates.publishFor('legal.revised');
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/internal/jobs/enqueue-legal-notices')
+      .set('x-internal-job-token', TEST_INTERNAL_JOB_TOKEN)
+      .expect(200);
+
+    expect(response.body).toEqual({ versionCount: 1, enqueuedCount: 1 });
+    expect(noticesFor()).toHaveLength(1);
   });
 });

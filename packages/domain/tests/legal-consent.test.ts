@@ -22,6 +22,7 @@ function version(overrides: Partial<LegalDocumentVersion> = {}): LegalDocumentVe
     effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
     requiresReconsent: false,
     publishedAt: NOW,
+    noticesEnqueuedAt: null,
     createdByAccountId: 'account-1',
     publishedByAccountId: 'account-1',
     createdAt: NOW,

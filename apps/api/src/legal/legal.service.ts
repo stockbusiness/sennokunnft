@@ -24,6 +24,7 @@ import {
   type TokushohoFields,
 } from '@sengoku/domain';
 import { DomainErrorException } from '../common/domain-error.filter';
+import { LegalRevisionNoticeService } from './legal-revision-notice.service';
 
 /**
  * 法務文書の編集と公開。
@@ -44,6 +45,13 @@ export class LegalService {
     private readonly clock: ClockPort,
     private readonly audit: AuditLogPort,
     private readonly consents: LegalConsentRepository,
+    /**
+     * 改定の知らせ（`UD-127`）。
+     *
+     * ⚠️ **`null` は「この配備では知らせない」。** 知らせの仕組みを
+     * 繋いでいない配備がある。必須にすると、そこで起動しなくなる。
+     */
+    private readonly revisionNotices: LegalRevisionNoticeService | null,
   ) {}
 
   /** 公開ページ向け。⚠️ 下書きは決して出さない。 */
@@ -94,6 +102,8 @@ export class LegalService {
         effectiveFrom: null,
         requiresReconsent: false,
         publishedAt: null,
+        // ⚠️ 下書きなので、知らせは積みようがない。
+        noticesEnqueuedAt: null,
         createdByAccountId: accountId,
         publishedByAccountId: null,
         createdAt: now,
@@ -203,6 +213,18 @@ export class LegalService {
         requiresReconsent: published.requiresReconsent,
       },
     });
+
+    /*
+      ⚠️ **公開のあとに積む。ここで失敗しても公開は戻さない**（`UD-127`）。
+         公開は取り消せない操作である。知らせが積めなかったことを理由に
+         例外にすると、公開した人には「失敗した」と見えるのに文書は
+         公開済み、という最も混乱する形になる。
+      ⚠️ **落ちても取りこぼさない。** 印が立たないので、掃き寄せ（cron）が
+         拾い直す。発行（P3）と同じ形にしてある。
+    */
+    if (this.revisionNotices !== null) {
+      await this.revisionNotices.enqueueFor(published);
+    }
 
     return toView(published, now);
   }

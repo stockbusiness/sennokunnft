@@ -184,6 +184,7 @@ import {
   PublicLegalController,
 } from './legal/legal.controller';
 import { LegalService } from './legal/legal.service';
+import { LegalRevisionNoticeService } from './legal/legal-revision-notice.service';
 import { PaymentCredentialController } from './payment-credential/payment-credential.controller';
 import {
   PaymentCredentialService,
@@ -1086,11 +1087,13 @@ export class AppModule implements NestModule {
                   { token: WalletAutoDeliveryService, optional: true },
                   { token: RevocationReconcileService, optional: true },
                   { token: NotificationSendService, optional: true },
+                  { token: LegalRevisionNoticeService, optional: true },
                 ],
                 useFactory: (
                   autoDelivery: WalletAutoDeliveryService | undefined,
                   revocationReconcile: RevocationReconcileService | undefined,
                   notificationSend: NotificationSendService | undefined,
+                  legalRevisionNotices: LegalRevisionNoticeService | null | undefined,
                 ): InternalJobConfig => ({
                   token: internalJobToken,
                   /*
@@ -1102,6 +1105,8 @@ export class AppModule implements NestModule {
                   autoDelivery: autoDelivery ?? null,
                   revocationReconcile: revocationReconcile ?? null,
                   notificationSend: notificationSend ?? null,
+                  // ⚠️ 法務文書を繋いでいない配備では provider ごと無い。
+                  legalRevisionNotices: legalRevisionNotices ?? null,
                   /*
                     時計仕掛けの生死を記録する先（P0-6）。
                     ⚠️ **`null` にしない。** 記録が無いと、運営の画面では
@@ -1253,13 +1258,35 @@ export class AppModule implements NestModule {
           ? []
           : [
               {
+                provide: LegalRevisionNoticeService,
+                /*
+                  改定の知らせ（`UD-127`）。
+                  ⚠️ **知らせの仕組みは `optional`。** 繋いでいない配備が
+                     ある。必須にすると、そこで起動しなくなる。
+                */
+                inject: [{ token: NotificationService, optional: true }],
+                useFactory: (
+                  notifications: NotificationService | undefined,
+                ): LegalRevisionNoticeService | null =>
+                  notifications === undefined
+                    ? null
+                    : new LegalRevisionNoticeService(
+                        legalDocuments.documents,
+                        notifications,
+                        deps.clock,
+                        deps.notification?.siteUrl ?? '',
+                      ),
+              },
+              {
                 provide: LegalService,
-                useFactory: () =>
+                inject: [LegalRevisionNoticeService],
+                useFactory: (notices: LegalRevisionNoticeService | null): LegalService =>
                   new LegalService(
                     legalDocuments.documents,
                     deps.clock,
                     deps.audit,
                     legalDocuments.consents,
+                    notices,
                   ),
               },
             ]),

@@ -71,6 +71,41 @@ export interface LegalDocumentRepository {
 
   /** 下書きだけを公開する。すでに公開済みなら `null`。 */
   publish(command: PublishLegalVersionCommand): Promise<LegalDocumentVersion | null>;
+
+  /* --- 改定の知らせ（`UD-127`）--- */
+
+  /**
+   * 知らせをまだ積んでいない、公開済みで再同意が要る版。
+   *
+   * ⚠️ **掃き寄せ（cron）が使う。** 公開の直後に積むのが本筋だが、
+   * そこで落ちると誰にも届かない。**公開は取り消せない**ので、
+   * 拾い直す口が要る。
+   */
+  listVersionsAwaitingNotices(limit: number): Promise<readonly LegalDocumentVersion[]>;
+
+  /**
+   * その文書の、**その版より前に同意した人**のアカウントID。
+   *
+   * ⚠️ **一度も同意していない方は含まない。** 再同意のしようが無い。
+   * ⚠️ **同じ版に同意済みの方も含まない。** 「もう同意しています」という
+   * 知らせになる。
+   * ⚠️ **停止中のアカウントは外さない。** ログインできないので再同意は
+   * できないが、これは**その方が当事者である約束についての連絡**である。
+   * こちらの都合で止めている相手に、黙って中身を変えたことにしない。
+   */
+  listAccountsConsentedBefore(input: {
+    readonly kind: LegalDocumentKind;
+    readonly beforeVersion: number;
+  }): Promise<readonly string[]>;
+
+  /**
+   * 積み終えた印を立てる。
+   *
+   * ⚠️ **途中で落ちたら立てない。** 立たなければ掃き寄せが拾い直す。
+   * 積み直しは安全である——同じ（種別・版・アカウント）は積む側の
+   * UNIQUE が重複として弾く。
+   */
+  markNoticesEnqueued(input: { readonly id: string; readonly now: Date }): Promise<void>;
 }
 
 /**

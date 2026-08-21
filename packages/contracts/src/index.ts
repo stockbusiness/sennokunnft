@@ -335,6 +335,7 @@ export type {
   NotificationHistoryView,
   NotificationTemplateListResponse,
   NotificationTemplateView,
+  EnqueueLegalNoticesResponse,
   SendNotificationsResponse,
 } from './notification';
 
