@@ -182,6 +182,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   PRODUCTION_NOT_READY: HttpStatus.CONFLICT,
   // ⚠️ 状態が合わないので断る。要求そのものは正しい形をしている。
   EMAIL_CHANGE_NOT_ALLOWED: HttpStatus.CONFLICT,
+  // ⚠️ 要求の形は正しい。中身が受け付けられない。
+  CREATOR_PROFILE_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -376,6 +378,11 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   // ⚠️ 「できません」で終わらせず、次に何を見ればよいかを書く。
   EMAIL_CHANGE_NOT_ALLOWED:
     'この申請は、いまの状態では進められません。本人確認が済んでいるか、すでに決着していないかをご確認ください。',
+
+  // --- 作家さま運営（P1-2）---
+  // ⚠️ 「できません」で終わらせず、どこを直せばよいかへ誘導する。
+  CREATOR_PROFILE_INVALID:
+    'プロフィールの内容を保存できませんでした。文字数、リンクのアドレス（https から始まるもの）、インボイス登録番号の形をご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

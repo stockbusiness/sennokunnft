@@ -72,6 +72,14 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
     ⚠️ `auditor` には要らない。名乗る場ではない。
   */
   'profile.manage_own': { anonymous: false, buyer: true, operator: true, auditor: false },
+  /*
+    ⚠️ **会員なら誰でも持つ。** ここでは会員なら誰でも出品できる（`UD-806`）
+       ので、「買う人」と「売る人」は同じロール。一度も売っていない方には
+       空の売上が返るだけで、他人の分は指定しようが無い。
+    ⚠️ `auditor` には渡さない。監査は自分名義の商いを持たない。
+       作家さまへの支払いを見るのは `payout.view`。
+  */
+  'creator.earnings.view_own': { anonymous: false, buyer: true, operator: true, auditor: false },
   'checkout.create': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.inspect': { anonymous: false, buyer: true, operator: false, auditor: false },
   'claim.accept': { anonymous: false, buyer: true, operator: false, auditor: false },

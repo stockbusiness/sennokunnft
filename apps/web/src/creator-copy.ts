@@ -71,6 +71,79 @@ export const CREATOR_COPY = {
   displayNameMissingHint:
     '作品ページには「お名前未登録」と出ます。お名前を登録すると、作品と一緒に表示されます。',
 
+  /* --- 売上（P1-2）--- */
+  earningsTitle: '売上とお振込',
+  /*
+    ⚠️ **「見込み」と「確定」を言葉で分ける。** 同じ顔で出すと、
+       締めたあとに数字が動いたときに「話が違う」になる。
+  */
+  earningsDescription:
+    '今月ぶんの見込みと、締めたあとのお支払いの記録です。今月ぶんは、月が終わるまで動きます。',
+  earningsCurrentTitle: '今月ぶん（見込み）',
+  earningsCurrentHint:
+    'まだ締めていないため、これから増えることも、ご返金があって減ることもあります。',
+  earningsNextTitle: '次回のお振込',
+  earningsNoNextPayout: '次回のお振込のご予定はありません',
+  /*
+    ⚠️ **「0円をお振込します」と読ませない。** 最低支払額に満たない分は
+       消えるのではなく、次の月へ繰り越される。そこまで言い切る。
+  */
+  earningsNoNextPayoutHint:
+    '売上が最低支払額に満たないときは、その分を次の月へ繰り越します。なくなるわけではありません。',
+  earningsByArtworkTitle: '作品ごとの売れ行き',
+  earningsNoSales: 'まだ売上がありません',
+  earningsNoSalesHint: '作品が売れると、こちらに出ます。',
+  earningsHistoryTitle: 'これまでのお支払い',
+  earningsNoHistory: 'まだ締めた月がありません',
+  earningsNoHistoryHint: '月が締まると、こちらに記録が残ります。',
+  earningsDetailTitle: '明細',
+  earningsCsvLink: '明細を CSV で受け取る',
+  /*
+    ⚠️ **買った方の情報が入らないことを、こちらから言う。** 聞かれる前に
+       書いておくほうが、余計なご心配をかけずに済む。
+  */
+  earningsCsvHint: 'Excel などで開けます。お買い上げくださった方のお名前やご連絡先は含まれません。',
+  earningsOpenRefundNotice: 'ご返金をお受けできる期間が残っています',
+  earningsOpenRefundHint:
+    'この期間が終わるまで、金額が確定しません。ご返金があった分は差し引かれます。',
+  earningsClawbackNote: '※ ご返金があった分は、売れた数から引かずに別に出しています。',
+
+  /* --- お店の情報（P1-2）--- */
+  shopTitle: 'お店の情報',
+  shopDescription: '作品ページに出るお店の情報です。あとから変更できます。',
+  fieldShopName: 'お店の名前',
+  fieldShopNameHint: '60文字まで。お名前と別に、屋号を出したいときにお使いください。',
+  fieldBio: 'ご紹介',
+  fieldBioHint: '2000文字まで。作品づくりのことなどを書けます。',
+  fieldLinks: 'SNS・ウェブサイト',
+  fieldLinksHint:
+    '5件まで。`https://` で始まるものだけお使いいただけます（`http://` は登録できません）。',
+  fieldInvoiceNumber: 'インボイス登録番号',
+  /*
+    ⚠️ **「無いと売れない」と読ませない。** 免税事業者の方もいらっしゃる。
+       任意であることを先に書く。
+  */
+  fieldInvoiceNumberHint:
+    '任意です。登録されている方のみ、T から始まる13桁の数字でご入力ください（例: T1234567890123）。登録がなくても販売できます。',
+  submitShop: 'この内容で保存する',
+  shopSaved: '保存しました',
+
+  setupTitle: 'ご準備の状況',
+  setupDone: '済',
+  setupTodo: 'これから',
+  setupOptional: '任意',
+  salesTermsTitle: '販売規約',
+  salesTermsPending: 'まだご同意いただいていません',
+  salesTermsPendingHint: 'お作りしているところです。用意ができ次第、こちらでご案内します。',
+  /*
+    ⚠️ **「準備中」と正直に出す**（P1-3）。「未登録」とだけ出すと、
+       登録する場所を探させてしまう。まだ無いことをこちらから言う。
+  */
+  payoutAccountTitle: 'お振込先',
+  payoutAccountPending: 'まだご登録いただけません（準備中）',
+  payoutAccountPendingHint:
+    'お振込先をご登録いただく仕組みを、いま用意しています。整い次第こちらでご案内しますので、いまは何もなさらなくて大丈夫です。',
+
   notSellableNotice: 'ご購入の受付はまだ開始できません',
   notSellableHint:
     '代金のお預かりと、出品者の方へのお支払いの仕組みが未整備のためです。いまは並べ方を確かめる段階です。',
@@ -96,6 +169,12 @@ export function creatorErrorMessage(
       return '運営とまぎらわしいお名前はお使いいただけません。「運営」「公式」「事務局」などを含まないお名前をご検討ください。';
     case 'DISPLAY_NAME_INVALID':
       return 'お名前は1〜40文字でご入力ください。目に見えない文字は使えません。';
+    case 'CREATOR_PROFILE_INVALID':
+      /*
+        ⚠️ **どの項目がどう悪かったかを断定しない。** 検証の中身を写すと、
+           判定の詳細が外へ出る。直しに行ける場所だけを伝える。
+      */
+      return 'お店の情報を受け付けられませんでした。文字数、`https://` で始まるお住所か、インボイス登録番号の形（Tと13桁の数字）をご確認ください。';
     default:
       break;
   }
@@ -112,4 +191,53 @@ export function creatorErrorMessage(
     case 'unavailable':
       return 'ただいま処理できませんでした。しばらくしてからもう一度お試しください。';
   }
+}
+
+/**
+ * 締めの状態を、作家さまに伝わる言葉にする。
+ *
+ * ⚠️ **`estimate` を「確定」と読ませない。** 締めるまでは動く。
+ * ⚠️ **`paid` は「お振込みしました」。** こちらの記録であって、着金の
+ * 確認ではない（実際に届いたかを機械は確かめられない）。
+ */
+export function earningsStateLabel(state: 'estimate' | 'draft' | 'confirmed' | 'paid'): string {
+  switch (state) {
+    case 'estimate':
+      return '見込み';
+    case 'draft':
+      return '集計中';
+    case 'confirmed':
+      return 'お支払い予定';
+    case 'paid':
+      return 'お振込み済み';
+  }
+}
+
+/**
+ * 締めの状態の色。
+ *
+ * ⚠️ **色だけで伝えない。** 必ず言葉（`earningsStateLabel`）と一緒に出す。
+ * ⚠️ **見込みを `success` にしない。** まだ決まっていないものを、
+ * 決まったものと同じ顔にしない。
+ */
+export function earningsStateTone(
+  state: 'estimate' | 'draft' | 'confirmed' | 'paid',
+): 'neutral' | 'success' {
+  return state === 'paid' ? 'success' : 'neutral';
+}
+
+/**
+ * `2026-08` を `2026年8月` にする。
+ *
+ * ⚠️ **読めない値はそのまま返す。** 勝手に置き換えると、
+ * 「どの月の話か分からない」より悪い「別の月に見える」を作る。
+ */
+export function formatPeriodKey(periodKey: string): string {
+  const matched = /^(\d{4})-(\d{2})$/.exec(periodKey);
+  if (matched === null) {
+    return periodKey;
+  }
+  const year = matched[1] ?? '';
+  const month = Number.parseInt(matched[2] ?? '', 10);
+  return Number.isNaN(month) ? periodKey : `${year}年${String(month)}月`;
 }

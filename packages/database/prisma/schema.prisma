@@ -124,6 +124,7 @@ model Account {
   paidPayouts                  Payout[]                     @relation("PayoutPayer")
   resolvedOperationsReviews    OperationsReview[]           @relation("OperationsReviewResolver")
   productionAttestations       ProductionAttestation[]      @relation("ProductionAttester")
+  creatorProfile               CreatorProfile?
   accountNotes                 AccountNote[]                @relation("AccountNoteSubject")
   authoredAccountNotes         AccountNote[]                @relation("AccountNoteAuthor")
   emailChangeRequests          EmailChangeRequest[]         @relation("EmailChangeSubject")
@@ -333,7 +334,9 @@ model LegalDocumentVersion {
 model LegalConsent {
   id          String   @id @default(uuid()) @db.Uuid
   accountId   String   @map("account_id") @db.Uuid
-  /// いまは `terms` のみ。
+  /// `terms` / `privacy` / `tokushoho` / `creator_terms`。
+  /// ⚠️ `creator_terms` は売る人向けの販売規約（P1-2）。買う人向けとは
+  /// 同意すべき内容も時点も違うので、種別を分けてある。
   kind        String
   /// どの版に同意したか。⚠️ 真偽値にしない。
   versionId   String   @map("version_id") @db.Uuid
@@ -1578,4 +1581,36 @@ model EmailChangeRequest {
 
   @@index([accountId, createdAt(sort: Desc)])
   @@map("email_change_requests")
+}
+
+/// 作家さまのプロフィール（実運営 指示書 P1-2）。
+///
+/// ⚠️ **表示名（`accounts.display_name`）とは別の表。** あちらは一意である
+/// 必要がある（なりすまし防止・`UD-102`）。こちらは紹介文や画像で、一意性とは
+/// 関係がない。混ぜると、紹介文を直すたびに一意性の検査が走る。
+///
+/// ⚠️ **すべて任意。** 埋めないと売れない作りにすると、作りたい人が最初の
+/// 一歩で止まる。
+model CreatorProfile {
+  accountId String @id @map("account_id") @db.Uuid
+  /// 屋号・ショップ名。⚠️ **一意ではない**（表示名がその役目を持つ）。
+  shopName  String? @map("shop_name")
+  /// 紹介文。⚠️ HTML は保存の時点で断る（アプリ側で検証）。
+  bio       String?
+  /// SNS・Web サイト。⚠️ `https` のものだけ（アプリ側で検証）。
+  /// 形は `[{ label, url }]`。件数の上限は CHECK で縛る。
+  links     Json    @default("[]")
+  /// 画像の保管庫の鍵。⚠️ URL ではなく鍵で持つ（保管庫を替えられるように）。
+  iconKey   String? @map("icon_key")
+  coverKey  String? @map("cover_key")
+  /// インボイス（適格請求書発行事業者）の登録番号。
+  /// ⚠️ **形だけを確かめる**（`T` + 13 桁）。実在は国税庁の公表サイトでしか
+  /// 分からず、こちらでは確かめられない。確認済みと表示しない。
+  invoiceNumber String? @map("invoice_number")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("creator_profiles")
 }

@@ -9,6 +9,7 @@ import {
   createListing,
   publishArtwork,
   suspendListing,
+  saveMyProfileDetail,
   updateMyProfile,
   uploadArtworkImage,
   type CreatorResult,
@@ -213,5 +214,59 @@ export async function updateDisplayNameAction(
   */
   revalidatePath('/');
   revalidatePath('/artworks/[slug]', 'page');
+  return { done: true };
+}
+
+/** 入力欄が何組あるか。⚠️ 画面と同じ数。増やすときは両方直す。 */
+const LINK_SLOTS = 5;
+
+/**
+ * お店の情報を保存する。
+ *
+ * ⚠️ **誰の分かをフォームから受け取らない。** API がトークンから決める。
+ *
+ * ⚠️ **検証を画面側に書かない。** 文字数・`https` かどうか・インボイス
+ * 登録番号の形は、すべて API 側の判定が正。ここは空欄を `null` に
+ * 直すだけにする。2 か所に書くと必ずずれる。
+ *
+ * ⚠️ **表示名と画像には触れない。** 別の口で扱う。ここで一緒に送ると、
+ * お店の説明を直したつもりでお名前まで書き換わる。
+ */
+export async function updateShopProfileAction(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const links: { label: string; url: string }[] = [];
+  for (let index = 0; index < LINK_SLOTS; index += 1) {
+    const label = text(form, `linkLabel${String(index)}`);
+    const url = text(form, `linkUrl${String(index)}`);
+    /*
+      ⚠️ **両方空の組は送らない。** 空欄のまま 5 件送ると、
+         「5 件まで」の上限に空欄で当たってしまう。
+      ⚠️ **片方だけの組は落とさずに送る。** ここで黙って捨てると、
+         打ったのに保存されない。API に断らせて理由を伝える。
+    */
+    if (label === '' && url === '') {
+      continue;
+    }
+    links.push({ label, url });
+  }
+
+  const shopName = text(form, 'shopName');
+  const bio = text(form, 'bio');
+  const invoiceNumber = text(form, 'invoiceNumber');
+
+  const result = await saveMyProfileDetail({
+    // ⚠️ 空欄は「消す」。空文字で保存すると、DB の CHECK に弾かれる。
+    shopName: shopName === '' ? null : shopName,
+    bio: bio === '' ? null : bio,
+    links,
+    invoiceNumber: invoiceNumber === '' ? null : invoiceNumber,
+  });
+  if (!result.ok) {
+    return fail(result);
+  }
+
+  revalidatePath('/creator/shop');
   return { done: true };
 }

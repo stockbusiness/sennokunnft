@@ -221,6 +221,13 @@ export class LegalService {
       throw new NotFoundException();
     }
     const now = this.clock.now();
+    /*
+      ⚠️ **`CONSENT_REQUIRED_KINDS` を回さない。** そこには販売規約
+         （`creator_terms`）も入っているが、あれは**作品を出される方に
+         向けた取り決め**である（P1-2）。ログインのたびに全員へ求めると、
+         買うだけの方に販売規約を承諾させることになる。ここは
+         `'terms'` だけを見る。販売規約の同意は作家さまの画面で取る。
+    */
     const effective = await this.legal.findEffective('terms', now);
     const latestConsent = await this.consents.findLatestConsent(accountId, 'terms');
     const hasPendingReconsent =

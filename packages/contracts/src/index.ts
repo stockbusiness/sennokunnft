@@ -415,3 +415,23 @@ export type {
   EmailChangeRequestView,
   IdentityVerificationMethod,
 } from './customer';
+
+// --- 作家さま運営（P1-2） -------------------------------------------------
+export {
+  artworkSalesSchema,
+  creatorEarningsDetailResponseSchema,
+  creatorEarningsLineSchema,
+  creatorEarningsQuerySchema,
+  creatorEarningsResponseSchema,
+  creatorLinkSchema,
+  creatorPeriodEarningsSchema,
+  creatorProfileDetailSchema,
+  updateCreatorProfileDetailRequestSchema,
+} from './creator-operations';
+export type {
+  ArtworkSalesView,
+  CreatorEarningsDetailResponse,
+  CreatorEarningsResponse,
+  CreatorPeriodEarningsView,
+  CreatorProfileDetailView,
+} from './creator-operations';

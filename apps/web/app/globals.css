@@ -1313,6 +1313,98 @@ button {
   overflow-wrap: anywhere;
 }
 
+/* --- 作家さまの売上（P1-2）--------------------------------------------
+ *
+ * ⚠️ **スマホで読める幅から考える。** 作家さまは移動中に確かめる。
+ *    横に並べるのは、置ける幅があるときだけ。
+ */
+
+.sengoku-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--sengoku-space-3);
+  margin: var(--sengoku-space-4) 0 0;
+}
+
+.sengoku-figures__item {
+  padding: var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+}
+
+.sengoku-figures__item dt {
+  margin: 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
+/*
+  ⚠️ **金額を細い字にしない。** 数字は確かめるために見るもので、
+     飾りではない。読み違えられると問い合わせになる。
+*/
+.sengoku-figures__value {
+  margin: var(--sengoku-space-1) 0 0;
+  font-size: var(--sengoku-text-title);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ご準備の状況。⚠️ 印だけでなく言葉も出す（色だけで伝えない）。 */
+.sengoku-setup {
+  margin: var(--sengoku-space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-3);
+}
+
+.sengoku-setup__item {
+  padding: var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+}
+
+.sengoku-setup__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sengoku-space-2);
+  font-weight: 600;
+}
+
+.sengoku-setup__detail {
+  margin: var(--sengoku-space-2) 0 0;
+  font-size: var(--sengoku-text-small);
+  color: var(--sengoku-sumi-soft);
+}
+
+/*
+  SNS・ウェブサイトの入力欄。
+  ⚠️ **スマホでは縦に積む。** 横に 2 つ並べると、どちらも打てない幅になる。
+*/
+.sengoku-link-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-2);
+  margin-top: var(--sengoku-space-2);
+  width: 100%;
+}
+
+@media (min-width: 40rem) {
+  .sengoku-link-row {
+    flex-direction: row;
+  }
+
+  .sengoku-link-row .sengoku-form__input:first-of-type {
+    flex: 0 0 12rem;
+  }
+
+  .sengoku-link-row .sengoku-form__input:last-of-type {
+    flex: 1 1 auto;
+  }
+}
+
 /*
   取り寄せたご連絡先（決定 2026-08-21）。
   ⚠️ **選んで写せる大きさで出す。** 小さいと読み違えられ、
