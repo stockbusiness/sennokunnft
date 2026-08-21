@@ -454,3 +454,219 @@ describe('禁じた操作の口が無いこと（指示書 §11）', () => {
     expect(response.body.duplicateCandidates[0].signals).toEqual(['email_hash']);
   });
 });
+
+/**
+ * ご連絡先そのものを見る（決定 2026-08-21）。
+ *
+ * ⚠️ **この組の主題は 3 つ。**
+ *  1. **保存していないこと**——応答は認証基盤から取り寄せたもので、
+ *     こちらの DB には入らない（`UD-503` 維持）
+ *  2. **監査ログにアドレスの値が残らないこと**——残せば、監査ログの側から
+ *     `UD-503` を破ることになる
+ *  3. **`customer.view` では通らないこと**——まとめて見ることと、
+ *     連絡先を読むことは別の力
+ */
+describe('ご連絡先を見る', () => {
+  beforeEach(() => {
+    seedCustomer();
+    harness.customerRecipients.emails.set(ACCOUNT_ID, EMAIL);
+  });
+
+  it('運営は取り寄せられる', async () => {
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(response.body).toEqual({ status: 'resolved', email: EMAIL });
+  });
+
+  it('未認証では取り寄せられない', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .expect(401);
+  });
+
+  /*
+    ⚠️ **監査は「読んだことを確かめる側」であって、読む側ではない。**
+       読む側と確かめる側が同じ人だと、歯止めにならない。
+  */
+  it('閲覧者は取り寄せられない', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('auditor')))
+      .expect(403);
+    // ⚠️ 断られたのだから、認証基盤へも問い合わせていない。
+    expect(harness.customerRecipients.calls).toEqual([]);
+  });
+
+  it('会員は取り寄せられない', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('buyer')))
+      .expect(403);
+  });
+
+  /*
+    ⚠️ **顧客詳細には出さない。** 出すと、画面を開いただけで全員のアドレスが
+       流れ、監査ログが「開いた人」で埋まって**本当に読んだ人が埋もれる**。
+  */
+  it('顧客詳細には現れない', async () => {
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}`)
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(JSON.stringify(response.body)).not.toContain(EMAIL);
+    // ⚠️ 詳細を開いただけでは、認証基盤へ問い合わせない。
+    expect(harness.customerRecipients.calls).toEqual([]);
+  });
+
+  /*
+    ⚠️ **この組でいちばん大事な 1 本。** 記録に平文が残れば、
+       監査ログの側から `UD-503` を破ることになる。
+  */
+  it('監査ログにアドレスの値が残らない', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    const recorded = harness.audit.entries.filter((row) => row.action === 'customer.email.view');
+    expect(recorded).toHaveLength(1);
+    // ⚠️ 誰の分を見たかは残る。
+    expect(recorded[0]?.targetId).toBe(ACCOUNT_ID);
+    // ⚠️ **値そのものは、記録のどこにも無い。**
+    expect(JSON.stringify(recorded[0])).not.toContain(EMAIL);
+    expect(JSON.stringify(recorded[0])).not.toContain('example.test');
+  });
+
+  it('取り寄せられなかったときも記録に残る', async () => {
+    harness.customerRecipients.down = true;
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(response.body).toEqual({ status: 'unavailable' });
+
+    const recorded = harness.audit.entries.filter((row) => row.action === 'customer.email.view');
+    // ⚠️ 失敗も残す。残さないと「試したが取れなかった」を後から確かめられない。
+    expect(recorded).toHaveLength(1);
+  });
+
+  /*
+    ⚠️ **「分からない」と「取れなかった」を分ける。** 前者は待っても
+       変わらず、後者は時間をおけば直りうる。同じ値で返すと、応対する人が
+       もう一度試すべきかを判断できない。
+  */
+  it('認証基盤に居ない方は「分からない」で返る（「取れなかった」にしない）', async () => {
+    harness.customerRecipients.emails.delete(ACCOUNT_ID);
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(response.body).toEqual({ status: 'unknown' });
+  });
+
+  /*
+    ⚠️ **居ないアカウントを引けないようにする。** 引けると、この口が
+       「そのアカウントが在るか」を確かめる道になる。
+  */
+  it('居ないアカウントは 404（存否を確かめる道にしない）', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${OTHER_ID}/email`)
+      .set(auth(actorToken('operator')))
+      .expect(404);
+    expect(harness.customerRecipients.calls).toEqual([]);
+  });
+
+  /*
+    ⚠️ **保存していないことを、呼ばれた回数で確かめる。** 保存していれば
+       2 回目は問い合わせずに返せてしまう。毎回問い合わせているというのが、
+       「持っていない」ことの裏返しである。
+  */
+  it('見るたびに取り寄せる（覚えておかない）', async () => {
+    const operator = actorToken('operator');
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(operator))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(operator))
+      .expect(200);
+    expect(harness.customerRecipients.calls).toEqual([ACCOUNT_ID, ACCOUNT_ID]);
+    // ⚠️ 2 回見たなら、記録も 2 件。
+    expect(harness.audit.entries.filter((r) => r.action === 'customer.email.view')).toHaveLength(2);
+  });
+});
+
+/**
+ * 認証基盤へ繋いでいない配備（決定 2026-08-21）。
+ *
+ * ⚠️ **起動できること自体が受入条件。** 必須にすると、繋いでいない配備で
+ * **アプリ全体が立ち上がらない**。口は生やしたまま「この配備では
+ * 取り寄せられません」と断る。
+ */
+describe('認証基盤へ繋いでいない配備', () => {
+  let bare: INestApplication;
+  let bareHarness: TestHarness;
+
+  beforeEach(async () => {
+    bareHarness = buildHarness(
+      new DevTokenVerifier({
+        secret: TEST_TOKEN_SECRET,
+        issuer: TEST_ISSUER,
+        audience: TEST_AUDIENCE,
+        now: () => TEST_NOW,
+      }),
+    );
+    // ⚠️ **繋いでいない状態を作る。** 設定漏れの配備を再現する。
+    const deps = {
+      ...bareHarness,
+      customers: {
+        directory: bareHarness.customerDirectory,
+        notes: bareHarness.accountNotes,
+        emailChanges: bareHarness.emailChangeRequests,
+      },
+    };
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.register(deps)],
+    }).compile();
+    bare = moduleRef.createNestApplication({ rawBody: true });
+    bare.useGlobalFilters(new DomainErrorFilter());
+    await bare.init();
+  });
+
+  afterEach(async () => {
+    await bare.close();
+  });
+
+  it('起動する', () => {
+    expect(bare).toBeDefined();
+  });
+
+  /*
+    ⚠️ **「取れなかった」と混ぜない。** 混ぜると、設定漏れが
+       「たまたま失敗した」に見えて、いつまでも直されない。
+  */
+  it('「この配備では取り寄せられません」と断る', async () => {
+    bareHarness.accounts.seed('user-operator', 'operator');
+    bareHarness.customerDirectory.summaries = [
+      {
+        accountId: ACCOUNT_ID,
+        maskedEmail: null,
+        commonUserId: null,
+        status: 'active',
+        orderCount: 1,
+        entitlementCount: 1,
+        signals: [],
+        createdAt: TEST_NOW,
+      },
+    ];
+
+    const response = await request(bare.getHttpServer())
+      .get(`/api/v1/admin/customers/${ACCOUNT_ID}/email`)
+      .set(auth(tokenFor('user-operator')))
+      .expect(200);
+    expect(response.body).toEqual({ status: 'not_configured' });
+  });
+});

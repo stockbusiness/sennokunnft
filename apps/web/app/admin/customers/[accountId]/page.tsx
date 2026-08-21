@@ -17,6 +17,7 @@ import {
 import {
   AddNoteForm,
   OpenEmailChangeForm,
+  RevealEmailForm,
   SettleEmailChangeForm,
   VerifyIdentityForm,
 } from '../forms';
@@ -24,8 +25,13 @@ import {
 /**
  * お客さま 1 人の状況（実運営 指示書 P1-1）。
  *
- * ⚠️ **お名前もご連絡先も出ない。** 本システムはそもそも平文を持っていない
+ * ⚠️ **お名前は出ない。** 本システムはそもそも平文を持っていない
  * （`UD-503`）。API が返さないので、出しようが無い。
+ *
+ * ⚠️ **ご連絡先は「押したときだけ」出る**（決定 2026-08-21）。ここでも
+ * 保存はしておらず、押されたときに認証基盤から取り寄せている。
+ * **開いただけでは出さない**——出すと、監査ログが「開いた人」で埋まって
+ * 本当に読んだ人が埋もれ、肩越しに見える場面も増える。
  *
  * ⚠️ **持ち主を付け替える操作はここに無い。** 注文・受取権・ウォレットの
  * 持ち主を人が変えられる口は、API にも画面にも存在しない。本人確認をして
@@ -73,9 +79,20 @@ export default async function AdminCustomerDetailPage({
 
       <Notice
         tone="info"
-        title="お名前とご連絡先は、この仕組みに保存されていません。"
+        title="お名前は、この仕組みに保存されていません。"
         hint="ご本人の確認は、ご注文の内容や登録済みのご連絡先への確認で行ってください。"
       />
+
+      {/*
+        ご連絡先（決定 2026-08-21）。
+        ⚠️ **要約より前に置く。** 応対で最初に要るのはここである。
+           下に埋めると、探しているあいだ相手を待たせる。
+      */}
+      <h2>ご連絡先</h2>
+      <p className="sengoku-form__hint">
+        この仕組みには保存されていません。押すと、そのつど認証基盤から 取り寄せて表示します。
+      </p>
+      <RevealEmailForm accountId={summary.accountId} />
 
       <h2>{CUSTOMER_COPY.attentionHeading}</h2>
       {detail.attentions.length === 0 ? (

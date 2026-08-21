@@ -192,3 +192,23 @@ export const settleEmailChangeRequestSchema = z.object({
  */
 export { IDENTITY_VERIFICATION_METHODS };
 export type { IdentityVerificationMethod };
+
+/**
+ * ご連絡先を取り寄せた結果（決定 2026-08-21）。
+ *
+ * ⚠️ **この値は保存されていない。** 見るたびに認証基盤から取り寄せ、
+ * 応答に載せて捨てる（`UD-503` 維持）。次に開いたときは、また取り寄せる。
+ *
+ * ⚠️ **「分からない」と「取れなかった」を分ける。** 前者はその方が認証基盤に
+ * 居ないということで、待っても変わらない。後者は認証基盤へ届かなかった
+ * ということで、**時間をおけば直りうる**。同じ顔で出すと、応対する人が
+ * 「もう一度試す」べきかを判断できない。
+ */
+export const customerEmailResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('resolved'), email: z.string() }),
+  z.object({ status: z.literal('unknown') }),
+  z.object({ status: z.literal('unavailable') }),
+  /** 認証基盤への接続が、この配備では設定されていない。 */
+  z.object({ status: z.literal('not_configured') }),
+]);
+export type CustomerEmailResponse = z.infer<typeof customerEmailResponseSchema>;

@@ -1312,3 +1312,19 @@ button {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/*
+  取り寄せたご連絡先（決定 2026-08-21）。
+  ⚠️ **選んで写せる大きさで出す。** 小さいと読み違えられ、
+     打ち直しは打ち間違いのもとになる。
+*/
+.sengoku-revealed-email {
+  margin: var(--sengoku-space-3) 0;
+  padding: var(--sengoku-space-3);
+  border: 1px solid var(--sengoku-keisen);
+  border-radius: var(--sengoku-radius);
+  background: var(--sengoku-paper);
+  font-size: var(--sengoku-text-title);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

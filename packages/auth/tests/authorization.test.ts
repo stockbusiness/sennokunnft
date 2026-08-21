@@ -119,6 +119,13 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   'customer.view': { anonymous: false, buyer: false, operator: true, auditor: false },
   'customer.note': { anonymous: false, buyer: false, operator: true, auditor: false },
   /*
+    ⚠️ **`auditor` に渡さない**（決定 2026-08-21）。監査は**読んだことを
+       確かめる側**であって、読む側ではない。読む側と確かめる側が同じ人だと、
+       歯止めにならない。
+    ⚠️ **`buyer` にも当然渡さない。** 他人の連絡先である。
+  */
+  'customer.view_email': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
     ⚠️ **本人確認の記録は、乗っ取りを止める最後の砦。** 見るだけの人が
        「確認した」と押せてはいけない。
   */

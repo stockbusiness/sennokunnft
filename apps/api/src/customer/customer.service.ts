@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   CustomerDetailResponse,
+  CustomerEmailResponse,
   CustomerSearchRequest,
   CustomerSearchResponse,
   EmailChangeRequestView,
@@ -22,6 +23,7 @@ import {
   type EmailChangeRequestRecord,
   type EmailHashPort,
   type IdentityVerificationMethod,
+  type RecipientResolverPort,
 } from '@sengoku/domain';
 import type { Actor } from '@sengoku/auth';
 import { DomainErrorException } from '../common/domain-error.filter';
@@ -48,6 +50,14 @@ export class CustomerSupportService {
     private readonly emailHasher: EmailHashPort,
     private readonly clock: ClockPort,
     private readonly audit: AuditLogPort,
+    /**
+     * ご連絡先を取り寄せる口（決定 2026-08-21）。
+     *
+     * ⚠️ **`null` は「この配備では取り寄せられない」。** 認証基盤への
+     * 接続が設定されていない環境がある。**「取れなかった」と混ぜない**
+     * ——混ぜると、設定漏れが「たまたま失敗した」に見えて放置される。
+     */
+    private readonly recipients: RecipientResolverPort | null,
   ) {}
 
   /**
@@ -78,6 +88,53 @@ export class CustomerSupportService {
     });
 
     return { items: items.map(toSummaryView) };
+  }
+
+  /**
+   * ご連絡先そのものを取り寄せる（決定 2026-08-21）。
+   *
+   * ⚠️ **保存しない**（`UD-503` 維持）。認証基盤から取り寄せ、応答に載せて
+   * 捨てる。DB にも、この処理のどこにも残らない。次に見るときは、また
+   * 取り寄せる。
+   *
+   * ⚠️ **見たことは必ず記録に残す。** 連絡先を読めるのは強い力で、誰がいつ
+   * 使ったかが残らないと歯止めが無い。
+   *
+   * ⚠️ **アドレスの値を記録に載せない。** 載せれば、監査ログの側から
+   * `UD-503` を破ることになる。残すのは「どのアカウントの分を引いたか」と
+   * 「取れたかどうか」まで。
+   *
+   * ⚠️ **ログへも出さない。** 失敗したときほど出したくなるが、そこが
+   * 平文アドレスの最大の漏れ口になる。
+   */
+  async emailOf(accountId: string, actor: Actor): Promise<CustomerEmailResponse> {
+    /*
+      ⚠️ **居ないアカウントを引けないようにする。** 引けると、この口が
+         「そのアカウントが在るか」を確かめる道になる。
+    */
+    const summary = await this.directory.findByAccountId(accountId);
+    if (summary === null) {
+      throw new NotFoundException();
+    }
+
+    const resolution = this.recipients === null ? null : await this.recipients.resolve(accountId);
+
+    await this.audit.record({
+      actorAccountId: actor.accountId,
+      action: 'customer.email.view',
+      targetType: 'account',
+      targetId: accountId,
+      // ⚠️ ここにアドレスを入れない。入れた瞬間に `UD-503` が崩れる。
+      summary: { result: resolution === null ? 'not_configured' : resolution.kind },
+    });
+
+    if (resolution === null) {
+      return { status: 'not_configured' };
+    }
+    if (resolution.kind === 'resolved') {
+      return { status: 'resolved', email: resolution.email };
+    }
+    return { status: resolution.kind };
   }
 
   async detail(accountId: string): Promise<CustomerDetailResponse> {

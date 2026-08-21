@@ -78,9 +78,11 @@ import {
   mailCheckResponseSchema,
   productionReadinessResponseSchema,
   customerDetailResponseSchema,
+  customerEmailResponseSchema,
   customerSearchResponseSchema,
   type ConsistencyResponse,
   type CustomerDetailResponse,
+  type CustomerEmailResponse,
   type CustomerSearchResponse,
   type EntitlementAdminDetailView,
   type EntitlementAdminListResponse,
@@ -1029,6 +1031,22 @@ export function fetchCustomer(accountId: string): Promise<AdminResult<CustomerDe
   return callAdmin(
     `/api/v1/admin/customers/${encodeURIComponent(accountId)}`,
     customerDetailResponseSchema,
+  );
+}
+
+/**
+ * ご連絡先そのものを取り寄せる（決定 2026-08-21）。
+ *
+ * ⚠️ **画面を開いたときに呼ばない。** 押されたときだけ呼ぶ。開くたびに
+ * 呼ぶと、監査ログが「開いた人」で埋まり、**本当に読んだ人が埋もれる**。
+ *
+ * ⚠️ **返ってきた値を保存も再利用もしない。** サーバー側でも保存して
+ * いない（`UD-503`）。次に要るときは、また取り寄せる。
+ */
+export function fetchCustomerEmail(accountId: string): Promise<AdminResult<CustomerEmailResponse>> {
+  return callAdmin(
+    `/api/v1/admin/customers/${encodeURIComponent(accountId)}/email`,
+    customerEmailResponseSchema,
   );
 }
 

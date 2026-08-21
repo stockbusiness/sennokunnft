@@ -627,6 +627,24 @@ async function bootstrap(): Promise<void> {
        見えないまま日が過ぎる。
     ⚠️ **鍵の値をログへ出さない。** 出すのは「どの変数が欠けているか」まで。
   */
+  /*
+    ご連絡先を取り寄せる口（決定 2026-08-21）。
+
+    ⚠️ **知らせの送信が有効かどうかとは切り離す。** 送信を止めている配備でも、
+       問い合わせ対応でご連絡先は要る。`NOTIFICATION_DELIVERY_ENABLED` に
+       ぶら下げると、送信を止めた日から応対ができなくなる。
+
+    ⚠️ **`UD-503` は維持したまま。** ここで作るのは「取り寄せる口」であって、
+       保存はどこにもしない。取り寄せた値は応答に載せて捨てる。
+  */
+  const recipientResolver =
+    env.SUPABASE_URL !== undefined && env.SUPABASE_SERVICE_ROLE_KEY !== undefined
+      ? new SupabaseRecipientResolver(
+          { url: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY },
+          new PrismaAuthSubjectLookup(prisma),
+        )
+      : undefined;
+
   let notificationDelivery:
     | { readonly recipients: SupabaseRecipientResolver; readonly mailer: ResendMailSender }
     | undefined;
@@ -657,13 +675,8 @@ async function bootstrap(): Promise<void> {
       process.exit(1);
     }
     notificationDelivery = {
-      recipients: new SupabaseRecipientResolver(
-        {
-          url: env.SUPABASE_URL!,
-          serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
-        },
-        new PrismaAuthSubjectLookup(prisma),
-      ),
+      // ⚠️ 上で作った口を使い回す。2 つ作ると、片方だけ設定が変わりうる。
+      recipients: recipientResolver!,
       mailer: new ResendMailSender({
         apiKey: env.RESEND_API_KEY!,
         from: env.MAIL_FROM_ADDRESS!,
@@ -754,6 +767,12 @@ async function bootstrap(): Promise<void> {
         directory: new PrismaCustomerDirectoryRepository(prisma),
         notes: new PrismaAccountNoteRepository(prisma),
         emailChanges: new PrismaEmailChangeRequestRepository(prisma),
+        /*
+          ⚠️ **無い配備がある。** 認証基盤へ繋いでいなければ `undefined` の
+             まま。画面は「この配備では取り寄せられません」と断る。
+             必須にすると、繋いでいない配備で起動しなくなる。
+        */
+        ...(recipientResolver === undefined ? {} : { recipients: recipientResolver }),
       },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),
