@@ -74,6 +74,9 @@ import {
   operationsDashboardResponseSchema,
   redeliverResponseSchema,
   retryIssuanceResponseSchema,
+  attestationListResponseSchema,
+  mailCheckResponseSchema,
+  productionReadinessResponseSchema,
   customerDetailResponseSchema,
   customerSearchResponseSchema,
   type ConsistencyResponse,
@@ -85,6 +88,9 @@ import {
   type OperationsDashboardResponse,
   type RedeliverResponse,
   type RetryIssuanceResponse,
+  type AttestationListResponse,
+  type MailCheckResponse,
+  type ProductionReadinessResponse,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
@@ -958,6 +964,46 @@ export function resendNotification(id: string): Promise<AdminResult<{ requeued: 
  */
 const resendNotificationResponseSchema = z.object({ requeued: z.boolean() });
 
+/**
+ * 本番販売ガード（P0-7）。
+ *
+ * ⚠️ **画面を隠すことは保護ではない。** 条件未達で支払い口を作らせない
+ * のは API 側の仕事で、ここは「いま何が足りないか」を見せるだけ。
+ */
+export function fetchProductionReadiness(): Promise<AdminResult<ProductionReadinessResponse>> {
+  return callAdmin('/api/v1/admin/production/readiness', productionReadinessResponseSchema);
+}
+
+export function fetchAttestations(): Promise<AdminResult<AttestationListResponse>> {
+  return callAdmin('/api/v1/admin/production/attestations', attestationListResponseSchema);
+}
+
+/**
+ * 証跡を残す。
+ *
+ * ⚠️ **決済世代を送らない。** サーバー側でいまの世代へ紐づける。
+ * 送れると、いま受付中でない世代を指す証跡を作れてしまう。
+ */
+export function recordAttestation(input: {
+  readonly kind: string;
+  readonly succeeded: boolean;
+  readonly note: string | null;
+}): Promise<AdminResult<{ readonly id: string }>> {
+  return callAdmin(
+    '/api/v1/admin/production/attestations',
+    attestationCreatedSchema,
+    json(input, 'POST'),
+  );
+}
+
+/** メールの試し送り。⚠️ 宛先は送らない（押した本人へ届く）。 */
+export function runMailCheck(): Promise<AdminResult<MailCheckResponse>> {
+  return callAdmin('/api/v1/admin/production/mail-check', mailCheckResponseSchema, {
+    method: 'POST',
+  });
+}
+
+const attestationCreatedSchema = z.object({ id: z.string() });
 // --- 顧客サポート（P1-1） -------------------------------------------------
 
 /**

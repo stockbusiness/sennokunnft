@@ -87,7 +87,11 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
            「一度も動いていない」を作れなくなる——止まった時計に
            気づけるかどうかを確かめる試験が、そこで空振りする。
       */
-      job_runs
+      job_runs,
+      -- ⚠️ TRUNCATE は行トリガーを撃たない。証跡は追記のみで DELETE は
+      --    トリガーが拒むが、TRUNCATE は素通りする。試験を片づけられるのは
+      --    そのおかげ。**本番でこれを実行しない。**
+      production_attestations
     RESTART IDENTITY CASCADE
   `);
 

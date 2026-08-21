@@ -35,3 +35,5 @@ export type {
   AccountRecord,
   AccountLookupPort,
 } from './token';
+
+export { MFA_RECORD_INTERVAL_MS } from './token';

@@ -25,6 +25,10 @@ export interface IntegrationEnvironmentInput {
   readonly SUPABASE_JWT_ISSUER?: string;
   readonly SUPABASE_JWT_AUDIENCE?: string;
   readonly SUPABASE_JWKS_URL?: string;
+  /** メールの送信（P0-7 の 6 番目）。⚠️ 鍵の値は持ち出さない。 */
+  readonly MAIL_PROVIDER?: string;
+  readonly RESEND_API_KEY?: string;
+  readonly MAIL_FROM_ADDRESS?: string;
 }
 
 export function describeIntegrationEnvironment(
@@ -36,6 +40,8 @@ export function describeIntegrationEnvironment(
         return describeStorage(env);
       case 'auth':
         return describeAuth(env);
+      case 'mail':
+        return describeMail(env);
       case 'payment':
       case 'ovew_wallet':
         /*
@@ -102,4 +108,29 @@ function missingNames(entries: readonly (readonly [string, string | undefined])[
 
 function nonEmpty(value: string | undefined): string | null {
   return value === undefined || value === '' ? null : value;
+}
+
+/**
+ * メールの送信（P0-7 の 6 番目）。
+ *
+ * ⚠️ **`publicUrl` を返さない。** 到達性の確認（`OPTIONS`）を
+ * 走らせないため。メールで確かめたいのは「届くホストがあるか」では
+ * なく「この鍵で受け付けられるか」で、それは試し送りでしか分からない。
+ *
+ * ⚠️ **差出人アドレスを返さない。** 秘密ではないが、ここは値を返さない
+ * 場所と決めてある。返す場所を 1 つ作ると、次は鍵が載る。
+ */
+function describeMail(env: IntegrationEnvironmentInput): EnvIntegrationSummary {
+  const provider = env.MAIL_PROVIDER ?? 'none';
+  if (provider !== 'resend') {
+    // 送らない配備。⚠️ **「そろっている」と言わない。** 送れないのだから。
+    return { provider, complete: false, missing: ['MAIL_PROVIDER'], publicUrl: null };
+  }
+
+  const missing = missingNames([
+    ['RESEND_API_KEY', env.RESEND_API_KEY],
+    ['MAIL_FROM_ADDRESS', env.MAIL_FROM_ADDRESS],
+  ]);
+
+  return { provider: 'resend', complete: missing.length === 0, missing, publicUrl: null };
 }

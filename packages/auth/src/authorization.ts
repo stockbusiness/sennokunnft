@@ -118,6 +118,19 @@ export const ACTIONS = [
   // ⚠️ **やり直しは運営だけ。** 発行のやり直しも再配送も、外部へ
   //    実際に送る操作である。見るのと動かすのを分ける。
   'operations.retry',
+  // --- 本番販売ガード（P0-7）---
+  // ⚠️ **閲覧は閲覧者にも開く。** 「本番販売を始めてよい状態か」は
+  //    監査の対象そのもの。出るのは条件の充足状況までで、鍵は含まない。
+  'production.view',
+  /*
+    ⚠️ **証跡を残せるのはオーナーだけ**（下の `OWNER_ONLY_ACTIONS`）。
+       これは「通し試験を確かめた」「本番販売を承認する」と署名する行為で、
+       押した人が責任を引き受けることそのものである。運営の 1 人が
+       乗っ取られただけで本番販売が始められる状態にしない。
+  */
+  'production.attest',
+  // ⚠️ 試し送りは運営の日常業務。宛先は運営自身の業務用アドレスに限る。
+  'production.mail_check',
   // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
   // ⚠️ 下書きは運営スタッフが書ける。**公開はオーナーだけ**（下の
   //    `OWNER_ONLY_ACTIONS`）。公開した版は取り消せず、そこに書いた
@@ -294,6 +307,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'notification.resend',
     'operations.view',
     'operations.retry',
+    'production.view',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'production.attest',
+    'production.mail_check',
     'legal.view',
     'legal.edit',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
@@ -333,6 +350,11 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'notification.view',
     // ⚠️ 見るだけ。やり直しはできない。
     'operations.view',
+    /*
+      ⚠️ **見るだけ。証跡は残せない。** 「本番販売を始めてよい状態か」を
+         確かめるのは監査の仕事そのものだが、承認するのは責任者の仕事。
+    */
+    'production.view',
     // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
     //    確かめるのは、まさに監査の仕事。
     'legal.view',
@@ -392,6 +414,12 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
        無い」を作れる。締める（`payout.manage`）人と分ける。
   */
   'payout.mark_paid',
+  /*
+    ⚠️ **本番販売を始めてよいと署名する操作**（P0-7）。押した記録が
+       10 条件のうち 2 つを埋める。運営の 1 人が乗っ取られただけで
+       本番販売が始められる状態にしない。
+  */
+  'production.attest',
 ];
 
 const OWNERSHIP_RULES: Readonly<Partial<Record<Action, { readonly bypass?: Action }>>> = {

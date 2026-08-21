@@ -366,6 +366,23 @@ export type {
   RetryIssuanceResponse,
 } from './operations';
 
+// --- 本番販売ガード（P0-7） -----------------------------------------------
+export {
+  attestationListResponseSchema,
+  attestationSchema,
+  mailCheckResponseSchema,
+  productionReadinessCheckSchema,
+  productionReadinessResponseSchema,
+  recordAttestationRequestSchema,
+} from './production';
+export type {
+  AttestationListResponse,
+  AttestationView,
+  MailCheckResponse,
+  ProductionReadinessCheckView,
+  ProductionReadinessResponse,
+  RecordAttestationRequest,
+} from './production';
 // --- 顧客サポート（P1-1） -------------------------------------------------
 export {
   accountNoteSchema,

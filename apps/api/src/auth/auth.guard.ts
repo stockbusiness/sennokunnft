@@ -12,6 +12,7 @@ import type { Request } from 'express';
 import {
   ANONYMOUS,
   canAtRoleLevel,
+  MFA_RECORD_INTERVAL_MS,
   type AccountLookupPort,
   type Action,
   type Actor,
@@ -225,6 +226,22 @@ export class AuthGuard implements CanActivate {
       await this.accounts.rememberEmailHash(account.id, emailHash);
     }
 
+    /*
+      二要素で入ったことを覚える（P0-7 の 8 番目・`UD-801` の段 1）。
+
+      ⚠️ **ここでは誰も拒否しない。** 記録するだけ。拒否を入れるのは
+         オーナーが登録を済ませたあと（段 3）。順序を飛ばすと、
+         **オーナーが自分の管理画面から締め出される**——人事権を持つのは
+         オーナーだけなので、締め出されると DB を直接触る以外に戻る道がない。
+
+      ⚠️ **毎回書かない。** 要求のたびに書くと、読むだけの画面が全部
+         書き込みになる。判定は日の単位で見るので、1 時間で十分細かい。
+    */
+    const now = this.clock.now();
+    if (verified.identity.assuranceLevel === 'aal2' && needsMfaRecord(account.lastAal2At, now)) {
+      await this.accounts.rememberMfa(account.id, now);
+    }
+
     return {
       // ロールは DB の値。トークンのクレームは使わない。
       role: account.role,
@@ -246,4 +263,21 @@ export function extractBearerToken(header: string | undefined): string | null {
     return null;
   }
   return value;
+}
+
+/**
+ * 二要素の記録を書き直すか。
+ *
+ * ⚠️ **`undefined` は「読んでいない」であって「無い」ではない。**
+ * 古い実装や試験の代替が値を返さないときに、毎回書き込みへ倒すと
+ * 読むだけの要求が全部書き込みになる。読めないなら書かない。
+ */
+function needsMfaRecord(lastAal2At: Date | null | undefined, now: Date): boolean {
+  if (lastAal2At === undefined) {
+    return false;
+  }
+  if (lastAal2At === null) {
+    return true;
+  }
+  return now.getTime() - lastAal2At.getTime() >= MFA_RECORD_INTERVAL_MS;
 }

@@ -168,6 +168,18 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 404 ではない。「無い」のではなく「この配備では使えない」。
   ISSUANCE_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
   WALLET_DELIVERY_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+
+  // --- 本番販売ガード（P0-7）---
+  MAIL_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  MAIL_RECIPIENT_MISSING: HttpStatus.UNPROCESSABLE_ENTITY,
+  PRODUCTION_CREDENTIAL_MISSING: HttpStatus.UNPROCESSABLE_ENTITY,
+  ATTESTATION_NOTE_TOO_LONG: HttpStatus.UNPROCESSABLE_ENTITY,
+  ATTESTATION_NOTE_REQUIRED: HttpStatus.UNPROCESSABLE_ENTITY,
+  /*
+    ⚠️ **403 ではなく 409。** 権限の問題ではない。「いまはまだその状態に
+       なっていない」であって、押した人が悪いわけではない。
+  */
+  PRODUCTION_NOT_READY: HttpStatus.CONFLICT,
   // ⚠️ 状態が合わないので断る。要求そのものは正しい形をしている。
   EMAIL_CHANGE_NOT_ALLOWED: HttpStatus.CONFLICT,
 };
@@ -346,6 +358,20 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   WALLET_DELIVERY_UNAVAILABLE:
     'この環境ではウォレットへの再送ができません。外部サービスの設定をご確認ください。',
 
+  // --- 本番販売ガード（P0-7）---
+  MAIL_UNAVAILABLE: 'この環境ではメールを送れません。送信の設定をご確認ください。',
+  MAIL_RECIPIENT_MISSING:
+    'あなたの業務用メールアドレスが登録されていないため、試し送りができません。スタッフの画面でご登録ください。',
+  PRODUCTION_CREDENTIAL_MISSING:
+    '受付中の決済の鍵がありません。先に決済の鍵を有効化してから記録してください。',
+  ATTESTATION_NOTE_TOO_LONG: '覚え書きが長すぎます。要点だけを書いてください。',
+  ATTESTATION_NOTE_REQUIRED: '「不成立」として記録するときは、何が起きたかを書いてください。',
+  /*
+    ⚠️ **購入者に理由の内訳を出さない。** どの条件が欠けているかは
+       運営の内部事情である。
+  */
+  PRODUCTION_NOT_READY:
+    'ただいま販売の準備中です。恐れ入りますが、しばらくしてからお試しください。',
   // --- 顧客サポート（P1-1）---
   // ⚠️ 「できません」で終わらせず、次に何を見ればよいかを書く。
   EMAIL_CHANGE_NOT_ALLOWED:

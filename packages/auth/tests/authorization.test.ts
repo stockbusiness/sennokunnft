@@ -127,6 +127,12 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   // ⚠️ 監査役も「いま何が滞っているか」を見られる。動かすことはできない。
   'operations.view': { anonymous: false, buyer: false, operator: true, auditor: true },
   'operations.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // --- 本番販売ガード（P0-7）---
+  // ⚠️ 監査役も「本番販売を始めてよい状態か」を見られる。承認はできない。
+  'production.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ **印が無ければ operator でも拒否。** 押した記録が 10 条件のうち 2 つを埋める。
+  'production.attest': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'production.mail_check': { anonymous: false, buyer: false, operator: true, auditor: false },
   // --- 法務文書 ---
   // ⚠️ 監査役も過去の版を見られる。「その時点でどう書いてあったか」を
   //    確かめるのは監査の仕事そのもの。
@@ -331,6 +337,8 @@ describe('オーナーの印', () => {
     'payment_credential.manage',
     // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
     'settlement.manage',
+    // ⚠️ 本番販売を始めてよいと署名する（P0-7）。
+    'production.attest',
   ] as const;
 
   for (const action of STAFF_ACTIONS) {

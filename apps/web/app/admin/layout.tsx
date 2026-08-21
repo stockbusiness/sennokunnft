@@ -54,6 +54,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <a href="/admin/payouts">お支払い</a>
         <a href="/admin/legal">規約・法務</a>
         <a href="/admin/consistency">記録の食い違い</a>
+        {/*
+          ⚠️ **出しっぱなしでよい。** 記録を残せるのはオーナーだけで、
+             ほかの人には「権限がありません」と出る。隠すことは保護ではない。
+        */}
+        <a href="/admin/production">本番販売の準備</a>
         <a href="/admin/audit-logs">操作の記録</a>
         <a href="/">公開ページ</a>
       </nav>

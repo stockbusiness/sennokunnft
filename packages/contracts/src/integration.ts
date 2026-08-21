@@ -1,4 +1,4 @@
-import { INTEGRATION_SERVICES } from '@sengoku/domain';
+import { CONNECTION_CHECK_KINDS, INTEGRATION_SERVICES } from '@sengoku/domain';
 import { z } from '@sengoku/validation';
 
 /**
@@ -43,7 +43,7 @@ export const connectionCheckSchema = z.object({
    * 確かめただけで、資格情報が正しいかどうかは確かめていない（要決定 06）。
    * 画面には必ず、何を確かめていないかを併記すること。
    */
-  kind: z.enum(['reachability']),
+  kind: z.enum(CONNECTION_CHECK_KINDS),
   succeeded: z.boolean(),
   /** 失敗の分類。⚠️ 外部の生の応答は入れない。 */
   failureCode: z.string().nullable(),

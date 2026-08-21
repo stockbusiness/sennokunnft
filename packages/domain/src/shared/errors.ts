@@ -308,6 +308,24 @@ export const DOMAIN_ERROR_CODES = [
   /** この配備ではウォレットへの再配送ができない（連携が無効）。 */
   'WALLET_DELIVERY_UNAVAILABLE',
 
+  // --- 本番販売ガード（P0-7） ---
+  /** この配備ではメールを送れない（送信の設定が無い）。 */
+  'MAIL_UNAVAILABLE',
+  /** 押した人に業務用アドレスが登録されていない。⚠️ 宛先は受け取らない。 */
+  'MAIL_RECIPIENT_MISSING',
+  /** 受付中の決済世代が無い。⚠️ 証跡を紐づける先が無い。 */
+  'PRODUCTION_CREDENTIAL_MISSING',
+  /** 覚え書きが長すぎる。 */
+  'ATTESTATION_NOTE_TOO_LONG',
+  /** 「不成立」には理由が要る。 */
+  'ATTESTATION_NOTE_REQUIRED',
+  /**
+   * 本番販売の条件が満たされていない（P0-7）。
+   *
+   * ⚠️ **購入者には理由の内訳を出さない。** どの条件が欠けているかは
+   * 運営の内部事情で、買おうとした方に伝えることではない。
+   */
+  'PRODUCTION_NOT_READY',
   // --- 顧客サポート（P1-1） ---
   /**
    * ご連絡先の変更申請を、いまその状態から動かせない。

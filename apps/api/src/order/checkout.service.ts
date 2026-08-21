@@ -27,6 +27,19 @@ export interface CheckoutServiceConfig {
    * 作らせないのと同じ考え方で、「売れない」ほうへ倒す。
    */
   readonly canDiscloseCheckoutTerms: () => Promise<boolean>;
+  /**
+   * 本番販売を始めてよい状態か（実運営 指示書 P0-7）。
+   *
+   * ⚠️ **画面を隠すだけにしない。** 管理画面で「準備中」と出しても、
+   * この口は直接叩ける。**API 側でも断る**のがこの引数の役目である。
+   *
+   * ⚠️ **満たしていなければ例外を投げる。** 真偽値ではなく例外にして
+   * あるのは、呼び出し側が戻り値を見忘れても止まるようにするため。
+   *
+   * ⚠️ **本番でだけ止まる。** staging では判定はするが通す。実装は
+   * `ProductionReadinessService.assertSellable`。
+   */
+  readonly assertSellable: () => Promise<void>;
 }
 
 /**
@@ -72,6 +85,16 @@ export class CheckoutService {
       ⚠️ 購入者には設定の中身を見せない。手数料率が未設定のときと
          同じ符号にして、「準備中」とだけ伝える。
     */
+    /*
+      本番販売ガード（P0-7）。
+      ⚠️ **在庫や金額より先に見る。** 売ってよい状態でないなら、そもそも
+         この申込みを受けられない。あとから弾くと、購入者に手間をかけさせて
+         から断ることになる。
+      ⚠️ **理由の内訳を購入者へ出さない。** どの条件が欠けているかは
+         運営の内部事情である。断る言葉は「準備中」で揃える。
+    */
+    await this.config.assertSellable();
+
     if (!(await this.config.canDiscloseCheckoutTerms())) {
       await this.audit.record({
         actorAccountId: input.accountId,
