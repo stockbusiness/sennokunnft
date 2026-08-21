@@ -1,5 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import type { CustomerDetailResponse, CustomerSearchResponse } from '@sengoku/contracts';
+import type {
+  CustomerDetailResponse,
+  CustomerEmailResponse,
+  CustomerSearchResponse,
+} from '@sengoku/contracts';
 import {
   addAccountNoteRequestSchema,
   customerSearchRequestSchema,
@@ -42,6 +46,28 @@ export class CustomerController {
   @RequireAction('customer.view')
   detail(@Param('accountId') accountId: string): Promise<CustomerDetailResponse> {
     return this.customers.detail(accountId);
+  }
+
+  /**
+   * ご連絡先そのものを見る（決定 2026-08-21）。
+   *
+   * ⚠️ **顧客詳細（`detail`）に混ぜていない。** 混ぜると、画面を開いた
+   * だけで全員のアドレスが流れ、監査ログが「開いた人」で埋まって
+   * **本当に読んだ人が埋もれる**。読むと決めたときだけ、この口を叩く。
+   *
+   * ⚠️ **`customer.view` では通らない。** 別の権限（`customer.view_email`）
+   * を要求する。まとめて見ることと、連絡先を読むことは別の力である。
+   *
+   * ⚠️ **この応答の値は保存されていない**（`UD-503` 維持）。認証基盤から
+   * 取り寄せて、そのまま返している。
+   */
+  @Get(':accountId/email')
+  @RequireAction('customer.view_email')
+  email(
+    @CurrentActor() actor: Actor,
+    @Param('accountId') accountId: string,
+  ): Promise<CustomerEmailResponse> {
+    return this.customers.emailOf(accountId, actor);
   }
 
   /** 申し送りを書く。⚠️ 追記のみ。直す口も消す口も無い。 */

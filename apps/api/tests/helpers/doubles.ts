@@ -104,6 +104,8 @@ import type {
   AccountNotePort,
   AccountNoteRecord,
   CustomerDirectoryPort,
+  RecipientResolverPort,
+  RecipientResolution,
   CustomerEntitlement,
   CustomerOrderRow,
   CustomerRefundRow,
@@ -2762,6 +2764,7 @@ export interface TestHarness extends AppDependencies {
   readonly customerDirectory: InMemoryCustomerDirectory;
   readonly creatorProfileDetails: InMemoryCreatorProfileDetails;
   readonly creatorEarnings: InMemoryCreatorEarnings;
+  readonly customerRecipients: InMemoryRecipientResolver;
   readonly accountNotes: InMemoryAccountNotes;
   readonly emailChangeRequests: InMemoryEmailChangeRequests;
   readonly entitlementAdmin: InMemoryEntitlementAdmin;
@@ -2981,6 +2984,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const customerDirectory = new InMemoryCustomerDirectory();
   const creatorProfileDetails = new InMemoryCreatorProfileDetails();
   const creatorEarnings = new InMemoryCreatorEarnings();
+  const customerRecipients = new InMemoryRecipientResolver();
   const accountNotes = new InMemoryAccountNotes();
   const emailChangeRequests = new InMemoryEmailChangeRequests();
   const entitlementAdmin = new InMemoryEntitlementAdmin();
@@ -3003,6 +3007,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     entitlementAdmin,
     // 顧客サポート（P1-1）。⚠️ 積んだ行を試験から覗くため、実体の型で持つ。
     customerDirectory,
+    customerRecipients,
     accountNotes,
     emailChangeRequests,
     // 作家さま運営（P1-2）。⚠️ 保存した値を試験から覗くため、実体の型で持つ。
@@ -3016,6 +3021,11 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       directory: customerDirectory,
       notes: accountNotes,
       emailChanges: emailChangeRequests,
+      /*
+        ⚠️ **繋いでいない配備を作れるようにしておく。** 試験は
+           `buildHarness()` の戻り値からこれを外して起動できる。
+      */
+      recipients: customerRecipients,
     },
     operations: {
       repository: operationsMetrics,
@@ -3941,6 +3951,29 @@ export class FakeMailTestSender {
  * ⚠️ **氏名とメールアドレスの平文を持たない。** 本物と同じく、持っていない
  * ものは返せない。
  */
+/**
+ * ご連絡先を取り寄せる口の代役（決定 2026-08-21）。
+ *
+ * ⚠️ **既定は「分からない」。** 既定で取れてしまうと、取れない道を
+ * 通る試験を書き忘れる。取れてほしい試験が明示的に置く。
+ */
+export class InMemoryRecipientResolver implements RecipientResolverPort {
+  readonly emails = new Map<string, string>();
+  /** 認証基盤へ届かない状態を作る。⚠️ 「分からない」とは別。 */
+  down = false;
+  /** 呼ばれた相手。⚠️ 押していないのに呼ばれていないかを確かめる。 */
+  readonly calls: string[] = [];
+
+  resolve(accountId: string): Promise<RecipientResolution> {
+    this.calls.push(accountId);
+    if (this.down) {
+      return Promise.resolve({ kind: 'unavailable' });
+    }
+    const email = this.emails.get(accountId);
+    return Promise.resolve(email === undefined ? { kind: 'unknown' } : { kind: 'resolved', email });
+  }
+}
+
 export class InMemoryCustomerDirectory implements CustomerDirectoryPort {
   summaries: CustomerSummary[] = [];
   entitlementRows: (CustomerEntitlement & { accountId: string })[] = [];

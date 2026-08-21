@@ -5,10 +5,13 @@ import { Notice } from '@sengoku/ui';
 import { IDENTITY_VERIFICATION_METHODS } from '@sengoku/contracts';
 import {
   addNoteAction,
+  CUSTOMER_EMAIL_IDLE,
   openEmailChangeAction,
+  revealCustomerEmailAction,
   settleEmailChangeAction,
   verifyIdentityAction,
 } from './actions';
+import type { CustomerEmailState } from './actions';
 import { verificationMethodLabel } from '../../../src/customer-copy';
 import type { AdminActionState } from '../actions';
 
@@ -211,4 +214,89 @@ export function SettleEmailChangeForm({
       </div>
     </form>
   );
+}
+
+/**
+ * ご連絡先そのものを表示する（決定 2026-08-21）。
+ *
+ * ⚠️ **押されるまで出さない。** 画面を開いただけで出すと、監査ログが
+ * 「開いた人」で埋まって**本当に読んだ人が埋もれる**。応対中に画面を
+ * 共有したときや、肩越しに見えたときにも漏れる。
+ *
+ * ⚠️ **押したことは記録に残る**（誰が・いつ・どの方の分を）。それを
+ * 押す前に書いておく。あとから知らせても遅い。
+ *
+ * ⚠️ **保存されていない値である。** 押すたびに認証基盤へ取り寄せている。
+ * 画面を閉じれば消える。
+ */
+export function RevealEmailForm({ accountId }: { readonly accountId: string }) {
+  const [state, action, pending] = useActionState(revealCustomerEmailAction, CUSTOMER_EMAIL_IDLE);
+
+  return (
+    <form className="sengoku-form" action={action}>
+      <input type="hidden" name="accountId" value={accountId} />
+      {state.status === 'idle' ? (
+        <p className="sengoku-form__hint">
+          ⚠️ 表示すると、
+          <strong>どなたが・いつ・どの方の分を見たか</strong>
+          が記録に残ります。応対に必要なときにお使いください。
+        </p>
+      ) : null}
+      <EmailResult state={state} />
+      <button className="sengoku-button sengoku-button--quiet" type="submit" disabled={pending}>
+        {pending
+          ? '取り寄せています…'
+          : state.status === 'idle'
+            ? 'ご連絡先を表示する'
+            : 'もう一度取り寄せる'}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * 取り寄せた結果。
+ *
+ * ⚠️ **「分からない」と「取れなかった」を分ける。** 前者は待っても
+ * 変わらず、後者は時間をおけば直りうる。同じ顔で出すと、応対する人が
+ * もう一度試すべきかを判断できない。
+ */
+function EmailResult({ state }: { readonly state: CustomerEmailState }) {
+  switch (state.status) {
+    case 'idle':
+      return null;
+    case 'resolved':
+      return (
+        <p className="sengoku-revealed-email">
+          {/* ⚠️ 選んで写せるようにする。打ち直しは打ち間違いのもと。 */}
+          <code>{state.email}</code>
+        </p>
+      );
+    case 'unknown':
+      return (
+        <Notice
+          tone="alert"
+          title="ご連絡先が見つかりませんでした"
+          hint="この方は認証基盤に登録されていません。時間をおいても変わりません。ご注文の内容からお調べください。"
+        />
+      );
+    case 'unavailable':
+      return (
+        <Notice
+          tone="alert"
+          title="ただいま取り寄せられませんでした"
+          hint="認証基盤へ届きませんでした。少し時間をおいて、もう一度お試しください。"
+        />
+      );
+    case 'not_configured':
+      return (
+        <Notice
+          tone="alert"
+          title="この配備では、ご連絡先を取り寄せられません"
+          hint="認証基盤への接続が設定されていません。設定が要る旨を運用担当へお伝えください。"
+        />
+      );
+    case 'error':
+      return <Notice tone="alert" title={state.error ?? '取り寄せられませんでした。'} />;
+  }
 }

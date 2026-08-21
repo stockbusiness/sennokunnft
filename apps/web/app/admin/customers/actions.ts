@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import {
   addCustomerNote,
+  fetchCustomerEmail,
   openEmailChange,
   settleEmailChange,
   verifyEmailChangeIdentity,
@@ -130,4 +131,48 @@ export async function settleEmailChangeAction(
   return {
     notice: status === 'completed' ? '変更済みとして記録しました。' : '見送りとして記録しました。',
   };
+}
+
+/**
+ * ご連絡先を取り寄せた結果（決定 2026-08-21）。
+ *
+ * ⚠️ **`AdminActionState` に相乗りさせない。** あちらの `notice` は
+ * 「操作が通りました」を伝える欄で、そこへアドレスを載せると、ほかの
+ * 操作の成功メッセージと同じ扱いになる——**そのうち画面のどこかへ
+ * 使い回される**。別の型にして、通り道を 1 本に絞る。
+ */
+export interface CustomerEmailState {
+  readonly status: 'idle' | 'resolved' | 'unknown' | 'unavailable' | 'not_configured' | 'error';
+  /** ⚠️ `status === 'resolved'` のときだけ入る。 */
+  readonly email?: string;
+  readonly error?: string;
+}
+
+export const CUSTOMER_EMAIL_IDLE: CustomerEmailState = { status: 'idle' };
+
+/**
+ * ご連絡先そのものを取り寄せる。
+ *
+ * ⚠️ **押されたときだけ動く。** 画面を開いただけでは呼ばない。開くたびに
+ * 呼ぶと、監査ログが「開いた人」で埋まり、**本当に読んだ人が埋もれる**。
+ * また、肩越しに見えてしまう場面も増える。
+ *
+ * ⚠️ **`revalidatePath` を呼ばない。** 何も変わっていないうえ、呼ぶと
+ * この結果ごと描き直されて消える。
+ *
+ * ⚠️ **取り寄せた値をここへ残さない。** 変数から出さず、そのまま返す。
+ * サーバー側でも保存していない（`UD-503`）。
+ */
+export async function revealCustomerEmailAction(
+  _previous: CustomerEmailState,
+  form: FormData,
+): Promise<CustomerEmailState> {
+  const accountId = text(form, 'accountId');
+  const result = await fetchCustomerEmail(accountId);
+  if (!result.ok) {
+    return { status: 'error', error: adminErrorMessage(result.reason, result.code) };
+  }
+  return result.data.status === 'resolved'
+    ? { status: 'resolved', email: result.data.email }
+    : { status: result.data.status };
 }

@@ -511,6 +511,17 @@ export interface AppDependencies {
     readonly directory: CustomerDirectoryPort;
     readonly notes: AccountNotePort;
     readonly emailChanges: EmailChangeRequestPort;
+    /**
+     * ご連絡先を取り寄せる口（決定 2026-08-21）。
+     *
+     * ⚠️ **省略できる。** 認証基盤へ繋いでいない配備では、応対の画面は
+     * 「この配備では取り寄せられません」と断る。**必須にすると起動しない。**
+     *
+     * ⚠️ **知らせの送信（`notification.delivery`）とは別の軸。** 送信を
+     * 止めている配備でも、問い合わせ対応でご連絡先は要る。まとめると、
+     * 送信を止めた日から応対ができなくなる。
+     */
+    readonly recipients?: RecipientResolverPort;
   };
   /**
    * 作家さま運営（P1-2）。
@@ -922,6 +933,11 @@ export class AppModule implements NestModule {
               deps.emailHasher,
               deps.clock,
               deps.audit,
+              /*
+                ⚠️ **`?? null` で正規化する。** 省略されたときに `undefined`
+                   が渡ると、`null` を待っている側の判定をすり抜ける。
+              */
+              deps.customers.recipients ?? null,
             ),
         },
         {
