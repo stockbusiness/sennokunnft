@@ -110,6 +110,19 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   // ⚠️ **印が無ければ operator でも拒否。** 公開した文面はそのまま全員へ届く。
   'notification.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
   'notification.resend': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // --- 顧客サポート（P1-1）---
+  /*
+    ⚠️ **監査役へ渡さない。** 監査は「運営が何をしたか」を見る仕事で、
+       「その方が何を買ったか」を 1 画面で見る必要は無い。まとめて
+       見えることそのものが力なので、必要のない人には渡さない。
+  */
+  'customer.view': { anonymous: false, buyer: false, operator: true, auditor: false },
+  'customer.note': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
+    ⚠️ **本人確認の記録は、乗っ取りを止める最後の砦。** 見るだけの人が
+       「確認した」と押せてはいけない。
+  */
+  'customer.email_change': { anonymous: false, buyer: false, operator: true, auditor: false },
   // --- 運営ダッシュボード（P0-6）---
   // ⚠️ 監査役も「いま何が滞っているか」を見られる。動かすことはできない。
   'operations.view': { anonymous: false, buyer: false, operator: true, auditor: true },

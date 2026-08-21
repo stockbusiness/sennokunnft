@@ -917,3 +917,42 @@ export type {
   AttestationRecord,
   ProductionReadinessPort,
 } from './ports/production';
+// --- 顧客サポート（P1-1） -------------------------------------------------
+export { CUSTOMER_ATTENTION_KEYS, customerAttentions, netPaidAmount } from './customer/profile';
+export type {
+  CustomerAttention,
+  CustomerAttentionKey,
+  CustomerEntitlement,
+  CustomerSummary,
+} from './customer/profile';
+export {
+  DUPLICATE_SIGNAL_LABELS,
+  DUPLICATE_SIGNALS,
+  rankDuplicateCandidates,
+} from './customer/duplicate';
+export type { DuplicateCandidate, DuplicateSignal } from './customer/duplicate';
+export {
+  EMAIL_CHANGE_NOTE_MAX_LENGTH,
+  EMAIL_CHANGE_STATUSES,
+  IDENTITY_VERIFICATION_LABELS,
+  IDENTITY_VERIFICATION_METHODS,
+  completeEmailChange,
+  isSettled,
+  rejectEmailChange,
+  verifyIdentity,
+} from './customer/email-change';
+export type {
+  EmailChangeDecision,
+  EmailChangeRejection,
+  EmailChangeStatus,
+  IdentityVerificationMethod,
+} from './customer/email-change';
+export type {
+  AccountNotePort,
+  AccountNoteRecord,
+  CustomerDirectoryPort,
+  CustomerOrderRow,
+  CustomerRefundRow,
+  EmailChangeRequestPort,
+  EmailChangeRequestRecord,
+} from './ports/customer';

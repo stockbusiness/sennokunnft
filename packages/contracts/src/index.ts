@@ -383,3 +383,33 @@ export type {
   ProductionReadinessResponse,
   RecordAttestationRequest,
 } from './production';
+// --- 顧客サポート（P1-1） -------------------------------------------------
+export {
+  accountNoteSchema,
+  addAccountNoteRequestSchema,
+  customerAttentionSchema,
+  customerDetailResponseSchema,
+  customerEntitlementSchema,
+  customerOrderSchema,
+  customerRefundSchema,
+  customerSearchRequestSchema,
+  customerSearchResponseSchema,
+  customerSummarySchema,
+  duplicateCandidateSchema,
+  emailChangeRequestSchema,
+  openEmailChangeRequestSchema,
+  settleEmailChangeRequestSchema,
+  verifyIdentityRequestSchema,
+  IDENTITY_VERIFICATION_METHODS,
+} from './customer';
+export type {
+  AccountNoteView,
+  CustomerAttentionView,
+  CustomerDetailResponse,
+  CustomerSearchRequest,
+  CustomerSearchResponse,
+  CustomerSummaryView,
+  DuplicateCandidateView,
+  EmailChangeRequestView,
+  IdentityVerificationMethod,
+} from './customer';

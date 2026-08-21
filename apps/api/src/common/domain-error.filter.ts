@@ -180,6 +180,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
        なっていない」であって、押した人が悪いわけではない。
   */
   PRODUCTION_NOT_READY: HttpStatus.CONFLICT,
+  // ⚠️ 状態が合わないので断る。要求そのものは正しい形をしている。
+  EMAIL_CHANGE_NOT_ALLOWED: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -370,6 +372,10 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   */
   PRODUCTION_NOT_READY:
     'ただいま販売の準備中です。恐れ入りますが、しばらくしてからお試しください。',
+  // --- 顧客サポート（P1-1）---
+  // ⚠️ 「できません」で終わらせず、次に何を見ればよいかを書く。
+  EMAIL_CHANGE_NOT_ALLOWED:
+    'この申請は、いまの状態では進められません。本人確認が済んでいるか、すでに決着していないかをご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
