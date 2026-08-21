@@ -657,9 +657,12 @@ describe('認証基盤へ繋いでいない配備', () => {
         commonUserId: null,
         status: 'active',
         orderCount: 1,
+        paidAmount: 12_000,
+        refundedAmount: 0,
         entitlementCount: 1,
-        signals: [],
-        createdAt: TEST_NOW,
+        unclaimedCount: 0,
+        firstOrderAt: TEST_NOW,
+        lastOrderAt: TEST_NOW,
       },
     ];
 
