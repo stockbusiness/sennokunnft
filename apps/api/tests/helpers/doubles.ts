@@ -121,7 +121,11 @@ import type {
   CreatorProfileRecord,
   PayoutLineDraft,
 } from '@sengoku/domain';
-import { DEFAULT_OPERATIONS_THRESHOLDS, NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
+import {
+  DEFAULT_OPERATIONS_THRESHOLDS,
+  NOTIFICATION_EVENT_TYPES,
+  NOTIFICATION_VARIABLES,
+} from '@sengoku/domain';
 import {
   canManuallyResend,
   domainError,
@@ -1218,6 +1222,7 @@ export class InMemoryLegalDocuments implements LegalDocumentRepository {
       effectiveFrom: null,
       requiresReconsent: false,
       publishedAt: null,
+      noticesEnqueuedAt: null,
       createdByAccountId: command.createdByAccountId,
       publishedByAccountId: null,
       createdAt: new Date('2026-06-01T00:00:00.000Z'),
@@ -1253,11 +1258,51 @@ export class InMemoryLegalDocuments implements LegalDocumentRepository {
       status: 'published',
       effectiveFrom: command.effectiveFrom,
       publishedAt: command.publishedAt,
+      noticesEnqueuedAt: null,
       publishedByAccountId: command.publishedByAccountId,
       requiresReconsent: command.requiresReconsent,
     };
     this.rows[index] = next;
     return Promise.resolve(next);
+  }
+  /* --- 改定の知らせ（`UD-127`）--- */
+
+  listVersionsAwaitingNotices(limit: number): Promise<readonly LegalDocumentVersion[]> {
+    const pending = this.rows
+      .filter(
+        (row) =>
+          row.noticesEnqueuedAt === null && row.requiresReconsent && row.publishedAt !== null,
+      )
+      .sort((a, b) => (a.publishedAt?.getTime() ?? 0) - (b.publishedAt?.getTime() ?? 0))
+      .slice(0, limit);
+    return Promise.resolve(pending);
+  }
+
+  /**
+   * 旧版に同意した人。
+   *
+   * ⚠️ 試験の代役なので、同意の記録は `consents` 側から差し込む。
+   * 本物は `legal_consents` を引く。
+   */
+  readonly consentedBefore = new Map<string, string[]>();
+
+  listAccountsConsentedBefore(input: {
+    readonly kind: LegalDocumentKind;
+    readonly beforeVersion: number;
+  }): Promise<readonly string[]> {
+    return Promise.resolve(
+      this.consentedBefore.get(`${input.kind}:${String(input.beforeVersion)}`) ?? [],
+    );
+  }
+
+  markNoticesEnqueued(input: { readonly id: string; readonly now: Date }): Promise<void> {
+    const row = this.rows.find((candidate) => candidate.id === input.id);
+    // ⚠️ すでに立っている印は上書きしない（本物の `updateMany` と同じ）。
+    if (row !== undefined && row.noticesEnqueuedAt === null) {
+      const index = this.rows.indexOf(row);
+      this.rows[index] = { ...row, noticesEnqueuedAt: input.now };
+    }
+    return Promise.resolve();
   }
 }
 
@@ -2793,6 +2838,7 @@ export function publishedTokushoho(): LegalDocumentVersion {
     effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
     requiresReconsent: false,
     publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+    noticesEnqueuedAt: null,
     createdByAccountId: 'account-seed',
     publishedByAccountId: 'account-seed',
     createdAt: new Date('2026-05-01T00:00:00.000Z'),
@@ -3464,17 +3510,38 @@ export class InMemoryNotificationTemplates implements NotificationTemplateReposi
   constructor(seedAll = true) {
     if (seedAll) {
       for (const eventType of NOTIFICATION_EVENT_TYPES) {
+        /*
+          ⚠️ **その種別で使える語だけを差し込む。** どの種別も
+             `{{orderNumber}}` にしていると、注文を持たない種別
+             （`legal.revised` など）で差し込む値が足りず、
+             **積まれないのに試験は通ってしまう**。
+        */
+        const first = NOTIFICATION_VARIABLES[eventType][0] ?? 'siteName';
         this.rows.push({
           eventType,
           version: 1,
-          subject: `[test] ${eventType} {{orderNumber}}`,
-          body: `本文 {{orderNumber}} / {{siteName}}`,
+          subject: `[test] ${eventType} {{${first}}}`,
+          body: `本文 {{${first}}} / {{siteName}}`,
           status: 'published',
           publishedAt: TEST_NOW,
           updatedAt: TEST_NOW,
         });
       }
     }
+  }
+
+  /** その種別の文面を用意し直す。⚠️ 取り下げたあとを試すため。 */
+  publishFor(eventType: NotificationEventType): void {
+    const first = NOTIFICATION_VARIABLES[eventType][0] ?? 'siteName';
+    this.rows.push({
+      eventType,
+      version: 1,
+      subject: `[test] ${eventType} {{${first}}}`,
+      body: `本文 {{${first}}} / {{siteName}}`,
+      status: 'published',
+      publishedAt: TEST_NOW,
+      updatedAt: TEST_NOW,
+    });
   }
 
   /** その種別の文面を取り下げる。⚠️ 「文面が無い」経路を試すため。 */
@@ -3574,7 +3641,11 @@ export class InMemoryNotifications implements NotificationOutboxPort, Notificati
       (row) =>
         row.record.eventType === input.eventType &&
         row.record.subjectType === input.subjectType &&
-        row.record.subjectId === input.subjectId,
+        row.record.subjectId === input.subjectId &&
+        // ⚠️ **宛先まで見る。** 本物の UNIQUE と同じ鍵にしておかないと、
+        //    1 つの版を大勢へ送る知らせが試験では通るのに本番で 1 通しか
+        //    積まれない、という食い違いが起きる。
+        row.record.accountId === input.accountId,
     );
     if (existing !== undefined) {
       // ⚠️ 例外にしない。業務側のトランザクションを巻き戻さない。

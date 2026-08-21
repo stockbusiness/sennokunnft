@@ -106,3 +106,16 @@ export const sendNotificationsResponseSchema = z.object({
   failedCount: z.number().int().nonnegative(),
 });
 export type SendNotificationsResponse = z.infer<typeof sendNotificationsResponseSchema>;
+
+/**
+ * 改定の知らせを積んだ結果（`UD-127`）。
+ *
+ * ⚠️ **文書の題も宛先も返さない。** これは時計が叩く口で、応答は監視の
+ * 数値として読まれる。人の情報を混ぜない。
+ */
+export const enqueueLegalNoticesResponseSchema = z.object({
+  /** 拾った版の数。⚠️ 0 は「取りこぼしが無い」——正常な状態。 */
+  versionCount: z.number().int().nonnegative(),
+  enqueuedCount: z.number().int().nonnegative(),
+});
+export type EnqueueLegalNoticesResponse = z.infer<typeof enqueueLegalNoticesResponseSchema>;

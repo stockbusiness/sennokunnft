@@ -7,6 +7,7 @@ import {
   mailErrorCodeFor,
   maskEmail,
   NOTIFICATION_EVENT_TYPES,
+  NOTIFICATION_SUBJECT_TYPES,
   NOTIFICATION_MAX_ATTEMPTS,
   referencedVariables,
   renderTemplate,
@@ -15,11 +16,16 @@ import {
 } from '../src/index';
 
 describe('知らせの種別', () => {
-  it('9 種別すべてに対象の種類が決まっている', () => {
+  it('すべての種別に対象の種類が決まっている', () => {
     for (const eventType of NOTIFICATION_EVENT_TYPES) {
-      expect(['order', 'entitlement', 'refund']).toContain(subjectTypeOf(eventType));
+      // ⚠️ 語彙そのものと突き合わせる。書き写すと、足したときに片方が古くなる。
+      expect(NOTIFICATION_SUBJECT_TYPES).toContain(subjectTypeOf(eventType));
     }
-    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(9);
+    /*
+      ⚠️ **数を書いておく。** 種別を足すのは「全購入者へ届く経路が増える」
+         ということ。ここが落ちて手が止まるのは、そのための仕掛けである。
+    */
+    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(10);
   });
 
   it('⚠️ 差し込み語彙に氏名・メール・住所を入れない（UD-503）', () => {
@@ -28,9 +34,15 @@ describe('知らせの種別', () => {
     for (const eventType of NOTIFICATION_EVENT_TYPES) {
       for (const variable of allowedVariables(eventType)) {
         const lower = variable.toLowerCase();
+        /*
+          ⚠️ **人を指す語だけを弾く。** `siteName`（事業者名）・
+             `artworkTitle`（作品名）・`documentName`（文書の題）は、
+             どれも人ではない。除外を足すときは、**それが人を指さないこと**を
+             確かめてから足すこと。
+        */
+        const notAboutPeople = ['sitename', 'artworktitle', 'documentname'];
         for (const word of forbidden) {
-          // `siteName` / `artworkTitle` は許す。人を指す語だけを弾く。
-          if (lower === 'sitename' || lower === 'artworktitle') continue;
+          if (notAboutPeople.includes(lower)) continue;
           expect(lower.includes(word), `${eventType}.${variable}`).toBe(false);
         }
       }

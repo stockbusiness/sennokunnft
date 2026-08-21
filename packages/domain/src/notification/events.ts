@@ -36,6 +36,17 @@ export const NOTIFICATION_EVENT_TYPES = [
   'refund.requested',
   /** ご返金が完了した。 */
   'refund.completed',
+  /**
+   * 法務文書を改めた（`UD-127`）。
+   *
+   * ⚠️ **再同意が要る改定のときだけ送る。** 誤字を直しただけで全員へ
+   * 送ると、次に本当に大事な改定を送ったときに読まれなくなる。
+   *
+   * ⚠️ **「次のログインで同意していただきます」だけでは足りない。**
+   * ログインしない方には、改まったこと自体が伝わらない。約束の中身が
+   * 変わるのに、黙って変えたことになる。
+   */
+  'legal.revised',
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
@@ -50,7 +61,19 @@ export function isNotificationEventType(value: string): value is NotificationEve
  * 一意にする。注文IDだけで一意にすると、同じ注文の決済成功と返金完了が
  * ぶつかる。
  */
-export const NOTIFICATION_SUBJECT_TYPES = ['order', 'entitlement', 'refund'] as const;
+export const NOTIFICATION_SUBJECT_TYPES = [
+  'order',
+  'entitlement',
+  'refund',
+  /**
+   * 法務文書の版（`UD-127`）。
+   *
+   * ⚠️ **版そのものを指す。** 「利用規約」を指すと、改定のたびに同じ鍵に
+   * なり、2 回目以降が重複として捨てられる。**版で分ければ、改定ごとに
+   * 1 通ずつ届く。**
+   */
+  'legal_version',
+] as const;
 export type NotificationSubjectType = (typeof NOTIFICATION_SUBJECT_TYPES)[number];
 
 /** その種別が指す対象の種類。⚠️ 送る側で取り違えないよう、ここで固定する。 */
@@ -64,6 +87,7 @@ const SUBJECT_OF: Readonly<Record<NotificationEventType, NotificationSubjectType
   'wallet.delivery_stalled': 'entitlement',
   'refund.requested': 'refund',
   'refund.completed': 'refund',
+  'legal.revised': 'legal_version',
 };
 
 export function subjectTypeOf(eventType: NotificationEventType): NotificationSubjectType {
@@ -91,6 +115,13 @@ export const NOTIFICATION_VARIABLES: Readonly<Record<NotificationEventType, read
   'wallet.delivery_stalled': ['orderNumber', 'artworkTitle', 'contactUrl'],
   'refund.requested': ['orderNumber', 'orderUrl'],
   'refund.completed': ['orderNumber', 'refundAmount', 'orderUrl'],
+  /*
+    ⚠️ **本文そのものを差し込ませない**（`UD-127`）。規約は長く、メールへ
+       写すと版が 2 か所に増える。**読みに行く先**（`legalUrl`）を渡す。
+    ⚠️ **`effectiveFrom` を渡す。** 「いつから変わるのか」が無い改定通知は、
+       読んだ方が何もできない。
+  */
+  'legal.revised': ['documentName', 'effectiveFrom', 'legalUrl'],
 };
 
 /** すべての種別で共通して使える語。⚠️ 事業者名は文面ごとに変えない。 */

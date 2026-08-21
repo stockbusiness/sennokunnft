@@ -431,6 +431,7 @@ describe('注文時点の規約の版', () => {
       effectiveFrom: new Date(TEST_NOW.getTime() - 1000),
       requiresReconsent: false,
       publishedAt: new Date(TEST_NOW.getTime() - 1000),
+      noticesEnqueuedAt: null,
       createdByAccountId: 'account-owner',
       publishedByAccountId: 'account-owner',
       createdAt: TEST_NOW,

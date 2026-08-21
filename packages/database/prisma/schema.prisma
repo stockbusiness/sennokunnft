@@ -307,6 +307,14 @@ model LegalDocumentVersion {
   /// ⚠️ 下書きには立たない（CHECK で縛る）。
   requiresReconsent    Boolean   @default(false) @map("requires_reconsent")
   publishedAt          DateTime? @map("published_at") @db.Timestamptz(6)
+  /// 改定の知らせを積み終えた時刻（`UD-127`）。
+  /// ⚠️ **公開は取り消せない。** 積むのは公開のあとなので、そのあいだに
+  /// 落ちると誰にも届かない。掃き寄せ（cron）が拾い直せるよう、
+  /// 「積み終えたか」を版そのものに持たせる。
+  /// ⚠️ 途中で落ちても印は立たない。積み直しは安全（積む側の UNIQUE が弾く）。
+  /// ⚠️ 掃き寄せ用の**部分索引**は Prisma では表せない。手書きの
+  /// マイグレーション `20260821220000_legal_revision_notice` にある。
+  noticesEnqueuedAt    DateTime? @map("notices_enqueued_at") @db.Timestamptz(6)
   createdByAccountId   String    @map("created_by_account_id") @db.Uuid
   publishedByAccountId String?   @map("published_by_account_id") @db.Uuid
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -350,6 +358,9 @@ model LegalConsent {
 
   /// 同じ版へ二重に押しても増やさない。
   @@unique([accountId, versionId])
+  /// 「その文書の、古い版に同意した人」を引く（`UD-127`）。
+  /// ⚠️ `version` まで入れる。種別だけだと、改定のたびに同意の全行を読む。
+  @@index([kind, version, accountId], map: "legal_consents_kind_version_account_idx")
   @@index([accountId, kind, version(sort: Desc)])
   @@map("legal_consents")
 }
@@ -399,8 +410,8 @@ model PaymentCredential {
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  registeredBy  Account        @relation("PaymentCredentialRegistrar", fields: [registeredByAccountId], references: [id], onDelete: Restrict)
-  activatedBy   Account?       @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
+  registeredBy  Account                 @relation("PaymentCredentialRegistrar", fields: [registeredByAccountId], references: [id], onDelete: Restrict)
+  activatedBy   Account?                @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
   payments      Payment[]
   webhookEvents WebhookEvent[]
   attestations  ProductionAttestation[]
@@ -1488,7 +1499,12 @@ model NotificationDelivery {
   account Account @relation("NotificationRecipient", fields: [accountId], references: [id], onDelete: Restrict)
 
   /// ★ 重複送信を止める最後の砦。同じ種別・同じ対象は 1 通だけ。
-  @@unique([eventType, subjectType, subjectId], map: "notification_deliveries_event_subject_unique")
+  /// 重複送信を止める最後の砦。
+  /// ⚠️ **宛先まで入れる**（`UD-127`）。1 つの版を大勢へ送る知らせがあるため、
+  /// 対象だけを鍵にすると 1 人目しか積まれない。止めたいのは「同じ知らせが
+  /// 同じ人へ 2 通届くこと」であって、「1 つの対象について 2 人へ届くこと」
+  /// ではない。
+  @@unique([eventType, subjectType, subjectId, accountId], map: "notification_deliveries_event_subject_account_unique")
   @@index([status, nextRetryAt])
   @@index([accountId, createdAt])
   @@index([subjectId])
@@ -1592,23 +1608,23 @@ model EmailChangeRequest {
 /// ⚠️ **すべて任意。** 埋めないと売れない作りにすると、作りたい人が最初の
 /// 一歩で止まる。
 model CreatorProfile {
-  accountId String @id @map("account_id") @db.Uuid
+  accountId     String   @id @map("account_id") @db.Uuid
   /// 屋号・ショップ名。⚠️ **一意ではない**（表示名がその役目を持つ）。
-  shopName  String? @map("shop_name")
+  shopName      String?  @map("shop_name")
   /// 紹介文。⚠️ HTML は保存の時点で断る（アプリ側で検証）。
-  bio       String?
+  bio           String?
   /// SNS・Web サイト。⚠️ `https` のものだけ（アプリ側で検証）。
   /// 形は `[{ label, url }]`。件数の上限は CHECK で縛る。
-  links     Json    @default("[]")
+  links         Json     @default("[]")
   /// 画像の保管庫の鍵。⚠️ URL ではなく鍵で持つ（保管庫を替えられるように）。
-  iconKey   String? @map("icon_key")
-  coverKey  String? @map("cover_key")
+  iconKey       String?  @map("icon_key")
+  coverKey      String?  @map("cover_key")
   /// インボイス（適格請求書発行事業者）の登録番号。
   /// ⚠️ **形だけを確かめる**（`T` + 13 桁）。実在は国税庁の公表サイトでしか
   /// 分からず、こちらでは確かめられない。確認済みと表示しない。
-  invoiceNumber String? @map("invoice_number")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  invoiceNumber String?  @map("invoice_number")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 

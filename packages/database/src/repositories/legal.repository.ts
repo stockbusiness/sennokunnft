@@ -119,6 +119,51 @@ export class PrismaLegalDocumentRepository implements LegalDocumentRepository {
     }
     return this.findById(command.id);
   }
+
+  /* --- 改定の知らせ（`UD-127`）--- */
+
+  async listVersionsAwaitingNotices(limit: number): Promise<readonly LegalDocumentVersion[]> {
+    const rows = await this.prisma.legalDocumentVersion.findMany({
+      where: {
+        // ⚠️ 部分索引と同じ条件で引く。ずらすと索引に当たらない。
+        noticesEnqueuedAt: null,
+        requiresReconsent: true,
+        publishedAt: { not: null },
+      },
+      // ⚠️ 古いものから。取りこぼしを長く放置しない。
+      orderBy: { publishedAt: 'asc' },
+      take: limit,
+    });
+    return rows.map(toDomain);
+  }
+
+  async listAccountsConsentedBefore(input: {
+    readonly kind: LegalDocumentKind;
+    readonly beforeVersion: number;
+  }): Promise<readonly string[]> {
+    /*
+      ⚠️ **`distinct` を使う。** 同じ方が版 1・版 2 と同意していれば
+         2 行ある。そのまま積むと、同じ人へ 2 通届く（積む側の UNIQUE で
+         止まるが、無駄な問い合わせが会員数ぶん走る）。
+    */
+    const rows = await this.prisma.legalConsent.findMany({
+      where: { kind: input.kind, version: { lt: input.beforeVersion } },
+      select: { accountId: true },
+      distinct: ['accountId'],
+    });
+    return rows.map((row) => row.accountId);
+  }
+
+  async markNoticesEnqueued(input: { readonly id: string; readonly now: Date }): Promise<void> {
+    /*
+      ⚠️ **まだ立っていない行にだけ立てる。** 掃き寄せと公開の直後が
+         同時に走っても、印の時刻が上書きされない。
+    */
+    await this.prisma.legalDocumentVersion.updateMany({
+      where: { id: input.id, noticesEnqueuedAt: null },
+      data: { noticesEnqueuedAt: input.now },
+    });
+  }
 }
 
 interface LegalRow {
@@ -132,6 +177,7 @@ interface LegalRow {
   readonly effectiveFrom: Date | null;
   readonly requiresReconsent: boolean;
   readonly publishedAt: Date | null;
+  readonly noticesEnqueuedAt: Date | null;
   readonly createdByAccountId: string;
   readonly publishedByAccountId: string | null;
   readonly createdAt: Date;
@@ -157,6 +203,7 @@ function toDomain(row: LegalRow): LegalDocumentVersion {
     effectiveFrom: row.effectiveFrom,
     requiresReconsent: row.requiresReconsent,
     publishedAt: row.publishedAt,
+    noticesEnqueuedAt: row.noticesEnqueuedAt,
     createdByAccountId: row.createdByAccountId,
     publishedByAccountId: row.publishedByAccountId,
     createdAt: row.createdAt,

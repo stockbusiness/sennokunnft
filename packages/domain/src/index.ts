@@ -832,6 +832,15 @@ export type {
 export { maskEmail } from './notification/recipient';
 export type { RecipientResolution } from './notification/recipient';
 
+// 法務文書の改定通知（`UD-127`）。
+export {
+  audienceFor,
+  LEGAL_NOTICE_BATCH_SIZE,
+  revisionValues,
+  shouldNotifyRevision,
+} from './notification/legal-revision';
+export type { RevisionAudience } from './notification/legal-revision';
+
 export type {
   MailSenderPort,
   NotificationEnqueueInput,
