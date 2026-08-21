@@ -9,6 +9,7 @@ import {
   createListing,
   publishArtwork,
   suspendListing,
+  saveMyPayoutAccount,
   saveMyProfileDetail,
   updateMyProfile,
   uploadArtworkImage,
@@ -262,6 +263,35 @@ export async function updateShopProfileAction(
     bio: bio === '' ? null : bio,
     links,
     invoiceNumber: invoiceNumber === '' ? null : invoiceNumber,
+  });
+  if (!result.ok) {
+    return fail(result);
+  }
+
+  revalidatePath('/creator/shop');
+  return { done: true };
+}
+
+/**
+ * お振込先を登録する・差し替える（P1-3）。
+ *
+ * ⚠️ **誰の分かをフォームから受け取らない。** API がトークンから決める。
+ *
+ * ⚠️ **検証を画面側に書かない。** 桁数・カナかどうか・空白の落とし方は
+ * すべて API 側の判定が正。2 か所に書くと必ずずれる。
+ */
+export async function savePayoutAccountAction(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const accountType = text(form, 'accountType');
+  const result = await saveMyPayoutAccount({
+    bankName: text(form, 'bankName'),
+    branchName: text(form, 'branchName'),
+    // ⚠️ 知らない値は既定へ寄せる。API 側でも語彙を縛っている。
+    accountType: accountType === 'checking' ? 'checking' : 'ordinary',
+    accountNumber: text(form, 'accountNumber'),
+    accountHolderKana: text(form, 'accountHolderKana'),
   });
   if (!result.ok) {
     return fail(result);

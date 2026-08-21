@@ -1,20 +1,24 @@
 import { Notice, PageHeader, StatusBadge } from '@sengoku/ui';
-import { fetchMyProfileDetail } from '../../../src/creator-client';
+import { fetchMyPayoutAccount, fetchMyProfileDetail } from '../../../src/creator-client';
 import { CREATOR_COPY, creatorErrorMessage } from '../../../src/creator-copy';
 import { formatJst } from '../../../src/customer-copy';
+import { PayoutAccountForm } from '../payout-account-form';
 import { ShopProfileForm } from '../shop-form';
 
 /**
  * お店の情報とご準備の状況（実運営 指示書 P1-2）。
  *
- * ⚠️ **「まだ無いもの」を、無いと書く。** お振込先の登録は P1-3 で、
- * この画面には無い。「未登録」とだけ出すと、登録する場所を探させてしまう。
+ * ⚠️ **お振込先はこの画面で登録する**（P1-3・`UD-124` 決定 2026-08-21）。
+ * 本人確認書類は取らない——**取らないと決めたものは、入力欄も作らない**。
  *
  * ⚠️ **ここで「売らせない」判定をしない。** ご準備の状況は案内であって、
  * 門ではない。門にすると、判定が画面と API の 2 か所に分かれる。
  */
 export default async function CreatorShopPage() {
-  const profile = await fetchMyProfileDetail();
+  const [profile, payoutAccount] = await Promise.all([
+    fetchMyProfileDetail(),
+    fetchMyPayoutAccount(),
+  ]);
 
   if (!profile.ok) {
     return (
@@ -73,17 +77,33 @@ export default async function CreatorShopPage() {
         )}
       </section>
 
-      {/* --- お振込先（P1-3）--- */}
+      {/* --- お振込先（P1-3・`UD-124` 決定 2026-08-21）--- */}
       <section className="sengoku-panel">
         <h2 className="sengoku-panel__title">{CREATOR_COPY.payoutAccountTitle}</h2>
-        {/*
-          ⚠️ **「未登録」とだけ出さない。** 探しても見つからない。
-             まだ用意できていないことを、こちらから言う。
-        */}
-        <Notice
-          title={CREATOR_COPY.payoutAccountPending}
-          hint={CREATOR_COPY.payoutAccountPendingHint}
-        />
+        <p className="sengoku-form__hint">{CREATOR_COPY.payoutAccountDescription}</p>
+
+        {!payoutAccount.ok ? (
+          /*
+            ⚠️ **読めなかったときは、フォームごと出さない。** 空欄を初期値に
+               すると、登録済みの方が押した拍子に**別の口座へ書き換わる**。
+               お金の行き先が変わるので、いちばん危ない取り違えである。
+          */
+          <Notice
+            tone="alert"
+            title={CREATOR_COPY.payoutAccountUnavailable}
+            hint={CREATOR_COPY.payoutAccountUnavailableHint}
+          />
+        ) : (
+          <>
+            {payoutAccount.data.account === null ? (
+              <Notice
+                title={CREATOR_COPY.payoutAccountMissing}
+                hint={CREATOR_COPY.payoutAccountMissingHint}
+              />
+            ) : null}
+            <PayoutAccountForm current={payoutAccount.data.account} />
+          </>
+        )}
       </section>
 
       {/* --- お店の情報 --- */}

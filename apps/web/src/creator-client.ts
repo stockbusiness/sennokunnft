@@ -4,6 +4,7 @@ import {
   creatorEarningsDetailResponseSchema,
   creatorEarningsResponseSchema,
   creatorProfileDetailSchema,
+  payoutAccountResponseSchema,
   creatorProfileSchema,
   uploadImageResponseSchema,
   type CreatorArtwork,
@@ -11,6 +12,7 @@ import {
   type CreatorEarningsResponse,
   type CreatorListing,
   type CreatorProfileDetailView,
+  type PayoutAccountResponse,
   type CreatorProfileView,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
@@ -324,4 +326,26 @@ export async function fetchMyEarningsCsv(
     return { ok: false, reason: 'unavailable' };
   }
   return { ok: true, data: { body: await response.text() } };
+}
+
+// --- お振込先（P1-3・`UD-124` 決定 2026-08-21）---------------------------
+
+/*
+  ⚠️ **どちらの口にも「誰の分か」を渡さない。** アカウントは API 側が
+     トークンから取る。渡せる形にすると、**そこが他人の支払先を差し替える
+     道になる**——この仕組みでいちばん実入りのある攻撃である。
+*/
+
+export function fetchMyPayoutAccount(): Promise<CreatorResult<PayoutAccountResponse>> {
+  return call('/api/v1/creator/payout-account', payoutAccountResponseSchema);
+}
+
+export function saveMyPayoutAccount(input: {
+  bankName: string;
+  branchName: string;
+  accountType: 'ordinary' | 'checking';
+  accountNumber: string;
+  accountHolderKana: string;
+}): Promise<CreatorResult<PayoutAccountResponse>> {
+  return call('/api/v1/creator/payout-account', payoutAccountResponseSchema, json(input, 'PUT'));
 }
