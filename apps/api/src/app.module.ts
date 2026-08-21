@@ -52,6 +52,9 @@ import type {
   NotificationOutboxPort,
   NotificationTemplateRepository,
   RecipientResolverPort,
+  OperationsThresholds,
+  OperationsMetricsPort,
+  EntitlementAdminPort,
 } from '@sengoku/domain';
 import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
@@ -134,6 +137,8 @@ import { NotificationService, NOTIFICATION_CONFIG } from './notification/notific
 import { NotificationSendService } from './notification/send.service';
 import { BuyerNotifier } from './notification/buyer-notifier';
 import { NotificationSweepService } from './notification/sweep.service';
+import { OperationsController } from './operations/operations.controller';
+import { OperationsDashboardService } from './operations/dashboard.service';
 import {
   AdminSettlementController,
   SETTLEMENT_CONFIG,
@@ -447,6 +452,20 @@ export interface AppDependencies {
     };
     readonly logger: Logger;
   };
+  /**
+   * 運営ダッシュボード（P0-6）。
+   *
+   * ⚠️ **省略できない。** 省略できるようにすると、指標の見えない配備が
+   * 「正常」に見える。止まっていることに誰も気づけない状態そのものが、
+   * この機能で塞ぎたかった穴である。
+   */
+  readonly operations: {
+    readonly repository: OperationsMetricsPort;
+    readonly entitlements: EntitlementAdminPort;
+    readonly thresholds: OperationsThresholds;
+    /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
+    readonly jobKeys: readonly string[];
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -572,6 +591,8 @@ export class AppModule implements NestModule {
         OperationsReviewController,
         // 知らせの文面と送信履歴（P0-4）。⚠️ 積む口も送る口もここには無い。
         NotificationController,
+        // 運営ダッシュボード（P0-6）。⚠️ 見るのと動かすので権限が違う。
+        OperationsController,
       ],
       providers: [
         {
@@ -768,6 +789,33 @@ export class AppModule implements NestModule {
               },
             ]),
         {
+          provide: OperationsDashboardService,
+          /*
+            ⚠️ **やり直しの相手は `optional`。** 発行も配送も、繋いで
+               いない配備では provider ごと存在しない。必須にすると起動しない。
+               口は生やしたまま「この配備では押せません」と断る。
+          */
+          inject: [
+            EntitlementIssuanceService,
+            { token: WalletAutoDeliveryService, optional: true },
+          ],
+          useFactory: (
+            issuance: EntitlementIssuanceService,
+            autoDelivery: WalletAutoDeliveryService | undefined,
+          ): OperationsDashboardService =>
+            new OperationsDashboardService(
+              deps.operations.repository,
+              deps.operations.entitlements,
+              deps.clock,
+              deps.audit,
+              deps.operations.thresholds,
+              deps.operations.jobKeys,
+              issuance,
+              // ⚠️ `undefined` を `null` へ寄せる（P0-2 で同型の不具合を出した）。
+              autoDelivery ?? null,
+            ),
+        },
+        {
           provide: NotificationAdminService,
           useFactory: () =>
             new NotificationAdminService(
@@ -902,6 +950,14 @@ export class AppModule implements NestModule {
                   autoDelivery: autoDelivery ?? null,
                   revocationReconcile: revocationReconcile ?? null,
                   notificationSend: notificationSend ?? null,
+                  /*
+                    時計仕掛けの生死を記録する先（P0-6）。
+                    ⚠️ **`null` にしない。** 記録が無いと、運営の画面では
+                       「一度も成功していない」と「そもそも記録していない」が
+                       区別できない。
+                  */
+                  jobRuns: deps.operations.repository,
+                  clock: deps.clock,
                 }),
               },
             ]),

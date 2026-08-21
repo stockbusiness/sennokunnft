@@ -847,3 +847,37 @@ export type {
   NotificationTemplateRepository,
   RecipientResolverPort,
 } from './ports/notification';
+
+// --- 運営ダッシュボード（P0-6） -------------------------------------------
+export {
+  DEFAULT_OPERATIONS_THRESHOLDS,
+  JOB_LABELS,
+  OPERATIONS_SEVERITIES,
+  buildIndicators,
+  overallSeverity,
+} from './operations/dashboard';
+export type {
+  JobHeartbeat,
+  OperationsCounts,
+  OperationsIndicator,
+  OperationsSeverity,
+  OperationsThresholds,
+} from './operations/dashboard';
+
+export {
+  CONSISTENCY_CHECK_KEYS,
+  CONSISTENCY_SAMPLE_LIMIT,
+  buildConsistencyFindings,
+} from './operations/consistency';
+export type {
+  ConsistencyCheckKey,
+  ConsistencyCounts,
+  ConsistencyFinding,
+} from './operations/consistency';
+
+export type {
+  EntitlementAdminDetailRecord,
+  EntitlementAdminPort,
+  EntitlementAdminRecord,
+  OperationsMetricsPort,
+} from './ports/operations';

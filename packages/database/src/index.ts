@@ -83,3 +83,11 @@ export {
 } from './repositories/notification-history.repository';
 export { PrismaNotificationSweepRepository } from './repositories/notification-sweep.repository';
 export type { NotifiableEntitlement } from './repositories/notification-sweep.repository';
+export { PrismaOperationsRepository } from './repositories/operations.repository';
+export { PrismaEntitlementAdminRepository } from './repositories/entitlement-admin.repository';
+export type {
+  EntitlementAdminDetail,
+  EntitlementAdminPage,
+  EntitlementAdminQuery,
+  EntitlementAdminRow,
+} from './repositories/entitlement-admin.repository';

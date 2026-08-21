@@ -67,6 +67,20 @@ import {
   type SaveLegalDraftRequest,
   type AdminOrderListResponse,
   type AdminOrderDetail,
+  consistencyResponseSchema,
+  entitlementAdminDetailSchema,
+  entitlementAdminListResponseSchema,
+  notificationHistoryListResponseSchema,
+  operationsDashboardResponseSchema,
+  redeliverResponseSchema,
+  retryIssuanceResponseSchema,
+  type ConsistencyResponse,
+  type EntitlementAdminDetailView,
+  type EntitlementAdminListResponse,
+  type NotificationHistoryListResponse,
+  type OperationsDashboardResponse,
+  type RedeliverResponse,
+  type RetryIssuanceResponse,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
@@ -845,3 +859,97 @@ export function actOnPaymentCredential(
     json({ confirmation }, 'POST'),
   );
 }
+
+// --- 運営ダッシュボード（P0-6） -------------------------------------------
+
+/** 朝いちばんに見る画面。⚠️ 個人情報は返らない。 */
+export function fetchOperationsDashboard(): Promise<AdminResult<OperationsDashboardResponse>> {
+  return callAdmin('/api/v1/admin/operations/dashboard', operationsDashboardResponseSchema);
+}
+
+/** 記録どうしの食い違い。⚠️ 直さない。数えるだけ。 */
+export function fetchConsistency(): Promise<AdminResult<ConsistencyResponse>> {
+  return callAdmin('/api/v1/admin/operations/consistency', consistencyResponseSchema);
+}
+
+export interface EntitlementFilter {
+  readonly status?: string;
+  readonly walletDeliveryStatus?: string;
+  readonly orderId?: string;
+  readonly cursor?: string;
+}
+
+export function fetchEntitlements(
+  filter: EntitlementFilter = {},
+): Promise<AdminResult<EntitlementAdminListResponse>> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (typeof value === 'string' && value !== '') {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/operations/entitlements${query === '' ? '' : `?${query}`}`,
+    entitlementAdminListResponseSchema,
+  );
+}
+
+export function fetchEntitlement(id: string): Promise<AdminResult<EntitlementAdminDetailView>> {
+  return callAdmin(
+    `/api/v1/admin/operations/entitlements/${encodeURIComponent(id)}`,
+    entitlementAdminDetailSchema,
+  );
+}
+
+/** 発行をやり直す。⚠️ 何度押しても増えない。 */
+export function retryIssuance(orderId: string): Promise<AdminResult<RetryIssuanceResponse>> {
+  return callAdmin(
+    `/api/v1/admin/operations/orders/${encodeURIComponent(orderId)}/retry-issuance`,
+    retryIssuanceResponseSchema,
+    { method: 'POST' },
+  );
+}
+
+/** その方ぶんをまとめて送り直す。 */
+export function redeliverForAccount(accountId: string): Promise<AdminResult<RedeliverResponse>> {
+  return callAdmin(
+    `/api/v1/admin/operations/accounts/${encodeURIComponent(accountId)}/redeliver`,
+    redeliverResponseSchema,
+    { method: 'POST' },
+  );
+}
+
+/** 知らせの送信履歴（P0-4）。⚠️ 宛先は伏せた表記しか返らない。 */
+export function fetchNotificationHistory(
+  filter: { readonly status?: string; readonly eventType?: string; readonly cursor?: string } = {},
+): Promise<AdminResult<NotificationHistoryListResponse>> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (typeof value === 'string' && value !== '') {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/notifications/deliveries${query === '' ? '' : `?${query}`}`,
+    notificationHistoryListResponseSchema,
+  );
+}
+
+/** 知らせを送り直す。⚠️ 送り直せるのは失敗したものだけ（API が断る）。 */
+export function resendNotification(id: string): Promise<AdminResult<{ requeued: boolean }>> {
+  return callAdmin(
+    `/api/v1/admin/notifications/deliveries/${encodeURIComponent(id)}/resend`,
+    resendNotificationResponseSchema,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * 知らせの再送の応答。
+ *
+ * ⚠️ **`{ requeued: false }` を成功として黙らせない。** 押したのに
+ * 戻らなかったことを、押した人に伝える必要がある。
+ */
+const resendNotificationResponseSchema = z.object({ requeued: z.boolean() });

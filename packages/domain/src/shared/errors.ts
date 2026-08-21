@@ -301,6 +301,12 @@ export const DOMAIN_ERROR_CODES = [
   'NOTIFICATION_TEMPLATE_NOT_PUBLISHED',
   /** その状態の知らせは送り直せない（送信中・送信済み・送らないと決めた）。 */
   'NOTIFICATION_NOT_RESENDABLE',
+
+  // --- 運営ダッシュボード（P0-6） ---
+  /** この配備では発行のやり直しができない。 */
+  'ISSUANCE_UNAVAILABLE',
+  /** この配備ではウォレットへの再配送ができない（連携が無効）。 */
+  'WALLET_DELIVERY_UNAVAILABLE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

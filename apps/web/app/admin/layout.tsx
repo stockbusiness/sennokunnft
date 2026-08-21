@@ -30,6 +30,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
     <div className="sengoku-admin">
       <nav className="sengoku-admin__nav" aria-label="管理メニュー">
+        {/*
+          ⚠️ **いちばん左は運営の状況。** 朝いちばんに開く画面を端に置くと、
+             探さないと辿り着けない。手当てが要ることは、探さずに目に入る
+             ところに無ければ気づかれない。
+        */}
+        <a href="/admin">運営の状況</a>
         <a href="/admin/artworks">作品</a>
         <a href="/admin/listings">販売</a>
         <a href="/admin/orders">注文</a>
@@ -38,12 +44,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
              ほかの人には「権限がありません」と出る。隠すことは保護ではない。
         */}
         <a href="/admin/staff">スタッフ</a>
+        <a href="/admin/entitlements">受取権</a>
         <a href="/admin/wallet-deliveries">お届け</a>
+        <a href="/admin/notifications">知らせ</a>
         <a href="/admin/integrations">外部サービス</a>
         <a href="/admin/payment-credentials">決済の鍵</a>
         <a href="/admin/settlement-settings">返金と精算</a>
         <a href="/admin/payouts">お支払い</a>
         <a href="/admin/legal">規約・法務</a>
+        <a href="/admin/consistency">記録の食い違い</a>
         <a href="/admin/audit-logs">操作の記録</a>
         <a href="/">公開ページ</a>
       </nav>

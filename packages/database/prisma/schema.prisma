@@ -1439,3 +1439,31 @@ model NotificationDelivery {
   @@index([subjectId])
   @@map("notification_deliveries")
 }
+
+/// 時計仕掛けの生死（実運営 指示書 P0-6）。
+///
+/// ⚠️ **これが無いと「止まっている」を誰も検知できない。** 発行も配送も
+/// 知らせも、止まれば静かに溜まるだけで、エラーは 1 件も出ない。
+/// 気づくのは、買った方から問い合わせが来たときになる。
+///
+/// ⚠️ **1 実行 1 行にしない。** 行が無限に増え、掃除の仕組みが要る。
+/// 見たいのは「最後にいつ成功したか」だけなので、種別ごとに 1 行を上書きする。
+/// ⚠️ 個々の実行の記録が要るなら監査ログを見る。
+model JobRun {
+  /// 時計仕掛けの識別子（`issue-entitlements` など）。
+  jobKey          String    @id @map("job_key")
+  lastStartedAt   DateTime? @map("last_started_at") @db.Timestamptz(6)
+  /// ⚠️ **成功と失敗を別の列で持つ。** 1 列にすると、失敗が上書きした
+  /// 瞬間に「最後にいつ成功したか」が失われる。
+  lastSucceededAt DateTime? @map("last_succeeded_at") @db.Timestamptz(6)
+  lastFailedAt    DateTime? @map("last_failed_at") @db.Timestamptz(6)
+  /// `succeeded` / `failed`。⚠️ CHECK で縛っている。
+  lastOutcome     String?   @map("last_outcome")
+  /// 直近の失敗の分類。⚠️ 例外の中身をそのまま入れない。
+  lastErrorCode   String?   @map("last_error_code")
+  /// 直近の成功で処理した件数。⚠️ 運用の目安であって、正確な累計ではない。
+  lastPickedCount Int?      @map("last_picked_count")
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("job_runs")
+}

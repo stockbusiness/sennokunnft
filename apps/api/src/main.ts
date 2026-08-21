@@ -53,7 +53,9 @@ import {
   PrismaAuthSubjectLookup,
   PrismaNotificationHistoryRepository,
   PrismaNotificationOutboxRepository,
+  PrismaEntitlementAdminRepository,
   PrismaNotificationSweepRepository,
+  PrismaOperationsRepository,
   PrismaNotificationTemplateRepository,
 } from '@sengoku/database';
 import {
@@ -83,7 +85,12 @@ import {
   ResendMailSender,
   SupabaseRecipientResolver,
 } from '@sengoku/integrations';
-import { acceptingGeneration, CREDENTIAL_VERIFICATION_LIMIT } from '@sengoku/domain';
+import {
+  acceptingGeneration,
+  CREDENTIAL_VERIFICATION_LIMIT,
+  DEFAULT_OPERATIONS_THRESHOLDS,
+} from '@sengoku/domain';
+import { WATCHED_JOB_KEYS } from './order/internal-jobs.controller';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
 import { createRefundWindowResolver } from './settlement/refund-window';
 import type { PaymentGatewayPort } from '@sengoku/domain';
@@ -659,6 +666,13 @@ async function bootstrap(): Promise<void> {
     };
   }
 
+  /*
+    時計仕掛けの生死を記録する口（P0-6）。
+    ⚠️ **これが無いと「止まっている」を誰も検知できない。** 発行も配送も
+       知らせも、止まれば静かに溜まるだけで、エラーは 1 件も出ない。
+  */
+  const operationsRepository = new PrismaOperationsRepository(prisma);
+
   const app = await NestFactory.create(
     AppModule.register({
       version: VERSION,
@@ -689,6 +703,17 @@ async function bootstrap(): Promise<void> {
         // 「届いた」「止まっている」を状態から数え上げる（P0-4）。
         sweepSource: new PrismaNotificationSweepRepository(prisma),
         logger,
+      },
+      /*
+        運営ダッシュボード（P0-6）。
+        ⚠️ **省略できない。** 指標の見えない配備は「正常」に見えてしまい、
+           止まっていることに誰も気づけない。
+      */
+      operations: {
+        repository: operationsRepository,
+        entitlements: new PrismaEntitlementAdminRepository(prisma),
+        thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
+        jobKeys: WATCHED_JOB_KEYS,
       },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),

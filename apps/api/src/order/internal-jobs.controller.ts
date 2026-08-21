@@ -21,6 +21,7 @@ import {
   NOTIFICATION_BATCH_SIZE,
   RELEASE_BATCH_SIZE,
 } from '@sengoku/domain';
+import type { ClockPort } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
 import {
@@ -32,6 +33,31 @@ import { EntitlementIssuanceService } from './issuance.service';
 import { OrderService } from './order.service';
 
 export const INTERNAL_JOB_CONFIG = Symbol('sengoku:internal-job-config');
+
+/**
+ * 生死を見張る時計仕掛け（P0-6）。
+ *
+ * ⚠️ **ここが一覧の正。** 画面側で別に並べると、時計を足したときに
+ * 片方だけ古くなり、**足したはずの処理が見張られていない**状態になる。
+ */
+export const WATCHED_JOB_KEYS = [
+  'release-expired-reservations',
+  'issue-entitlements',
+  'deliver-entitlements',
+  'reconcile-revocations',
+  'send-notifications',
+] as const;
+
+/** 時計仕掛けの結果を記録する口。⚠️ 実装は `@sengoku/database`。 */
+export interface JobRunRecorder {
+  recordJobRun(input: {
+    readonly jobKey: string;
+    readonly outcome: 'succeeded' | 'failed';
+    readonly pickedCount?: number | undefined;
+    readonly errorCode?: string | undefined;
+    readonly now: Date;
+  }): Promise<void>;
+}
 
 export interface InternalJobConfig {
   /** ⚠️ 未設定なら、このコントローラは登録されない（配線側で切る）。 */
@@ -60,6 +86,14 @@ export interface InternalJobConfig {
    * 変えることになり、送り始めた日に設定漏れで動かない。
    */
   readonly notificationSend: NotificationSendService | null;
+  /**
+   * 実行の結果を記録する先（P0-6）。
+   *
+   * ⚠️ **`null` にしない。** 記録が無いと、運営の画面では「一度も成功して
+   * いない」と「そもそも記録していない」が区別できない。
+   */
+  readonly jobRuns: JobRunRecorder;
+  readonly clock: ClockPort;
 }
 
 /**
@@ -88,12 +122,18 @@ export class InternalJobsController {
     @Headers('x-internal-job-token') token: string | undefined,
   ): Promise<ReleaseExpiredResponse> {
     this.assertAuthorized(token);
-    const released = await this.orders.releaseExpiredReservations(RELEASE_BATCH_SIZE);
-    return {
-      releasedCount: released.length,
-      // ⚠️ 注文IDまで。購入者・作品名・金額は返さない。
-      orderIds: released.map((entry) => entry.orderId),
-    };
+    return this.record(
+      'release-expired-reservations',
+      async () => {
+        const released = await this.orders.releaseExpiredReservations(RELEASE_BATCH_SIZE);
+        return {
+          releasedCount: released.length,
+          // ⚠️ 注文IDまで。購入者・作品名・金額は返さない。
+          orderIds: released.map((entry) => entry.orderId),
+        };
+      },
+      (result) => result.releasedCount,
+    );
   }
 
   /**
@@ -113,16 +153,22 @@ export class InternalJobsController {
     @Headers('x-internal-job-token') token: string | undefined,
   ): Promise<IssueEntitlementsResponse> {
     this.assertAuthorized(token);
-    const result = await this.issuance.sweep(ISSUANCE_BATCH_SIZE);
-    /*
-      ⚠️ **注文番号も購入者も返さない。** これは時計が叩く口で、
-         応答は監視の数値として読まれる。人の情報を混ぜない。
-    */
-    return {
-      pickedCount: result.picked,
-      issuedCount: result.issued,
-      failedCount: result.failed,
-    };
+    return this.record(
+      'issue-entitlements',
+      async () => {
+        const result = await this.issuance.sweep(ISSUANCE_BATCH_SIZE);
+        /*
+          ⚠️ **注文番号も購入者も返さない。** これは時計が叩く口で、
+             応答は監視の数値として読まれる。人の情報を混ぜない。
+        */
+        return {
+          pickedCount: result.picked,
+          issuedCount: result.issued,
+          failedCount: result.failed,
+        };
+      },
+      (result) => result.pickedCount,
+    );
   }
 
   /**
@@ -143,17 +189,29 @@ export class InternalJobsController {
     @Headers('x-internal-job-token') token: string | undefined,
   ): Promise<DeliverEntitlementsResponse> {
     this.assertAuthorized(token);
-    if (this.config.autoDelivery === null) {
-      // Wallet へ繋いでいない配備。⚠️ 黙って 0 を返す（異常ではない）。
-      return { pickedCount: 0, deliveredCount: 0, skippedCount: 0, failedCount: 0 };
-    }
-    const result = await this.config.autoDelivery.sweep(AUTO_DELIVERY_BATCH_SIZE);
-    return {
-      pickedCount: result.picked,
-      deliveredCount: result.delivered,
-      skippedCount: result.skipped,
-      failedCount: result.failed,
-    };
+    return this.record(
+      'deliver-entitlements',
+      async () => {
+        const autoDelivery = this.config.autoDelivery;
+        if (autoDelivery === null) {
+          /*
+            Wallet へ繋いでいない配備。⚠️ 黙って 0 を返す（異常ではない）。
+            ⚠️ **それでも成功として記録する。** 記録しないと運営の画面には
+               「一度も成功していない」と出て、繋いでいないだけなのに
+               止まっているように見える。
+          */
+          return { pickedCount: 0, deliveredCount: 0, skippedCount: 0, failedCount: 0 };
+        }
+        const result = await autoDelivery.sweep(AUTO_DELIVERY_BATCH_SIZE);
+        return {
+          pickedCount: result.picked,
+          deliveredCount: result.delivered,
+          skippedCount: result.skipped,
+          failedCount: result.failed,
+        };
+      },
+      (result) => result.pickedCount,
+    );
   }
 
   /**
@@ -173,26 +231,33 @@ export class InternalJobsController {
     @Headers('x-internal-job-token') token: string | undefined,
   ): Promise<ReconcileRevocationsResponse> {
     this.assertAuthorized(token);
-    if (this.config.revocationReconcile === null) {
-      // 取消イベントを作らない配備。⚠️ 黙って 0 を返す（異常ではない）。
-      return {
-        pickedCount: 0,
-        createdCount: 0,
-        duplicateCount: 0,
-        needsReviewCount: 0,
-        conflictCount: 0,
-        truncated: false,
-      };
-    }
-    const result = await this.config.revocationReconcile.run(REVOCATION_RECONCILE_BATCH_SIZE);
-    return {
-      pickedCount: result.picked,
-      createdCount: result.created,
-      duplicateCount: result.duplicate,
-      needsReviewCount: result.needsReview,
-      conflictCount: result.conflicts,
-      truncated: result.truncated,
-    };
+    return this.record(
+      'reconcile-revocations',
+      async () => {
+        const reconcile = this.config.revocationReconcile;
+        if (reconcile === null) {
+          // 取消イベントを作らない配備。⚠️ 黙って 0 を返す（異常ではない）。
+          return {
+            pickedCount: 0,
+            createdCount: 0,
+            duplicateCount: 0,
+            needsReviewCount: 0,
+            conflictCount: 0,
+            truncated: false,
+          };
+        }
+        const result = await reconcile.run(REVOCATION_RECONCILE_BATCH_SIZE);
+        return {
+          pickedCount: result.picked,
+          createdCount: result.created,
+          duplicateCount: result.duplicate,
+          needsReviewCount: result.needsReview,
+          conflictCount: result.conflicts,
+          truncated: result.truncated,
+        };
+      },
+      (result) => result.pickedCount,
+    );
   }
 
   /**
@@ -219,21 +284,79 @@ export class InternalJobsController {
     @Headers('x-internal-job-token') token: string | undefined,
   ): Promise<SendNotificationsResponse> {
     this.assertAuthorized(token);
-    if (this.config.notificationSend === null) {
-      // まだ送らない配備。⚠️ 黙って 0 を返す（異常ではない）。
-      return { pickedCount: 0, sentCount: 0, skippedCount: 0, failedCount: 0 };
+    return this.record(
+      'send-notifications',
+      async () => {
+        const send = this.config.notificationSend;
+        if (send === null) {
+          // まだ送らない配備。⚠️ 黙って 0 を返す（異常ではない）。
+          return { pickedCount: 0, sentCount: 0, skippedCount: 0, failedCount: 0 };
+        }
+        const result = await send.sweep(NOTIFICATION_BATCH_SIZE);
+        /*
+          ⚠️ **宛先も注文番号も返さない。** これは時計が叩く口で、
+             応答は監視の数値として読まれる。人の情報を混ぜない。
+        */
+        return {
+          pickedCount: result.picked,
+          sentCount: result.sent,
+          skippedCount: result.skipped,
+          failedCount: result.failed,
+        };
+      },
+      (result) => result.pickedCount,
+    );
+  }
+
+  /**
+   * 実行の結果を記録しながら走らせる（P0-6）。
+   *
+   * ⚠️ **合言葉の検査より後で包む。** 通らなかった呼び出しを失敗として
+   * 数えると、設定を間違えた監視ツール 1 つで画面が赤くなり続ける。
+   *
+   * ⚠️ **記録に失敗しても本来の結果を返す。** 記録は見張るための控えで、
+   * それが書けないことを理由に業務の処理を失敗させない。
+   */
+  private async record<T>(
+    jobKey: string,
+    run: () => Promise<T>,
+    countOf?: (result: T) => number,
+  ): Promise<T> {
+    const now = this.config.clock.now();
+    let result: T;
+    try {
+      result = await run();
+    } catch (error) {
+      // ⚠️ 例外の中身をそのまま入れない。分類だけ残す。
+      await this.safelyRecord({
+        jobKey,
+        outcome: 'failed',
+        errorCode: error instanceof Error ? error.name : 'unknown',
+        now,
+      });
+      throw error;
     }
-    const result = await this.config.notificationSend.sweep(NOTIFICATION_BATCH_SIZE);
-    /*
-      ⚠️ **宛先も注文番号も返さない。** これは時計が叩く口で、
-         応答は監視の数値として読まれる。人の情報を混ぜない。
-    */
-    return {
-      pickedCount: result.picked,
-      sentCount: result.sent,
-      skippedCount: result.skipped,
-      failedCount: result.failed,
-    };
+    await this.safelyRecord({
+      jobKey,
+      outcome: 'succeeded',
+      pickedCount: countOf === undefined ? undefined : countOf(result),
+      now,
+    });
+    return result;
+  }
+
+  private async safelyRecord(input: {
+    readonly jobKey: string;
+    readonly outcome: 'succeeded' | 'failed';
+    readonly pickedCount?: number | undefined;
+    readonly errorCode?: string | undefined;
+    readonly now: Date;
+  }): Promise<void> {
+    try {
+      await this.config.jobRuns.recordJobRun(input);
+    } catch {
+      // ⚠️ 握りつぶす。見張りの控えが書けないことで処理を止めない。
+    }
   }
 
   private assertAuthorized(token: string | undefined): void {
