@@ -15,6 +15,8 @@ import {
   type PayoutLineView,
   type PayoutPeriod,
   type PayoutRepository,
+  type PayoutAccountCipherPort,
+  type PayoutAccountPort,
   type PayoutStatus,
   type PayoutView,
   type SettlementSettingsRepository,
@@ -45,7 +47,44 @@ export interface PayoutConfig {
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly audit: AuditLogPort;
+  /**
+   * お振込先（P1-3・決定 2026-08-21）。
+   *
+   * ⚠️ **`null` は「この配備では預かる仕組みが無い」。** 暗号鍵を設定して
+   * いない配備がある。必須にすると、そこで起動しなくなる。
+   *
+   * ⚠️ **作家さま向けの口と同じ組を使う。** 2 つ持つと、鍵を入れ替える
+   * ときに片方だけ古いままになる。
+   */
+  readonly payoutAccounts: {
+    readonly store: PayoutAccountPort;
+    readonly cipher: PayoutAccountCipherPort;
+  } | null;
 }
+
+/**
+ * 振込のために読んだ結果（決定 2026-08-21）。
+ *
+ * ⚠️ **「取れなかった」を分けている。** 運営の次の一手が違うため——
+ * 未登録なら作家さまへお願いし、鍵が無ければ運用担当へ伝え、
+ * **包みが解けなければ振り込まない**。
+ */
+export type PayoutAccountReveal =
+  | {
+      readonly status: 'resolved';
+      readonly account: {
+        readonly bankName: string;
+        readonly branchName: string;
+        readonly accountType: 'ordinary' | 'checking';
+        readonly accountNumber: string;
+        readonly accountHolderKana: string;
+        readonly updatedAt: Date;
+      };
+    }
+  | { readonly status: 'missing' }
+  | { readonly status: 'not_configured' }
+  | { readonly status: 'undecipherable' }
+  | { readonly status: 'not_payable_yet' };
 
 /** 締めた結果。⚠️ 作家さまごとに 1 件ずつ返す。丸めない。 */
 export interface ClosePeriodResult {
@@ -70,12 +109,19 @@ export class PayoutService {
     readonly payout: PayoutView;
     readonly lines: readonly PayoutLineView[];
     readonly openRefundWindows: number;
+    readonly payoutAccountStatus: 'registered' | 'missing' | 'unavailable';
   } | null> {
     const payout = await this.config.repository.findById(payoutId);
     if (payout === null) {
       return null;
     }
     const lines = await this.config.repository.listLines(payoutId);
+    /*
+      ⚠️ **状態だけを見る。包みは解かない。** 画面を開いただけで復号が
+         走る形にすると、監査ログに残らないところで口座が読まれる
+         （読むのは別の口＝`payout_account.view_full`）。
+    */
+    const payoutAccountStatus = await this.payoutAccountStatusOf(payout.creatorAccountId);
 
     /*
       ⚠️ **確定済みなら、いま数え直さない。** 確定の時点で 0 だったことは
@@ -83,13 +129,103 @@ export class PayoutService {
          「確定済みなのに窓が開いている」という読み方ができてしまう。
     */
     if (payout.status !== 'draft') {
-      return { payout, lines, openRefundWindows: 0 };
+      return { payout, lines, openRefundWindows: 0, payoutAccountStatus };
     }
     const openRefundWindows = await this.config.repository.countOpenRefundWindows(
       payout.id,
       this.config.clock.now(),
     );
-    return { payout, lines, openRefundWindows };
+    return { payout, lines, openRefundWindows, payoutAccountStatus };
+  }
+
+  private async payoutAccountStatusOf(
+    creatorAccountId: string,
+  ): Promise<'registered' | 'missing' | 'unavailable'> {
+    const payoutAccounts = this.config.payoutAccounts;
+    if (payoutAccounts === null) {
+      return 'unavailable';
+    }
+    const found = await payoutAccounts.store.find(creatorAccountId);
+    return found === null ? 'missing' : 'registered';
+  }
+
+  /**
+   * 振込のために、お振込先を伏せずに読む（決定 2026-08-21）。
+   *
+   * ⚠️ **確定した精算のためだけに開く。** 下書きのうちに読む理由が無い。
+   * 絞っておくと、監査ログの 1 行が**何のためだったか**を後から説明できる。
+   *
+   * ⚠️ **読めたかどうかに関わらず、必ず記録する。** 「開こうとした」こと
+   * 自体が記録の対象である。
+   *
+   * ⚠️ **記録に口座の値を入れない。** 入れた瞬間、包んで保管した意味が
+   * 監査ログの側から失われる。残すのは「誰が・いつ・どの精算のために」まで。
+   */
+  async revealPayoutAccount(input: {
+    readonly payoutId: string;
+    readonly actorAccountId: string;
+  }): Promise<PayoutAccountReveal | null> {
+    const payout = await this.config.repository.findById(input.payoutId);
+    if (payout === null) {
+      return null;
+    }
+
+    const result = await this.readPayoutAccount(payout);
+    await this.config.audit.record({
+      actorAccountId: input.actorAccountId,
+      action: 'payout_account.viewed',
+      targetType: 'payout',
+      targetId: payout.id,
+      // ⚠️ 口座の値をここへ入れない。残すのは結果の種類まで。
+      summary: { result: result.status, creatorAccountId: payout.creatorAccountId },
+    });
+    return result;
+  }
+
+  private async readPayoutAccount(payout: PayoutView): Promise<PayoutAccountReveal> {
+    /*
+      ⚠️ **下書きでは開かない。** 「確定する前に確かめたい」は、状態
+         （`payoutAccountStatus`）で足りる。番号は振り込むときに要る。
+    */
+    if (payout.status === 'draft') {
+      return { status: 'not_payable_yet' };
+    }
+
+    const payoutAccounts = this.config.payoutAccounts;
+    if (payoutAccounts === null) {
+      return { status: 'not_configured' };
+    }
+
+    const record = await payoutAccounts.store.find(payout.creatorAccountId);
+    if (record === null) {
+      return { status: 'missing' };
+    }
+
+    /*
+      ⚠️ **解けなかったら、伏せた表記で代用しない。** 「***4567 までは
+         分かる」と出すと、そのまま振り込もうとする人が出る。解けないのは
+         鍵の入れ替えを誤ったか、行が差し替えられたかで、**どちらでも
+         振り込んではいけない**。
+    */
+    const accountNumber = payoutAccounts.cipher.open(
+      record.sealedAccountNumber,
+      payout.creatorAccountId,
+    );
+    if (accountNumber === null) {
+      return { status: 'undecipherable' };
+    }
+
+    return {
+      status: 'resolved',
+      account: {
+        bankName: record.bankName,
+        branchName: record.branchName,
+        accountType: record.accountType,
+        accountNumber,
+        accountHolderKana: record.accountHolderKana,
+        updatedAt: record.updatedAt,
+      },
+    };
   }
 
   /**

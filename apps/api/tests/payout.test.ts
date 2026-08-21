@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module';
 import { DomainErrorFilter } from '../src/common/domain-error.filter';
 import {
   buildHarness,
+  FakePayoutAccountCipher,
   TEST_AUDIENCE,
   TEST_ISSUER,
   TEST_TOKEN_SECRET,
@@ -481,5 +482,237 @@ describe('金額を書き換える口が無い', () => {
       .delete(`/api/v1/admin/payouts/${created.body.items[0].id as string}`)
       .set(auth(operator))
       .expect(404);
+  });
+});
+
+/**
+ * 振込のために、お振込先を読む（決定 2026-08-21）。
+ *
+ * ⚠️ **この組の主題は 5 つ。**
+ *  1. **`payout.view` では読めない**こと（監査担当にも渡していない）
+ *  2. **確定するまで開かない**こと——読む口を「振り込むため」に絞る
+ *  3. **監査ログに値が残らない**こと——残せば包んだ意味が失われる
+ *  4. **明細（`detail`）に値が載らない**こと——開いただけで流れない
+ *  5. **解けなかったら伏せた表記で代用しない**こと——振り込ませない
+ */
+describe('お振込先を運営が読む', () => {
+  const NUMBER = '1234567';
+
+  /** ⚠️ 本物と同じ包み方をする。代役でも結び付け先は必ずアカウントID。 */
+  function seedAccount(creatorAccountId = CREATOR, sealedFor = creatorAccountId): void {
+    harness.payoutAccounts.rows.set(creatorAccountId, {
+      creatorAccountId,
+      bankName: '千ノ国銀行',
+      branchName: '本店',
+      accountType: 'ordinary',
+      sealedAccountNumber: new FakePayoutAccountCipher().seal(NUMBER, sealedFor),
+      maskedAccountNumber: '***4567',
+      accountHolderKana: 'センノクニ　タロウ',
+      updatedAt: new Date('2026-09-01T00:00:00.000Z'),
+    });
+  }
+
+  /** 確定済みの精算を 1 件つくる。⚠️ 読めるのは確定してから。 */
+  async function confirmedPayout(operator: string): Promise<string> {
+    harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
+    const created = await closePeriod(operator).expect(201);
+    const payoutId = created.body.items[0].id as string;
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/payouts/${payoutId}/confirm`)
+      .set(auth(operator))
+      .expect(200);
+    return payoutId;
+  }
+
+  function readAccount(token: string, payoutId: string) {
+    return request(app.getHttpServer())
+      .get(`/api/v1/admin/payouts/${payoutId}/payout-account`)
+      .set(auth(token));
+  }
+
+  it('監査担当は読めない（読んだことを確かめる側である）', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-1');
+    const payoutId = await confirmedPayout(operator);
+
+    await readAccount(actorToken('auditor', 'auditor-account-1'), payoutId).expect(403);
+    // ⚠️ **同じ要求が運営なら通ることを確かめる。** 確かめないと、
+    //    経路そのものが壊れていても 403 になり、この試験が空振りする。
+    await readAccount(operator, payoutId).expect(200);
+  });
+
+  it('会員は読めない', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-2');
+    const payoutId = await confirmedPayout(operator);
+    await readAccount(actorToken('buyer', 'buyer-account-1'), payoutId).expect(403);
+  });
+
+  it('確定するまで開かない（下書きのうちに読む理由が無い）', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-3');
+    harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
+    const created = await closePeriod(operator).expect(201);
+    const payoutId = created.body.items[0].id as string;
+
+    const response = await readAccount(operator, payoutId).expect(200);
+    expect(response.body.status).toBe('not_payable_yet');
+    // ⚠️ 状態だけで、値は 1 つも返らない。
+    expect(JSON.stringify(response.body)).not.toContain(NUMBER);
+  });
+
+  it('確定していれば、運営は伏せずに読める', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-4');
+    const payoutId = await confirmedPayout(operator);
+
+    const response = await readAccount(operator, payoutId).expect(200);
+    expect(response.body).toMatchObject({
+      status: 'resolved',
+      account: {
+        bankName: '千ノ国銀行',
+        branchName: '本店',
+        accountType: 'ordinary',
+        // ⚠️ **ここが伏せていないこと。** 伏せたままでは振り込めない。
+        accountNumber: NUMBER,
+        accountHolderKana: 'センノクニ　タロウ',
+      },
+    });
+  });
+
+  it('未登録なら missing（待っても変わらない）', async () => {
+    const operator = actorToken('operator', 'operator-account-5');
+    const payoutId = await confirmedPayout(operator);
+
+    const response = await readAccount(operator, payoutId).expect(200);
+    expect(response.body.status).toBe('missing');
+  });
+
+  it('包みが解けなければ undecipherable。伏せた表記で代用しない', async () => {
+    /*
+      ⚠️ **別の作家さまの行へ貼り替えられた状態を作る。** 鍵の入れ替えを
+         誤った場合も同じ結果になる。**どちらでも振り込んではいけない**ので、
+         「***4567 までは分かる」と出さないことを確かめる。
+    */
+    seedAccount(CREATOR, 'account-someone-else');
+    const operator = actorToken('operator', 'operator-account-6');
+    const payoutId = await confirmedPayout(operator);
+
+    const response = await readAccount(operator, payoutId).expect(200);
+    expect(response.body.status).toBe('undecipherable');
+    expect(JSON.stringify(response.body)).not.toContain('4567');
+  });
+
+  it('預かる仕組みが無い配備では not_configured', async () => {
+    const operator = actorToken('operator', 'operator-account-7');
+    const payoutId = await confirmedPayout(operator);
+
+    // ⚠️ 暗号鍵を設定していない配備の姿。**起動はする。**
+    const { payoutAccounts: _omitted, ...creatorOperations } = harness.creatorOperations;
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.register({ ...harness, creatorOperations })],
+    }).compile();
+    const bare = moduleRef.createNestApplication();
+    bare.useGlobalFilters(new DomainErrorFilter());
+    await bare.init();
+    try {
+      const response = await request(bare.getHttpServer())
+        .get(`/api/v1/admin/payouts/${payoutId}/payout-account`)
+        .set(auth(operator))
+        .expect(200);
+      expect(response.body.status).toBe('not_configured');
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it('読むたびに記録が残る。⚠️ 値は残らない', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-8');
+    const payoutId = await confirmedPayout(operator);
+    await readAccount(operator, payoutId).expect(200);
+
+    const entries = harness.audit.entries.filter((row) => row.action === 'payout_account.viewed');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      actorAccountId: 'account-operator-account-8',
+      targetType: 'payout',
+      targetId: payoutId,
+    });
+    /*
+      ⚠️ **記録のどこにも口座の値が無いこと。** 入った瞬間、包んで保管した
+         意味が監査ログの側から失われる。名義も伏せた表記も残さない。
+    */
+    const recorded = JSON.stringify(entries[0]);
+    expect(recorded).not.toContain(NUMBER);
+    expect(recorded).not.toContain('4567');
+    expect(recorded).not.toContain('センノクニ');
+    expect(recorded).not.toContain('千ノ国銀行');
+  });
+
+  it('2 回読めば 2 行残る（同じ人でもまとめない）', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-9');
+    const payoutId = await confirmedPayout(operator);
+    await readAccount(operator, payoutId).expect(200);
+    await readAccount(operator, payoutId).expect(200);
+
+    expect(
+      harness.audit.entries.filter((row) => row.action === 'payout_account.viewed'),
+    ).toHaveLength(2);
+  });
+
+  it('読めなかったときも記録が残る（開こうとしたこと自体が対象）', async () => {
+    const operator = actorToken('operator', 'operator-account-10');
+    const payoutId = await confirmedPayout(operator);
+    await readAccount(operator, payoutId).expect(200);
+
+    const entry = harness.audit.entries.find((row) => row.action === 'payout_account.viewed');
+    expect(entry?.summary).toMatchObject({ result: 'missing' });
+  });
+
+  it('明細には状態だけが載り、値は載らない', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-11');
+    const payoutId = await confirmedPayout(operator);
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/payouts/${payoutId}`)
+      .set(auth(operator))
+      .expect(200);
+
+    expect(response.body.payoutAccountStatus).toBe('registered');
+    const body = JSON.stringify(response.body);
+    expect(body).not.toContain(NUMBER);
+    expect(body).not.toContain('4567');
+    expect(body).not.toContain('千ノ国銀行');
+    // ⚠️ 明細を開いただけでは、記録に「読んだ」と残らない。
+    expect(harness.audit.entries.filter((row) => row.action === 'payout_account.viewed')).toEqual(
+      [],
+    );
+  });
+
+  it('未登録なら、明細の状態が missing になる（確定の前に気づける）', async () => {
+    const operator = actorToken('operator', 'operator-account-12');
+    harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
+    const created = await closePeriod(operator).expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/payouts/${created.body.items[0].id as string}`)
+      .set(auth(operator))
+      .expect(200);
+    expect(response.body.payoutAccountStatus).toBe('missing');
+  });
+
+  it('監査担当も明細の状態は見られる（振込先が無いまま確定していないか）', async () => {
+    seedAccount();
+    const operator = actorToken('operator', 'operator-account-13');
+    const payoutId = await confirmedPayout(operator);
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/admin/payouts/${payoutId}`)
+      .set(auth(actorToken('auditor', 'auditor-account-2')))
+      .expect(200);
+    expect(response.body.payoutAccountStatus).toBe('registered');
   });
 });

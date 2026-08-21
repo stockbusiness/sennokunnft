@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import {
   closePayoutPeriod,
   confirmPayout,
+  fetchPayoutAccount,
   markPayoutPaid,
   type AdminResult,
 } from '../../../src/admin-client';
@@ -114,4 +115,53 @@ export async function markPayoutPaidAction(
   }
   refresh(id);
   return { notice: PAYOUT_COPY.paid };
+}
+
+/**
+ * 読み取った結果。
+ *
+ * ⚠️ **この形に「保存しておく」場所を作らない。** 画面の再描画で消える
+ * ことが、そのまま「残さない」という設計になっている。
+ */
+export type PayoutAccountState =
+  | { readonly status: 'idle' }
+  | {
+      readonly status: 'resolved';
+      readonly bankName: string;
+      readonly branchName: string;
+      readonly accountType: 'ordinary' | 'checking';
+      readonly accountNumber: string;
+      readonly accountHolderKana: string;
+      readonly updatedAt: string;
+    }
+  | { readonly status: 'missing' }
+  | { readonly status: 'not_configured' }
+  | { readonly status: 'undecipherable' }
+  | { readonly status: 'not_payable_yet' }
+  | { readonly status: 'error'; readonly error: string };
+
+export const PAYOUT_ACCOUNT_IDLE: PayoutAccountState = { status: 'idle' };
+
+/**
+ * 振込のために、お振込先を伏せずに読む（決定 2026-08-21）。
+ *
+ * ⚠️ **押されたときだけ呼ぶ。** 画面の読み込みで呼ぶと、監査ログが
+ * 「開いた人」で埋まり、**本当に読んだ人が埋もれる**。
+ *
+ * ⚠️ **読み取った値をここへ残さない。** 変数から出さず、そのまま返す。
+ * 次に要るときは、また読む（記録がもう 1 行増える）。
+ */
+export async function revealPayoutAccountAction(
+  _previous: PayoutAccountState,
+  form: FormData,
+): Promise<PayoutAccountState> {
+  const payoutId = text(form, 'payoutId');
+  const result = await fetchPayoutAccount(payoutId);
+  if (!result.ok) {
+    return { status: 'error', error: payoutError(result) };
+  }
+  if (result.data.status !== 'resolved') {
+    return { status: result.data.status };
+  }
+  return { status: 'resolved', ...result.data.account };
 }

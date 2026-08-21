@@ -11,12 +11,14 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  adminPayoutAccountResponseSchema,
   closePayoutPeriodRequestSchema,
   closePayoutPeriodResponseSchema,
   payoutDetailResponseSchema,
   payoutListQuerySchema,
   payoutListResponseSchema,
   payoutSchema,
+  type AdminPayoutAccountResponse,
   type ClosePayoutPeriodResponse,
   type PayoutDetailResponse,
   type PayoutListResponse,
@@ -68,7 +70,46 @@ export class AdminPayoutController {
       payout: toDto(found.payout),
       lines: found.lines.map(toLineDto),
       openRefundWindows: found.openRefundWindows,
+      // ⚠️ **状態だけ。** 銀行名も名義も番号も、ここには載せない。
+      payoutAccountStatus: found.payoutAccountStatus,
     });
+  }
+
+  /**
+   * 振込のために、お振込先を伏せずに読む（決定 2026-08-21）。
+   *
+   * ⚠️ **明細（`detail`）に混ぜていない。** 混ぜると、精算を開いた
+   * だけで口座番号が経路へ流れ、監査ログが「開いた人」で埋まって
+   * **本当に読んだ人が埋もれる**。読むと決めたときだけ、この口を叩く。
+   *
+   * ⚠️ **`payout.view` では通らない。** いくら払うかを見ることと、
+   * どこへ振り込むかを読むことは別の力である（`auditor` には渡していない）。
+   *
+   * ⚠️ **精算を指してもらう。** 作家さまを直に指定する口にしない——
+   * 「作家さま一覧から口座を順に開く」ができてしまう。
+   */
+  @Get(':id/payout-account')
+  @RequireAction('payout_account.view_full')
+  async payoutAccount(
+    @CurrentActor() actor: Actor,
+    @Param('id') id: string,
+  ): Promise<AdminPayoutAccountResponse> {
+    const result = await this.payouts.revealPayoutAccount({
+      payoutId: id,
+      actorAccountId: requireAccountId(actor),
+    });
+    if (result === null) {
+      throw new NotFoundException();
+    }
+    return parseOrThrow(
+      adminPayoutAccountResponseSchema,
+      result.status === 'resolved'
+        ? {
+            status: 'resolved',
+            account: { ...result.account, updatedAt: result.account.updatedAt.toISOString() },
+          }
+        : { status: result.status },
+    );
   }
 
   /**
