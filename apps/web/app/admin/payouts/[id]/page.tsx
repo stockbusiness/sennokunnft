@@ -9,7 +9,7 @@ import {
   payoutStatusTone,
   transferFeeBearerLabelForPayout,
 } from '../../../../src/payout-copy';
-import { ConfirmPayoutForm, MarkPaidForm } from '../forms';
+import { ConfirmPayoutForm, MarkPaidForm, RevealPayoutAccountForm } from '../forms';
 
 /**
  * 精算の明細（`UD-119`）。
@@ -40,7 +40,7 @@ export default async function AdminPayoutDetailPage({
     );
   }
 
-  const { payout, lines, openRefundWindows } = result.data;
+  const { payout, lines, openRefundWindows, payoutAccountStatus } = result.data;
   const currency = payout.currency;
 
   return (
@@ -144,6 +144,23 @@ export default async function AdminPayoutDetailPage({
       </section>
 
       {/*
+        お振込先（決定 2026-08-21）。
+
+        ⚠️ **状態は常に出す。値は押されたときだけ。** 「振込先が無いのに
+           確定してしまった」を、確定の前に気づけるようにする。
+        ⚠️ **この欄は `payout.view` では読めない。** 読むには別の権限
+           （`payout_account.view_full`）が要る——閲覧者には出ても、
+           押すと断られる。
+      */}
+      <section>
+        <h2>{COPY.accountHeading}</h2>
+        <PayoutAccountStatus status={payoutAccountStatus} />
+        {payoutAccountStatus === 'registered' ? (
+          <RevealPayoutAccountForm payoutId={payout.id} />
+        ) : null}
+      </section>
+
+      {/*
         ⚠️ **状態ごとに、いま押せる操作だけを出す。** 押せるのに効かない
            ボタンを並べると、押してから断られる。
       */}
@@ -174,6 +191,28 @@ export default async function AdminPayoutDetailPage({
       </p>
     </>
   );
+}
+
+/**
+ * お振込先が預かってあるか（決定 2026-08-21）。
+ *
+ * ⚠️ **ここに値を出さない。** 出るのは状態だけ。銀行名も名義も番号も、
+ * 応答に載っていない。
+ */
+function PayoutAccountStatus({
+  status,
+}: {
+  readonly status: 'registered' | 'missing' | 'unavailable';
+}) {
+  if (status === 'missing') {
+    return <Notice tone="alert" title={COPY.accountMissing} hint={COPY.accountMissingHint} />;
+  }
+  if (status === 'unavailable') {
+    return (
+      <Notice tone="alert" title={COPY.accountUnavailable} hint={COPY.accountUnavailableHint} />
+    );
+  }
+  return <p>{COPY.accountRegistered}</p>;
 }
 
 /**

@@ -749,6 +749,14 @@ export class AppModule implements NestModule {
             clock: deps.clock,
             ids: deps.ids,
             audit: deps.audit,
+            /*
+              お振込先（決定 2026-08-21）。
+              ⚠️ **作家さま向けと同じ組を渡す。** 2 つ持つと、鍵を
+                 入れ替えるときに片方だけ古いままになる。
+              ⚠️ **`null` は「この配備では預かる仕組みが無い」。** 画面は
+                 「この配備では読み取れません」と断る。
+            */
+            payoutAccounts: deps.creatorOperations.payoutAccounts ?? null,
           }),
         },
         PayoutService,

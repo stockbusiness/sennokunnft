@@ -41,8 +41,10 @@ import {
   type RefundResult,
   payoutListResponseSchema,
   payoutDetailResponseSchema,
+  adminPayoutAccountResponseSchema,
   payoutSchema,
   closePayoutPeriodResponseSchema,
+  type AdminPayoutAccountResponse,
   type ClosePayoutPeriodResponse,
   type PayoutDetailResponse,
   type PayoutListResponse,
@@ -742,6 +744,23 @@ export function fetchPayouts(
 
 export function fetchPayout(id: string): Promise<AdminResult<PayoutDetailResponse>> {
   return callAdmin(`/api/v1/admin/payouts/${encodeURIComponent(id)}`, payoutDetailResponseSchema);
+}
+
+/**
+ * 振込のために、お振込先を伏せずに読む（決定 2026-08-21）。
+ *
+ * ⚠️ **画面を開いたときに呼ばない。** 押されたときだけ呼ぶ。開くたびに
+ * 呼ぶと、監査ログが「開いた人」で埋まり、**本当に読んだ人が埋もれる**。
+ *
+ * ⚠️ **返ってきた値を保存も再利用もしない。** 次に要るときは、また読む。
+ */
+export function fetchPayoutAccount(
+  payoutId: string,
+): Promise<AdminResult<AdminPayoutAccountResponse>> {
+  return callAdmin(
+    `/api/v1/admin/payouts/${encodeURIComponent(payoutId)}/payout-account`,
+    adminPayoutAccountResponseSchema,
+  );
 }
 
 /**

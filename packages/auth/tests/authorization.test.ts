@@ -67,6 +67,15 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   */
   'payout.mark_paid': { anonymous: false, buyer: false, operator: false, auditor: false },
   /*
+    ⚠️ **`auditor` は false。** 口座番号を読むのは監査の仕事ではない
+       （`customer.view_email` と同じ考え方）。監査は**読んだことを
+       確かめる側**である。
+    ⚠️ **`buyer` も false。** 会員は誰でも出品できる（`UD-806`）が、
+       読めるのは自分の分ですらない——ご自分の画面には伏せた表記しか
+       出さない（`payoutAccountOf`）。
+  */
+  'payout_account.view_full': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
     ⚠️ **会員なら誰でも持つ。** 出品する前に名前を決めたい方がいる。
        「作品を 1 つ作らないと名乗れない」という順序を強いない。
     ⚠️ `auditor` には要らない。名乗る場ではない。

@@ -74,8 +74,68 @@ export const payoutDetailResponseSchema = z.object({
    * 画面はこれを見て「まだ締められない」ことを先に伝える。
    */
   openRefundWindows: z.number().int(),
+  /**
+   * お振込先が預かってあるか（決定 2026-08-21）。
+   *
+   * ⚠️ **値は一切載せない。** 銀行名も名義も番号も含まない——**状態だけ**。
+   * 精算の画面を開いただけで口座の手掛かりが流れる形にしない。読むには
+   * 別の口（`payout_account.view_full` ＋ 監査）を叩く。
+   *
+   * ⚠️ **`auditor` にも見える。** 「振込先が無いのに確定した精算」が
+   * あるかどうかは、監査の対象そのものである。状態は値ではない。
+   *
+   * - `registered` … 預かってある
+   * - `missing` … 未登録。**このまま確定しても振り込めない**
+   * - `unavailable` … この配備では預かる仕組みが無い（暗号鍵が未設定）
+   */
+  payoutAccountStatus: z.enum(['registered', 'missing', 'unavailable']),
 });
 export type PayoutDetailResponse = z.infer<typeof payoutDetailResponseSchema>;
+
+/**
+ * 振込のために、お振込先を伏せずに読む（決定 2026-08-21）。
+ *
+ * ⚠️ **精算ごとに読む。** 作家さまを直に指定する口にしていない——
+ * そうすると「作家さま一覧から口座を順に開く」ができてしまう。
+ * **払う相手の精算があるときだけ**開く形にしてある。
+ *
+ * ⚠️ **「取れなかった」を 3 つに分けている。** 運営の次の一手が違うため。
+ * 同じ顔で出すと、鍵の設定漏れと改ざんの疑いが同じ扱いになる。
+ */
+export const adminPayoutAccountViewSchema = z.object({
+  bankName: z.string(),
+  branchName: z.string(),
+  accountType: z.enum(['ordinary', 'checking']),
+  /** ⚠️ **ここだけが伏せていない値。** 画面から先へ写さない。 */
+  accountNumber: z.string(),
+  accountHolderKana: z.string(),
+  /** ⚠️ **いつ登録された内容か。** 直前に差し替わっていれば疑う手掛かりになる。 */
+  updatedAt: z.string(),
+});
+export type AdminPayoutAccountView = z.infer<typeof adminPayoutAccountViewSchema>;
+
+export const adminPayoutAccountResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('resolved'), account: adminPayoutAccountViewSchema }),
+  /** 作家さまがまだ登録していない。⚠️ 待っても変わらない。 */
+  z.object({ status: z.literal('missing') }),
+  /** この配備では預かる仕組みが無い（暗号鍵が未設定）。 */
+  z.object({ status: z.literal('not_configured') }),
+  /**
+   * 包みが解けなかった。
+   *
+   * ⚠️ **これは「時間をおけば直る」ではない。** 鍵の入れ替えを誤ったか、
+   * 行が差し替えられたかである。**振り込まないこと。**
+   */
+  z.object({ status: z.literal('undecipherable') }),
+  /**
+   * まだ下書きの精算である。
+   *
+   * ⚠️ **確定する前に口座を読む理由が無い。** 読む口を「振り込むため」に
+   * 絞っておくと、監査ログの 1 行が何のためだったかを後から説明できる。
+   */
+  z.object({ status: z.literal('not_payable_yet') }),
+]);
+export type AdminPayoutAccountResponse = z.infer<typeof adminPayoutAccountResponseSchema>;
 
 /**
  * 締め（下書きの作成）。
