@@ -165,6 +165,78 @@ describe('売上のまとめ', () => {
     expect(response.body.byArtwork).toEqual([]);
     expect(response.body.history).toEqual([]);
   });
+
+  /*
+    ⚠️ **この組でいちばん大事な 1 本。**
+
+    作家さまは月の途中で見込みを見て、翌月に締めた額を見る。**その 2 つが
+    ずれると「話が違う」になる。** ずれる原因は、見込みを別の式で出す
+    ことである（見込み用に手早く書いた合計と、締めのときの正しい合計）。
+
+    そうならないよう、見込みは `PayoutService.estimateFor` を通し、締める
+    ときと**同じ `buildFor`** を呼んでいる。ここでは月をまたいで、
+    6 月半ばに見た見込みと、7 月に締めた実額が一致することを確かめる。
+
+    ⚠️ **数字を直に書かない。** 見込み側の数字を期待値に書くと、両方が
+       同じ間違いをしたときに気づけない。見込みと実額を**突き合わせる**。
+  */
+  it('月をまたいでも、見込みと締めた実額がずれない', async () => {
+    const creator = actorToken('operator', 'user-operator');
+    // ⚠️ 6/10 のお買い上げ。返金の窓（14 日）は 6/24 に閉じる。
+    harness.payouts.candidates = [
+      {
+        orderId: 'order-june-1',
+        orderNumber: 'SNK-0601',
+        creatorAccountId: 'account-user-operator',
+        artworkTitleSnapshot: '朝霧の里',
+        paidAt: new Date('2026-06-10T00:00:00.000Z'),
+        grossAmount: 12000,
+        feeRateBps: 2000,
+        feeAmount: 2400,
+        netAmount: 9600,
+        refundableUntil: new Date('2026-06-24T00:00:00.000Z'),
+      },
+    ];
+
+    // --- 6 月半ば。作家さまが見込みを見る。 ---
+    harness.clock.set(new Date('2026-06-15T00:00:00.000Z'));
+    const estimate = await request(app.getHttpServer())
+      .get('/api/v1/creator/earnings')
+      .set(auth(creator))
+      .expect(200);
+    expect(estimate.body.current.state).toBe('estimate');
+    expect(estimate.body.current.periodKey).toBe('2026-06');
+    /*
+      ⚠️ **空同士を突き合わせていないことを確かめる。** 両方 0 なら、
+         この試験は何も見ていないのに通ってしまう。
+    */
+    expect(estimate.body.current.grossAmount).toBe(12000);
+    expect(estimate.body.current.netAmount).toBe(9600);
+
+    // --- 7 月。運営が 6 月を締める。 ---
+    harness.clock.set(new Date('2026-07-20T00:00:00.000Z'));
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/payouts/close')
+      .set(auth(actorToken('operator', 'closer-1')))
+      .send({ periodKey: '2026-06' })
+      .expect(201);
+
+    const after = await request(app.getHttpServer())
+      .get('/api/v1/creator/earnings')
+      .set(auth(creator))
+      .expect(200);
+    const closed = after.body.history.find(
+      (row: { periodKey: string }) => row.periodKey === '2026-06',
+    );
+
+    // ⚠️ 見込みで見えていた額が、そのまま締めた額になっている。
+    expect(closed).toBeDefined();
+    expect(closed.grossAmount).toBe(estimate.body.current.grossAmount);
+    expect(closed.feeAmount).toBe(estimate.body.current.feeAmount);
+    expect(closed.netAmount).toBe(estimate.body.current.netAmount);
+    // ⚠️ 「見込み」の顔のまま残さない。締めたことが分かる。
+    expect(closed.state).not.toBe('estimate');
+  });
 });
 
 describe('CSV', () => {

@@ -17,13 +17,21 @@ ALTER TABLE "legal_document_versions"
   ADD CONSTRAINT "legal_document_versions_kind_valid"
   CHECK ("kind" IN ('terms', 'privacy', 'tokushoho', 'creator_terms'));
 
--- 同意の側も、同じ語彙に揃える。
+-- 同意の側は、**同意を求める種類だけ**を足す。
+--
+-- ⚠️ **文書の語彙（上の 4 つ）へ揃えない。** 揃えると、
+--    「プライバシーポリシーにも同意を取ってある」と読める行を作れてしまい、
+--    実際には取っていない同意を取ったことにできる。
+--    ここに並ぶのは `CONSENT_REQUIRED_KINDS` と同じ 2 つだけ。
+-- ⚠️ **販売規約を足すのは、承諾が要る取り決めだから**（P1-2）。手数料の率、
+--    返金が起きたときの扱い、精算の時期——一方的に決めて従わせてよいもの
+--    ではない。ただし求める相手は作品を出される方で、買うだけの方ではない。
 ALTER TABLE "legal_consents"
   DROP CONSTRAINT IF EXISTS "legal_consents_kind_valid";
 
 ALTER TABLE "legal_consents"
   ADD CONSTRAINT "legal_consents_kind_valid"
-  CHECK ("kind" IN ('terms', 'privacy', 'tokushoho', 'creator_terms'));
+  CHECK ("kind" IN ('terms', 'creator_terms'));
 
 -- 作家さまのプロフィール。
 --
