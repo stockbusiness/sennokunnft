@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  PayoutAccountResponse,
+  PayoutAccountView,
   CreatorEarningsDetailResponse,
   CreatorEarningsResponse,
   CreatorProfileDetailView,
 } from '@sengoku/contracts';
 import {
+  isErr,
+  validatePayoutAccount,
   buildEarningsCsv,
   creatorSetupChecklist,
   estimateFromDraft,
@@ -29,8 +33,13 @@ import {
   type PayoutView,
   type SettlementSettingsRepository,
   type StoragePort,
+  type PayoutAccountCipherPort,
+  type PayoutAccountPort,
+  type PayoutAccountRecord,
+  type PayoutAccountType,
 } from '@sengoku/domain';
 import { DomainErrorException } from '../common/domain-error.filter';
+import type { NotificationService } from '../notification/notification.service';
 import type { PayoutService } from '../settlement/payout.service';
 
 /**
@@ -65,6 +74,20 @@ export class CreatorOperationsService {
     private readonly appEnvironment: IntegrationEnvironment,
     private readonly clock: ClockPort,
     private readonly audit: AuditLogPort,
+    /**
+     * お振込先（P1-3）。
+     *
+     * ⚠️ **`null` は「この配備では預かれない」。** 暗号鍵を設定していない
+     * 配備がある。必須にすると、そこで起動しなくなる。画面は
+     * 「まだご登録いただけません」と断る。
+     */
+    private readonly payoutAccounts: {
+      readonly store: PayoutAccountPort;
+      readonly cipher: PayoutAccountCipherPort;
+    } | null,
+    /** お振込先が変わったことを知らせる口。⚠️ `null` なら積まない。 */
+    private readonly notifications: NotificationService | null,
+    private readonly siteUrl: string,
   ) {}
 
   /** 売上のまとめ。⚠️ 進行中の期間は見込み、過ぎた期間は締めた記録。 */
@@ -125,12 +148,14 @@ export class CreatorOperationsService {
   }
 
   async profileOf(creatorAccountId: string): Promise<CreatorProfileDetailView> {
-    const [profile, account, consent] = await Promise.all([
+    const [profile, account, consent, payoutAccount] = await Promise.all([
       this.profiles.find(creatorAccountId),
       this.displayNames.find(creatorAccountId),
       this.consents === null
         ? Promise.resolve(null)
         : this.consents.findLatestConsent(creatorAccountId, 'creator_terms'),
+      // ⚠️ 預かれない配備では `undefined`。そのときは未登録として出る。
+      this.payoutAccounts?.store.find(creatorAccountId) ?? Promise.resolve(null),
     ]);
 
     return {
@@ -152,14 +177,110 @@ export class CreatorOperationsService {
       setup: creatorSetupChecklist({
         hasDisplayName: (account?.displayName ?? null) !== null,
         salesTermsAcceptedAt: consent?.consentedAt ?? null,
-        /*
-          ⚠️ **お振込先を預かる仕組みは、まだこの中に無い**（P1-3）。
-             常に「未登録」で返す。あるふりをしない。
-        */
-        hasPayoutAccount: false,
+        // お振込先（P1-3）。⚠️ 預かれない配備では、常に未登録として出る。
+        hasPayoutAccount: payoutAccount !== null,
         hasInvoiceNumber: (profile?.invoiceNumber ?? null) !== null,
       }).map((row) => ({ ...row })),
     };
+  }
+
+  /* --- お振込先（P1-3・`UD-124` 決定 2026-08-21）--- */
+
+  /**
+   * ご自分のお振込先を見る。
+   *
+   * ⚠️ **口座番号そのものは返さない。** 返すのは伏せた表記まで。画面を
+   * 開くたびに番号が経路へ流れる形にしない。振込のために全体が要るのは
+   * 運営だけで、そこは別の口（権限＋監査つき）にしてある。
+   */
+  async payoutAccountOf(creatorAccountId: string): Promise<PayoutAccountResponse> {
+    const record = await this.payoutAccounts?.store.find(creatorAccountId);
+    return { account: record == null ? null : toPayoutAccountView(record) };
+  }
+
+  /**
+   * お振込先を登録する・差し替える。
+   *
+   * ⚠️ **お金の行き先が変わる操作である。** 乗っ取られた側から見れば、
+   * いちばん実入りのある操作。**必ず記録し、ご本人へ知らせる**——
+   * 気づけるのは本人だけ。
+   *
+   * ⚠️ **記録に口座の値を残さない。** 監査ログに番号が残れば、包んだ意味が
+   * 無くなる。残すのは「変えた」という事実まで。
+   */
+  async savePayoutAccount(
+    creatorAccountId: string,
+    input: {
+      readonly bankName: string;
+      readonly branchName: string;
+      readonly accountType: PayoutAccountType;
+      readonly accountNumber: string;
+      readonly accountHolderKana: string;
+    },
+  ): Promise<PayoutAccountResponse> {
+    const payoutAccounts = this.payoutAccounts;
+    if (payoutAccounts === null) {
+      // ⚠️ 預かれない配備。**「登録できた」と見せない。**
+      throw new DomainErrorException('PAYOUT_ACCOUNT_UNAVAILABLE');
+    }
+
+    const validated = validatePayoutAccount(input);
+    if (isErr(validated)) {
+      throw new DomainErrorException(validated.error.code);
+    }
+
+    const now = this.clock.now();
+    const { replaced } = await payoutAccounts.store.save({
+      creatorAccountId,
+      bankName: validated.value.bankName,
+      branchName: validated.value.branchName,
+      accountType: validated.value.accountType,
+      /*
+        ⚠️ **結び付ける相手はアカウントID。** 別の作家さまの行へ暗号文を
+           貼り替えても復号できないようにする（支払先の差し替えを塞ぐ）。
+      */
+      sealedAccountNumber: payoutAccounts.cipher.seal(
+        validated.value.accountNumber,
+        creatorAccountId,
+      ),
+      maskedAccountNumber: validated.value.maskedAccountNumber,
+      accountHolderKana: validated.value.accountHolderKana,
+      updatedAt: now,
+    });
+
+    await this.audit.record({
+      actorAccountId: creatorAccountId,
+      action: 'payout_account.saved',
+      targetType: 'account',
+      targetId: creatorAccountId,
+      // ⚠️ 口座の値をここへ入れない。包んだ意味が無くなる。
+      summary: { replaced },
+    });
+
+    /*
+      ⚠️ **差し替えのときだけ知らせる。** 初めての登録に「変更されました」と
+         届くと、身に覚えのない知らせになる。
+      ⚠️ **変えた本人にも届ける。** 「押した本人だから要らない」ではない——
+         押したのが本人でないときに気づけるのが、この知らせの目的である。
+    */
+    if (replaced && this.notifications !== null) {
+      await this.notifications.enqueue({
+        eventType: 'payout_account.changed',
+        /*
+          ⚠️ **対象IDに時刻を含める。** アカウントだけを対象にすると、
+             2 回目以降の変更が重複として捨てられ、**乗っ取りの 2 回目が
+             知らされない**。
+        */
+        subjectId: `${creatorAccountId}:${String(now.getTime())}`,
+        accountId: creatorAccountId,
+        values: {
+          changedAt: formatJst(now),
+          contactUrl: `${this.siteUrl.replace(/\/+$/, '')}/contact`,
+        },
+      });
+    }
+
+    return this.payoutAccountOf(creatorAccountId);
   }
 
   /** プロフィールを保存する。⚠️ 表示名と画像には触れない。 */
@@ -334,4 +455,33 @@ function nextPayoutOf(
     amount: current.netAmount,
     dueAt: current.dueAt.toISOString(),
   };
+}
+
+/**
+ * 画面へ出す形にする。
+ *
+ * ⚠️ **口座番号そのものを載せない。** 載せる欄が契約に無いので、
+ * うっかり載せても型で落ちる。
+ */
+function toPayoutAccountView(record: PayoutAccountRecord): PayoutAccountView {
+  return {
+    bankName: record.bankName,
+    branchName: record.branchName,
+    accountType: record.accountType,
+    maskedAccountNumber: record.maskedAccountNumber,
+    accountHolderKana: record.accountHolderKana,
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+/** 日時。⚠️ 日本時間で出す（読むのは日本の作家さま）。 */
+function formatJst(value: Date): string {
+  return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value);
 }

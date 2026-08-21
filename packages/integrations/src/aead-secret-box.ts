@@ -63,6 +63,22 @@ export class AeadSecretBox implements SecretCipherPort {
   }
 
   seal(plaintext: string, scope: SecretScope): SealedSecret {
+    return this.sealWithAad(plaintext, aad(scope));
+  }
+
+  open(sealed: SealedSecret, scope: SecretScope): string | null {
+    return this.openWithAad(sealed, aad(scope));
+  }
+
+  /**
+   * 結び付け情報を直に渡して包む。
+   *
+   * ⚠️ **用途ごとに薄い口をかぶせて使うこと**（`PayoutAccountSecretBox` など）。
+   * ここを直接呼ぶと、結び付ける相手を呼ぶ側が毎回決めることになり、
+   * **同じ用途で違う値を渡した箇所**が必ず生まれる。そうなると復号できない
+   * 行が静かに残る。
+   */
+  sealWithAad(plaintext: string, boundTo: string): SealedSecret {
     const key = this.keys[this.activeKeyVersion];
     if (key === undefined) {
       // 構築時に確かめているので通常は起きない。型の上で保証されないため残す。
@@ -71,9 +87,9 @@ export class AeadSecretBox implements SecretCipherPort {
 
     const nonce = this.generateNonce();
     const cipher = createCipheriv(ALGORITHM, key, nonce);
-    // ⚠️ 結び付け情報。これにより、staging の暗号文を production の行へ
-    //    貼り替えても復号が失敗する（DB を触れる人にだけできる攻撃を塞ぐ）。
-    cipher.setAAD(Buffer.from(aad(scope), 'utf8'));
+    // ⚠️ 結び付け情報。これにより、暗号文を別の行へ貼り替えても復号が
+    //    失敗する（DB を触れる人にだけできる攻撃を塞ぐ）。
+    cipher.setAAD(Buffer.from(boundTo, 'utf8'));
 
     const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     return {
@@ -85,7 +101,8 @@ export class AeadSecretBox implements SecretCipherPort {
     };
   }
 
-  open(sealed: SealedSecret, scope: SecretScope): string | null {
+  /** 結び付け情報を直に渡して解く。⚠️ `sealWithAad` と同じ注意。 */
+  openWithAad(sealed: SealedSecret, boundTo: string): string | null {
     const key = this.keys[sealed.keyVersion];
     if (key === undefined) {
       // 交換で捨てられた version。理由は返さない。
@@ -100,7 +117,7 @@ export class AeadSecretBox implements SecretCipherPort {
       }
 
       const decipher = createDecipheriv(ALGORITHM, key, nonce);
-      decipher.setAAD(Buffer.from(aad(scope), 'utf8'));
+      decipher.setAAD(Buffer.from(boundTo, 'utf8'));
       decipher.setAuthTag(authTag);
 
       const plaintext = Buffer.concat([

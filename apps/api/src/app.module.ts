@@ -62,6 +62,8 @@ import type {
   // 作家さま運営（P1-2）。
   CreatorEarningsPort,
   CreatorProfilePort,
+  PayoutAccountCipherPort,
+  PayoutAccountPort,
 } from '@sengoku/domain';
 import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
@@ -533,6 +535,17 @@ export interface AppDependencies {
   readonly creatorOperations: {
     readonly profiles: CreatorProfilePort;
     readonly earnings: CreatorEarningsPort;
+    /**
+     * お振込先（P1-3・`UD-124` 決定 2026-08-21）。
+     *
+     * ⚠️ **省略できる。** 暗号鍵を設定していない配備では預かれない。
+     * **必須にすると、そこで起動しなくなる。** 画面は
+     * 「まだご登録いただけません」と断る。
+     */
+    readonly payoutAccounts?: {
+      readonly store: PayoutAccountPort;
+      readonly cipher: PayoutAccountCipherPort;
+    };
   };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
@@ -899,8 +912,15 @@ export class AppModule implements NestModule {
                使うことが、この画面の唯一の存在理由である。別に計算する
                口をここへ足さないこと。
           */
-          inject: [PayoutService],
-          useFactory: (payoutService: PayoutService): CreatorOperationsService =>
+          /*
+            ⚠️ **知らせは `optional`。** 繋いでいない配備では provider ごと
+               存在しない。必須にすると、そこで起動しなくなる。
+          */
+          inject: [PayoutService, { token: NotificationService, optional: true }],
+          useFactory: (
+            payoutService: PayoutService,
+            notifications: NotificationService | undefined,
+          ): CreatorOperationsService =>
             new CreatorOperationsService(
               payoutService,
               deps.payouts,
@@ -918,6 +938,15 @@ export class AppModule implements NestModule {
               deps.integrations?.appEnvironment ?? 'staging',
               deps.clock,
               deps.audit,
+              /*
+                お振込先（P1-3）。
+                ⚠️ **`null` は「この配備では預かれない」。** 暗号鍵を設定して
+                   いない配備がある。必須にすると、そこで起動しなくなる。
+                   画面は「まだご登録いただけません」と断る。
+              */
+              deps.creatorOperations.payoutAccounts ?? null,
+              notifications ?? null,
+              deps.notification?.siteUrl ?? '',
             ),
         },
         {

@@ -1,4 +1,10 @@
-import { CREATOR_SETUP_KEYS } from '@sengoku/domain';
+import {
+  ACCOUNT_HOLDER_MAX,
+  BANK_NAME_MAX,
+  BRANCH_NAME_MAX,
+  CREATOR_SETUP_KEYS,
+  PAYOUT_ACCOUNT_TYPES,
+} from '@sengoku/domain';
 import { z } from 'zod';
 
 /**
@@ -120,4 +126,44 @@ export const creatorEarningsQuerySchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
+});
+
+/**
+ * お振込先（P1-3・`UD-124` 決定 2026-08-21）。
+ *
+ * ⚠️ **読み戻しに口座番号そのものを入れない。** 入れると、画面を開くたびに
+ * 番号が経路へ流れる。出すのは**伏せた表記**まで。振込のために全体が要る
+ * のは運営だけで、そこは別の口（権限＋監査つき）にしてある。
+ *
+ * ⚠️ **本人確認書類の項目は無い**（`UD-124`）。項目が無ければ、実装が
+ * うっかり載せても型で落ちる。
+ */
+export const payoutAccountViewSchema = z.object({
+  bankName: z.string(),
+  branchName: z.string(),
+  accountType: z.enum(PAYOUT_ACCOUNT_TYPES),
+  /** `***4567`。⚠️ **ここから元へは戻せない。** */
+  maskedAccountNumber: z.string(),
+  accountHolderKana: z.string(),
+  updatedAt: z.string(),
+});
+export type PayoutAccountView = z.infer<typeof payoutAccountViewSchema>;
+
+/** ⚠️ `null` は「まだご登録がない」。 */
+export const payoutAccountResponseSchema = z.object({
+  account: payoutAccountViewSchema.nullable(),
+});
+export type PayoutAccountResponse = z.infer<typeof payoutAccountResponseSchema>;
+
+export const savePayoutAccountRequestSchema = z.object({
+  bankName: z.string().min(1).max(BANK_NAME_MAX),
+  branchName: z.string().min(1).max(BRANCH_NAME_MAX),
+  accountType: z.enum(PAYOUT_ACCOUNT_TYPES),
+  /*
+    ⚠️ **ここでは形を細かく見ない。** 空白やハイフンの落とし方、桁数の
+       許容はドメインが持つ（`validatePayoutAccount`）。2 か所に書くと、
+       片方だけ直したときに「画面は通るのに保存できない」が生まれる。
+  */
+  accountNumber: z.string().min(1).max(32),
+  accountHolderKana: z.string().min(1).max(ACCOUNT_HOLDER_MAX),
 });

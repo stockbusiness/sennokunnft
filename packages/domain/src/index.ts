@@ -997,4 +997,25 @@ export type {
   CreatorEarningsPort,
   CreatorProfilePort,
   CreatorProfileRecord,
+  PayoutAccountCipherPort,
+  PayoutAccountPort,
+  PayoutAccountRecord,
 } from './ports/creator';
+
+// お振込先（P1-3・`UD-124` 決定 2026-08-21）。
+// ⚠️ 本人確認書類は取らない。口座情報の確認をもって足りるとする。
+export {
+  ACCOUNT_HOLDER_MAX,
+  BANK_NAME_MAX,
+  BRANCH_NAME_MAX,
+  isPayoutAccountType,
+  maskAccountNumber,
+  PAYOUT_ACCOUNT_TYPES,
+  payoutAccountTypeLabel,
+  validatePayoutAccount,
+} from './creator/payout-account';
+export type {
+  PayoutAccountInput,
+  PayoutAccountType,
+  ValidatedPayoutAccount,
+} from './creator/payout-account';

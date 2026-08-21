@@ -47,6 +47,18 @@ export const NOTIFICATION_EVENT_TYPES = [
    * 変わるのに、黙って変えたことになる。
    */
   'legal.revised',
+  /**
+   * お振込先が変わった（P1-3）。
+   *
+   * ⚠️ **お金の行き先が変わることを、ご本人へ知らせる。** 乗っ取られた側から
+   * 見れば、いちばん実入りのある操作である。**気づけるのは本人だけ**なので、
+   * 変えた本人にも必ず届ける（「押した本人だから要らない」ではない）。
+   *
+   * ⚠️ **新しい口座の情報は載せない。** 乗っ取った側がこのメールを見れば
+   * 済むことになる。載せるのは「変わったこと」と「覚えが無ければご連絡を」
+   * まで。
+   */
+  'payout_account.changed',
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
@@ -65,6 +77,14 @@ export const NOTIFICATION_SUBJECT_TYPES = [
   'order',
   'entitlement',
   'refund',
+  /**
+   * お振込先（P1-3）。⚠️ 対象は作家さまのアカウント。
+   *
+   * ⚠️ **版を持たない。** 変わるたびに知らせたいので、対象を固定すると
+   * 2 回目以降が重複として捨てられる……が、**それは困らない**——
+   * 対象IDに変更の時刻を含めることで、変更ごとに 1 通にする。
+   */
+  'payout_account',
   /**
    * 法務文書の版（`UD-127`）。
    *
@@ -88,6 +108,7 @@ const SUBJECT_OF: Readonly<Record<NotificationEventType, NotificationSubjectType
   'refund.requested': 'refund',
   'refund.completed': 'refund',
   'legal.revised': 'legal_version',
+  'payout_account.changed': 'payout_account',
 };
 
 export function subjectTypeOf(eventType: NotificationEventType): NotificationSubjectType {
@@ -122,6 +143,12 @@ export const NOTIFICATION_VARIABLES: Readonly<Record<NotificationEventType, read
        読んだ方が何もできない。
   */
   'legal.revised': ['documentName', 'effectiveFrom', 'legalUrl'],
+  /*
+    ⚠️ **新しい口座の情報を語彙に入れない。** 入れられるようにすると、
+       いつか誰かが本文へ入れる。**語彙に無ければ、書きようがない。**
+       乗っ取った側がこのメールを見れば済む、という形にしない。
+  */
+  'payout_account.changed': ['changedAt', 'contactUrl'],
 };
 
 /** すべての種別で共通して使える語。⚠️ 事業者名は文面ごとに変えない。 */

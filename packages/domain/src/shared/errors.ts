@@ -345,6 +345,10 @@ export const DOMAIN_ERROR_CODES = [
    * 画面側が入力欄ごとに案内する（そちらのほうが直しやすい）。
    */
   'CREATOR_PROFILE_INVALID',
+  /** お振込先の内容を受け付けられない（P1-3）。⚠️ どの項目かは返さない。 */
+  'PAYOUT_ACCOUNT_INVALID',
+  /** この配備ではお振込先を預かれない（暗号鍵が未設定）。 */
+  'PAYOUT_ACCOUNT_UNAVAILABLE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

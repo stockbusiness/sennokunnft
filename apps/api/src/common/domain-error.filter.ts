@@ -184,6 +184,13 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   EMAIL_CHANGE_NOT_ALLOWED: HttpStatus.CONFLICT,
   // ⚠️ 要求の形は正しい。中身が受け付けられない。
   CREATOR_PROFILE_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
+  // お振込先（P1-3）。
+  PAYOUT_ACCOUNT_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
+  /*
+    ⚠️ **422 ではなく 503。** 入力が悪いのではなく、**この配備が受け取れない**。
+       422 にすると、作家さまが入力を直そうとして直らない。
+  */
+  PAYOUT_ACCOUNT_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -383,6 +390,16 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   // ⚠️ 「できません」で終わらせず、どこを直せばよいかへ誘導する。
   CREATOR_PROFILE_INVALID:
     'プロフィールの内容を保存できませんでした。文字数、リンクのアドレス（https から始まるもの）、インボイス登録番号の形をご確認ください。',
+  // --- お振込先（P1-3）---
+  /*
+    ⚠️ **どの項目がどう悪かったかを断定しない。** 検証の中身を写すと判定の
+       詳細が外へ出る。直しに行ける場所だけを伝える。
+    ⚠️ **名義がカナであることを、はっきり書く。** ここがいちばん詰まる。
+  */
+  PAYOUT_ACCOUNT_INVALID:
+    'お振込先を保存できませんでした。口座番号は数字で、口座名義はカタカナ（または英字）でご入力ください。',
+  PAYOUT_ACCOUNT_UNAVAILABLE:
+    'ただいまお振込先をお預かりできません。お手数ですが、時間をおいてからお試しください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
