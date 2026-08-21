@@ -54,6 +54,8 @@ import {
   PrismaNotificationHistoryRepository,
   PrismaNotificationOutboxRepository,
   PrismaEntitlementAdminRepository,
+  PrismaAttestationRepository,
+  PrismaProductionReadinessRepository,
   PrismaNotificationSweepRepository,
   PrismaOperationsRepository,
   PrismaNotificationTemplateRepository,
@@ -89,6 +91,7 @@ import {
   acceptingGeneration,
   CREDENTIAL_VERIFICATION_LIMIT,
   DEFAULT_OPERATIONS_THRESHOLDS,
+  DEFAULT_PRODUCTION_READINESS_THRESHOLDS,
 } from '@sengoku/domain';
 import { WATCHED_JOB_KEYS } from './order/internal-jobs.controller';
 import { describeIntegrationEnvironment } from './integration/environment-summary';
@@ -714,6 +717,30 @@ async function bootstrap(): Promise<void> {
         entitlements: new PrismaEntitlementAdminRepository(prisma),
         thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
         jobKeys: WATCHED_JOB_KEYS,
+      },
+      /*
+        本番販売ガード（P0-7）。
+        ⚠️ **省略できない。** 繋ぎ忘れた配備でガードごと消えるのは、
+           「売ってよい」と判定するのと同じである。
+        ⚠️ **`environment` はプロセスの環境。** 要求から受け取らない。
+           受け取れると、本番のプロセスで staging の判定を通せてしまう。
+      */
+      production: {
+        readiness: new PrismaProductionReadinessRepository(
+          prisma,
+          settlementEnvironment,
+          env.PAYMENT_PROVIDER,
+        ),
+        attestations: new PrismaAttestationRepository(prisma, settlementEnvironment),
+        environment: settlementEnvironment,
+        thresholds: DEFAULT_PRODUCTION_READINESS_THRESHOLDS,
+        /*
+          メールの試し送り。
+          ⚠️ **送信の配線を使い回す。** 別に鍵を読む口を作ると、
+             「試し送りは通るが本番の知らせは届かない」が起きうる。
+             確かめたいのは、まさにその本番の経路である。
+        */
+        mailTestSender: notificationDelivery?.mailer ?? null,
       },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),

@@ -58,6 +58,11 @@ import type {
 } from '@sengoku/domain';
 import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
+import type {
+  AttestationPort,
+  ProductionReadinessPort,
+  ProductionReadinessThresholds,
+} from '@sengoku/domain';
 import type { SenNoKuniHmacVerifier } from '@sengoku/integrations';
 import type { Logger } from '@sengoku/observability';
 
@@ -139,6 +144,9 @@ import { BuyerNotifier } from './notification/buyer-notifier';
 import { NotificationSweepService } from './notification/sweep.service';
 import { OperationsController } from './operations/operations.controller';
 import { OperationsDashboardService } from './operations/dashboard.service';
+import { ProductionController } from './production/production.controller';
+import { ProductionReadinessService } from './production/readiness.service';
+import { MailCheckService, type MailTestSender } from './production/mail-check.service';
 import {
   AdminSettlementController,
   SETTLEMENT_CONFIG,
@@ -466,6 +474,22 @@ export interface AppDependencies {
     /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
     readonly jobKeys: readonly string[];
   };
+  /**
+   * 本番販売ガード（P0-7）。
+   *
+   * ⚠️ **省略できる形にしていない。** 省略できると、繋ぎ忘れた配備で
+   * ガードごと消える——**それは「売ってよい」と判定するのと同じ**である。
+   * 判定に要る事実を集められない配備は、そもそも本番で売れない。
+   */
+  readonly production: {
+    readonly readiness: ProductionReadinessPort;
+    readonly attestations: AttestationPort;
+    /** ⚠️ このプロセスの環境。要求から受け取らない。 */
+    readonly environment: IntegrationEnvironment;
+    readonly thresholds: ProductionReadinessThresholds;
+    /** メールの試し送り。⚠️ 持たない配備では `null`（押されたら断る）。 */
+    readonly mailTestSender: MailTestSender | null;
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -593,6 +617,8 @@ export class AppModule implements NestModule {
         NotificationController,
         // 運営ダッシュボード（P0-6）。⚠️ 見るのと動かすので権限が違う。
         OperationsController,
+        // 本番販売ガード（P0-7）。⚠️ 判定そのものは支払い口を作る側が行う。
+        ProductionController,
       ],
       providers: [
         {
@@ -789,6 +815,31 @@ export class AppModule implements NestModule {
               },
             ]),
         {
+          provide: ProductionReadinessService,
+          useFactory: (): ProductionReadinessService =>
+            new ProductionReadinessService(
+              deps.production.readiness,
+              deps.production.attestations,
+              deps.clock,
+              deps.audit,
+              deps.production.environment,
+              deps.production.thresholds,
+            ),
+        },
+        {
+          provide: MailCheckService,
+          inject: [IntegrationService_],
+          useFactory: (integrations: IntegrationService_): MailCheckService =>
+            new MailCheckService(
+              integrations,
+              deps.staffMembers,
+              deps.clock,
+              deps.audit,
+              deps.production.environment,
+              deps.production.mailTestSender,
+            ),
+        },
+        {
           provide: OperationsDashboardService,
           /*
             ⚠️ **やり直しの相手は `optional`。** 発行も配送も、繋いで
@@ -966,7 +1017,8 @@ export class AppModule implements NestModule {
           : [
               {
                 provide: CheckoutService,
-                useFactory: () =>
+                inject: [ProductionReadinessService],
+                useFactory: (productionReadiness: ProductionReadinessService) =>
                   new CheckoutService(
                     deps.orders.repository,
                     payments.repository,
@@ -982,6 +1034,12 @@ export class AppModule implements NestModule {
                            果たせないまま販売できてしまう。配線の欠けは
                            運営が直せるが、法に触れた販売は取り消せない。
                       */
+                      /*
+                        本番販売ガード（P0-7）。
+                        ⚠️ **画面を隠すだけにしない。** 管理画面で
+                           「準備中」と出しても、この口は直接叩ける。
+                      */
+                      assertSellable: () => productionReadiness.assertSellable(),
                       canDiscloseCheckoutTerms: async () => {
                         if (legalDocuments === undefined) {
                           return false;

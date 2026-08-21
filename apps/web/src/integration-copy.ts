@@ -206,6 +206,12 @@ export function integrationServiceLabel(service: IntegrationStatusView['service'
       return '画像の保管先';
     case 'auth':
       return 'ログイン';
+    /*
+      ⚠️ **鍵は管理画面から触れない。** ここに名前があるのは、
+         本番販売の前に「送れること」を確かめた記録を置くため（P0-7）。
+    */
+    case 'mail':
+      return 'メールの送信';
   }
 }
 

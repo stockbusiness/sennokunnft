@@ -68,6 +68,16 @@ model Account {
   /// ⚠️ UD-503（購入者のメールを平文で持たない）は維持したまま、
   /// オーナーが自分で入力したスタッフの連絡先だけを持つ。
   staffEmail     String?       @map("staff_email")
+  /// 二要素で入った最後の時刻（`UD-801` の段階導入 段 1・P0-7 の 8 番目）。
+  ///
+  /// ⚠️ **「入ったことがある」であって、いまの設定ではない。** 相手側の
+  /// 設定を毎回問い合わせるのではなく、二要素で入った記録を根拠にする。
+  /// 外したことはこちらからは分からない——だから判定の側で期限を切る。
+  ///
+  /// ⚠️ **この列だけでは誰も拒否しない**（段 1）。拒否を入れるのは、
+  /// オーナーが登録を済ませたあと。順序を飛ばすと、オーナーが自分の
+  /// 管理画面から締め出される。
+  lastAal2At     DateTime?     @map("last_aal2_at") @db.Timestamptz(6)
 
   /// 共通顧客ID。**発行元は代理店システムのみ**で、本システムは受け取るだけ。
   /// ⚠️ 主キーにしない。外部が発行した値を主キーにすると、
@@ -113,6 +123,7 @@ model Account {
   payouts                      Payout[]                     @relation("PayoutCreator")
   paidPayouts                  Payout[]                     @relation("PayoutPayer")
   resolvedOperationsReviews    OperationsReview[]           @relation("OperationsReviewResolver")
+  productionAttestations       ProductionAttestation[]      @relation("ProductionAttester")
   notifications                NotificationDelivery[]       @relation("NotificationRecipient")
 
   @@unique([authProvider, authSubject])
@@ -383,10 +394,45 @@ model PaymentCredential {
   activatedBy   Account?       @relation("PaymentCredentialActivator", fields: [activatedByAccountId], references: [id], onDelete: Restrict)
   payments      Payment[]
   webhookEvents WebhookEvent[]
+  attestations  ProductionAttestation[]
 
   @@unique([provider, environment, generation])
   @@index([provider, environment, status, generation(sort: Desc)])
   @@map("payment_credentials")
+}
+
+/// 人が残す証跡（実運営 指示書 P0-7）。
+///
+/// 10 条件のうち 8 つは機械が確かめられる。残る 2 つ——通し試験が通ったことと、
+/// 責任者が承認したこと——は、機械には確かめようがない。
+///
+/// ⚠️ **これは「試験が通った証明」ではない。** 押した人が「通した」と言って
+/// いる記録にすぎない。だからこそ誰がいつ押したかを残し、書き換えられない
+/// ようにする。
+///
+/// ⚠️ **追記のみ。** 更新・削除はトリガーが拒む
+/// （`production_attestations_append_only`）。アプリ側にも口を作らない。
+/// 訂正は新しい記録を足して表す。
+model ProductionAttestation {
+  id                  String   @id @default(uuid()) @db.Uuid
+  /// e2e_sale_test / owner_approval
+  kind                String
+  /// staging / production。⚠️ 環境をまたいで証拠を使い回させない。
+  environment         String
+  succeeded           Boolean
+  /// ⚠️ **どの決済世代についての記録か。** 紐づけないと、前の鍵で通した
+  /// 試験が新しい鍵の証拠として残り続ける。
+  credentialId        String   @map("credential_id") @db.Uuid
+  attestedByAccountId String   @map("attested_by_account_id") @db.Uuid
+  /// ⚠️ 秘密を書かせない。画面にも注意書きを出す。
+  note                String?
+  attestedAt          DateTime @default(now()) @map("attested_at") @db.Timestamptz(6)
+
+  credential PaymentCredential @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  attestedBy Account           @relation("ProductionAttester", fields: [attestedByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([kind, environment, attestedAt(sort: Desc)])
+  @@map("production_attestations")
 }
 
 // ============================================================================

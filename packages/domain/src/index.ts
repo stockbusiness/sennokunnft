@@ -881,3 +881,39 @@ export type {
   EntitlementAdminRecord,
   OperationsMetricsPort,
 } from './ports/operations';
+
+// --- 本番販売ガード（P0-7） -----------------------------------------------
+export {
+  DEFAULT_PRODUCTION_READINESS_THRESHOLDS,
+  PRODUCTION_READINESS_CHECKS,
+  PRODUCTION_REQUIRED_JOB_KEYS,
+  evaluateProductionReadiness,
+} from './production/readiness';
+export type {
+  AcceptingCredentialFact,
+  AttestationFact,
+  ConnectionCheckFact,
+  OwnerMfaFact,
+  ProductionReadiness,
+  ProductionReadinessCheck,
+  ProductionReadinessCheckKey,
+  ProductionReadinessFacts,
+  ProductionReadinessThresholds,
+} from './production/readiness';
+export {
+  ATTESTATION_KINDS,
+  ATTESTATION_NOTE_MAX_LENGTH,
+  decideAttestation,
+  isAttestationKind,
+} from './production/attestation';
+export type {
+  AttestationDecision,
+  AttestationKind,
+  AttestationRejection,
+  RecordAttestationCommand,
+} from './production/attestation';
+export type {
+  AttestationPort,
+  AttestationRecord,
+  ProductionReadinessPort,
+} from './ports/production';

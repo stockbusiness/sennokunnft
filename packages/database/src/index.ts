@@ -84,6 +84,11 @@ export {
 export { PrismaNotificationSweepRepository } from './repositories/notification-sweep.repository';
 export type { NotifiableEntitlement } from './repositories/notification-sweep.repository';
 export { PrismaOperationsRepository } from './repositories/operations.repository';
+// 本番販売ガード（P0-7）。
+export {
+  PrismaAttestationRepository,
+  PrismaProductionReadinessRepository,
+} from './repositories/production.repository';
 export { PrismaEntitlementAdminRepository } from './repositories/entitlement-admin.repository';
 export type {
   EntitlementAdminDetail,
