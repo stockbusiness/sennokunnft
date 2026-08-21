@@ -163,6 +163,11 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   NOTIFICATION_RENDER_INCOMPLETE: HttpStatus.INTERNAL_SERVER_ERROR,
   NOTIFICATION_TEMPLATE_NOT_PUBLISHED: HttpStatus.CONFLICT,
   NOTIFICATION_NOT_RESENDABLE: HttpStatus.CONFLICT,
+
+  // --- 運営ダッシュボード（P0-6）---
+  // ⚠️ 404 ではない。「無い」のではなく「この配備では使えない」。
+  ISSUANCE_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  WALLET_DELIVERY_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -333,6 +338,11 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   // ⚠️ 「できません」で終わらせず、どの状態なら送り直せるかを書く。
   NOTIFICATION_NOT_RESENDABLE:
     'この知らせは送り直せません。送り直せるのは、送信に失敗した知らせだけです。',
+
+  // --- 運営ダッシュボード（P0-6）---
+  ISSUANCE_UNAVAILABLE: 'この環境では受取権の発行をやり直せません。設定をご確認ください。',
+  WALLET_DELIVERY_UNAVAILABLE:
+    'この環境ではウォレットへの再送ができません。外部サービスの設定をご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

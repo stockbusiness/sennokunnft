@@ -337,3 +337,31 @@ export type {
   NotificationTemplateView,
   SendNotificationsResponse,
 } from './notification';
+
+// --- 運営ダッシュボード（P0-6） -------------------------------------------
+export {
+  consistencyFindingSchema,
+  consistencyResponseSchema,
+  entitlementAdminDetailSchema,
+  entitlementAdminListResponseSchema,
+  entitlementAdminQuerySchema,
+  entitlementAdminSchema,
+  operationsDashboardResponseSchema,
+  operationsIndicatorSchema,
+  OPERATIONS_SEVERITIES,
+  redeliverResponseSchema,
+  retryIssuanceResponseSchema,
+} from './operations';
+export type {
+  ConsistencyFindingView,
+  ConsistencyResponse,
+  EntitlementAdminDetailView,
+  EntitlementAdminListResponse,
+  EntitlementAdminQuery,
+  EntitlementAdminView,
+  OperationsDashboardResponse,
+  OperationsIndicatorView,
+  OperationsSeverity,
+  RedeliverResponse,
+  RetryIssuanceResponse,
+} from './operations';

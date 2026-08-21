@@ -156,7 +156,15 @@ export function PriceTag({ price, taxIncluded = true }: PriceTagProps): ReactNod
   );
 }
 
-export type StatusToneName = 'neutral' | 'progress' | 'success' | 'warning';
+/**
+ * 印の色味。
+ *
+ * ⚠️ **`danger` を広げない。** これは弁柄（取り返しのつかない操作の色）で、
+ * 「いま人が手を動かさないと物事が止まる」ものにだけ使う。
+ * 数が多いだけ・待ちが溜まっているだけのものは `warning` に留める。
+ * どこにでも赤があると、赤は警告として働かなくなる。
+ */
+export type StatusToneName = 'neutral' | 'progress' | 'success' | 'warning' | 'danger';
 
 export interface StatusBadgeProps {
   readonly label: string;

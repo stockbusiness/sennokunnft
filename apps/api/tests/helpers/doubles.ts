@@ -93,8 +93,15 @@ import type {
   NotificationTemplateRecord,
   NotificationTemplateRepository,
   NotificationTemplateStatus,
+  ConsistencyCounts,
+  EntitlementAdminDetailRecord,
+  EntitlementAdminPort,
+  EntitlementAdminRecord,
+  JobHeartbeat,
+  OperationsCounts,
+  OperationsMetricsPort,
 } from '@sengoku/domain';
-import { NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
+import { DEFAULT_OPERATIONS_THRESHOLDS, NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
 import {
   canManuallyResend,
   domainError,
@@ -2694,6 +2701,9 @@ export interface TestHarness extends AppDependencies {
   readonly operationsReviews: InMemoryOperationsReviews;
   /** ⚠️ 積まれた知らせを覗くため、実体の型で持つ。 */
   readonly notifications: InMemoryNotifications;
+  /** ⚠️ 置いた数から正しい色が出るかを見るため、実体の型で持つ。 */
+  readonly operationsMetrics: InMemoryOperations;
+  readonly entitlementAdmin: InMemoryEntitlementAdmin;
   readonly notificationTemplates: InMemoryNotificationTemplates;
   readonly collectibles: InMemoryCollectibles;
 }
@@ -2896,6 +2906,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const issuance = new InMemoryEntitlementIssuance();
   const operationsReviews = new InMemoryOperationsReviews();
   const notifications = new InMemoryNotifications();
+  const operationsMetrics = new InMemoryOperations();
+  const entitlementAdmin = new InMemoryEntitlementAdmin();
   const notificationTemplates = new InMemoryNotificationTemplates();
   const collectibles = new InMemoryCollectibles();
   const legalConsents = new InMemoryLegalConsents(legalRepository);
@@ -2910,6 +2922,15 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     refunds,
     // 運用確認キュー（M3a）。⚠️ 積めたかどうかを試験から覗く。
     operationsReviews,
+    // 運営ダッシュボード（P0-6）。⚠️ 置いた数から色が決まるかを見る。
+    operationsMetrics,
+    entitlementAdmin,
+    operations: {
+      repository: operationsMetrics,
+      entitlements: entitlementAdmin,
+      thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
+      jobKeys: ['issue-entitlements', 'deliver-entitlements', 'send-notifications'],
+    },
     // 購入者への知らせ（P0-4）。⚠️ 積めたかどうかを試験から覗く。
     notifications,
     notificationTemplates,
@@ -3569,5 +3590,121 @@ export class InMemoryNotifications implements NotificationOutboxPort, Notificati
       sentAt: row.sentAt,
       createdAt: row.createdAt,
     };
+  }
+}
+
+/**
+ * 運営ダッシュボードの数え上げ（試験用）。
+ *
+ * ⚠️ **数字を試験から直に置く。** 本物の集計を真似ると、集計の試験に
+ * なってしまう（そちらは DB の結合試験で見る）。ここで見たいのは
+ * 「置いた数から、正しい色が出るか」である。
+ */
+export class InMemoryOperations implements OperationsMetricsPort {
+  counts_: OperationsCounts = {
+    todayOrderCount: 0,
+    todayPaidAmount: 0,
+    todayPaidCount: 0,
+    todayPaymentFailedCount: 0,
+    issuancePendingCount: 0,
+    issuanceFailedCount: 0,
+    walletDeliveryPendingCount: 0,
+    walletDeliveryFailedCount: 0,
+    operationsReviewOpenCount: 0,
+    notificationPendingCount: 0,
+    notificationFailedCount: 0,
+    integrationFailureCount: 0,
+    lastWebhookReceivedAt: TEST_NOW,
+  };
+
+  consistency_: ConsistencyCounts = {
+    paidWithoutEntitlements: [],
+    supplyDrift: [],
+    revokedWithoutWalletNotice: [],
+    claimedWithoutDelivery: [],
+    unmaskedRecipient: [],
+  };
+
+  /** 記録された実行。⚠️ 種別ごとに 1 行を上書きする（本物と同じ）。 */
+  readonly jobRuns = new Map<
+    string,
+    { lastSucceededAt: Date | null; lastFailedAt: Date | null; lastOutcome: string | null }
+  >();
+
+  counts(): Promise<OperationsCounts> {
+    return Promise.resolve(this.counts_);
+  }
+
+  heartbeats(jobKeys: readonly string[]): Promise<readonly JobHeartbeat[]> {
+    return Promise.resolve(
+      jobKeys.map((jobKey) => {
+        const row = this.jobRuns.get(jobKey);
+        return {
+          jobKey,
+          lastSucceededAt: row?.lastSucceededAt ?? null,
+          lastFailedAt: row?.lastFailedAt ?? null,
+          lastOutcome: (row?.lastOutcome as JobHeartbeat['lastOutcome']) ?? null,
+        };
+      }),
+    );
+  }
+
+  recordJobRun(input: {
+    readonly jobKey: string;
+    readonly outcome: 'succeeded' | 'failed';
+    readonly now: Date;
+  }): Promise<void> {
+    const existing = this.jobRuns.get(input.jobKey);
+    this.jobRuns.set(input.jobKey, {
+      // ⚠️ 失敗しても成功の時刻を消さない（本物と同じ）。
+      lastSucceededAt:
+        input.outcome === 'succeeded' ? input.now : (existing?.lastSucceededAt ?? null),
+      lastFailedAt: input.outcome === 'failed' ? input.now : (existing?.lastFailedAt ?? null),
+      lastOutcome: input.outcome,
+    });
+    return Promise.resolve();
+  }
+
+  consistency(): Promise<ConsistencyCounts> {
+    return Promise.resolve(this.consistency_);
+  }
+}
+
+/** 受取権の一覧（試験用）。⚠️ 個人情報の項目を持たない。 */
+export class InMemoryEntitlementAdmin implements EntitlementAdminPort {
+  rows: EntitlementAdminDetailRecord[] = [];
+
+  list(query: {
+    readonly status?: string | undefined;
+    readonly accountId?: string | undefined;
+    readonly limit: number;
+  }): Promise<{
+    readonly items: readonly EntitlementAdminRecord[];
+    readonly nextCursor: string | null;
+  }> {
+    const items = this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.accountId === undefined || row.accountId === query.accountId)
+      .slice(0, query.limit);
+    return Promise.resolve({ items, nextCursor: null });
+  }
+
+  findById(id: string): Promise<EntitlementAdminDetailRecord | null> {
+    const row = this.rows.find((candidate) => candidate.id === id);
+    return Promise.resolve(row ?? null);
+  }
+
+  listUndeliveredForAccount(accountId: string, limit: number): Promise<readonly string[]> {
+    return Promise.resolve(
+      this.rows
+        .filter(
+          (row) =>
+            row.accountId === accountId &&
+            row.status === 'claimed' &&
+            row.walletDeliveryStatus !== 'delivered',
+        )
+        .slice(0, limit)
+        .map((row) => row.id),
+    );
   }
 }

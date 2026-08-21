@@ -1,0 +1,79 @@
+import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import type {
+  ConsistencyResponse,
+  EntitlementAdminDetailView,
+  EntitlementAdminListResponse,
+  OperationsDashboardResponse,
+  RedeliverResponse,
+  RetryIssuanceResponse,
+} from '@sengoku/contracts';
+import { entitlementAdminQuerySchema } from '@sengoku/contracts';
+import type { Actor } from '@sengoku/auth';
+import { CurrentActor, RequireAction } from '../auth/auth.guard';
+import { parseOrThrow } from '../common/validation';
+import { OperationsDashboardService } from './dashboard.service';
+
+/**
+ * 運営ダッシュボード（実運営 指示書 P0-6）。
+ *
+ * ⚠️ **見るのと動かすのを分けている。** 一覧と指標は閲覧者にも開くが、
+ * やり直し（発行・再配送）は運営だけ。どちらも外部へ実際に送る操作である。
+ *
+ * ⚠️ **個人を特定できる値を返さない。** 返すのは件数と識別子まで。
+ * 契約（zod）に項目そのものが無いので、載せようがない。
+ */
+@Controller('api/v1/admin/operations')
+export class OperationsController {
+  constructor(private readonly operations: OperationsDashboardService) {}
+
+  /** 朝いちばんに見る画面。 */
+  @Get('dashboard')
+  @RequireAction('operations.view')
+  dashboard(): Promise<OperationsDashboardResponse> {
+    return this.operations.dashboard();
+  }
+
+  /**
+   * 記録どうしの食い違いを探す。
+   *
+   * ⚠️ **直さない。数えるだけ。** 黙って直すと、なぜ食い違ったのかが
+   * 分からないまま同じことが繰り返される。
+   */
+  @Get('consistency')
+  @RequireAction('operations.view')
+  consistency(): Promise<ConsistencyResponse> {
+    return this.operations.consistency();
+  }
+
+  @Get('entitlements')
+  @RequireAction('operations.view')
+  listEntitlements(@Query() query: unknown): Promise<EntitlementAdminListResponse> {
+    return this.operations.listEntitlements(parseOrThrow(entitlementAdminQuerySchema, query));
+  }
+
+  @Get('entitlements/:id')
+  @RequireAction('operations.view')
+  findEntitlement(@Param('id') id: string): Promise<EntitlementAdminDetailView> {
+    return this.operations.findEntitlement(id);
+  }
+
+  /** 発行をやり直す。⚠️ 何度押しても増えない。 */
+  @Post('orders/:orderId/retry-issuance')
+  @RequireAction('operations.retry')
+  retryIssuance(
+    @CurrentActor() actor: Actor,
+    @Param('orderId') orderId: string,
+  ): Promise<RetryIssuanceResponse> {
+    return this.operations.retryIssuance(actor, orderId);
+  }
+
+  /** その方ぶんをまとめて送り直す。 */
+  @Post('accounts/:accountId/redeliver')
+  @RequireAction('operations.retry')
+  redeliver(
+    @CurrentActor() actor: Actor,
+    @Param('accountId') accountId: string,
+  ): Promise<RedeliverResponse> {
+    return this.operations.redeliverForAccount(actor, accountId);
+  }
+}

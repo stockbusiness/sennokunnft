@@ -110,6 +110,10 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   // ⚠️ **印が無ければ operator でも拒否。** 公開した文面はそのまま全員へ届く。
   'notification.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
   'notification.resend': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // --- 運営ダッシュボード（P0-6）---
+  // ⚠️ 監査役も「いま何が滞っているか」を見られる。動かすことはできない。
+  'operations.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  'operations.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
   // --- 法務文書 ---
   // ⚠️ 監査役も過去の版を見られる。「その時点でどう書いてあったか」を
   //    確かめるのは監査の仕事そのもの。

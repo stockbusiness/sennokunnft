@@ -80,7 +80,13 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
       orders, wallet_delivery_outbox, listings, artworks, idempotency_keys, hmac_nonces, accounts,
       webhook_events, outbox_events, audit_logs, legal_consents, legal_document_versions,
       payment_credentials, settlement_settings,
-      notification_deliveries
+      notification_deliveries,
+      /*
+        ⚠️ **時計仕掛けの記録も消す。** 残すと、次の試験が
+           「一度も動いていない」を作れなくなる——止まった時計に
+           気づけるかどうかを確かめる試験が、そこで空振りする。
+      */
+      job_runs
     RESTART IDENTITY CASCADE
   `);
 

@@ -87,6 +87,13 @@ export const ACTIONS = [
   'notification.publish',
   // ⚠️ 再送は運営の日常業務。本文は確定済みで、新しく何かを決める操作ではない。
   'notification.resend',
+  // --- 運営ダッシュボード（P0-6）---
+  // ⚠️ **閲覧は閲覧者にも開く。** 「いま何が滞っているか」は監査の
+  //    対象そのもの。出るのは件数と識別子までで、個人情報は含まない。
+  'operations.view',
+  // ⚠️ **やり直しは運営だけ。** 発行のやり直しも再配送も、外部へ
+  //    実際に送る操作である。見るのと動かすのを分ける。
+  'operations.retry',
   // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
   // ⚠️ 下書きは運営スタッフが書ける。**公開はオーナーだけ**（下の
   //    `OWNER_ONLY_ACTIONS`）。公開した版は取り消せず、そこに書いた
@@ -257,6 +264,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'notification.publish',
     'notification.resend',
+    'operations.view',
+    'operations.retry',
     'legal.view',
     'legal.edit',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
@@ -289,6 +298,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'operations_review.view',
     // ⚠️ 見るだけ。文面は書けず、送り直しもできない。
     'notification.view',
+    // ⚠️ 見るだけ。やり直しはできない。
+    'operations.view',
     // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
     //    確かめるのは、まさに監査の仕事。
     'legal.view',
