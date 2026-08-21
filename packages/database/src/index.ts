@@ -103,3 +103,9 @@ export {
   PrismaCustomerDirectoryRepository,
   PrismaEmailChangeRequestRepository,
 } from './repositories/customer.repository';
+
+// 作家さま運営（P1-2）。
+export {
+  PrismaCreatorEarningsRepository,
+  PrismaCreatorProfileDetailRepository,
+} from './repositories/creator.repository';

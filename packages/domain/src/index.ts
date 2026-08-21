@@ -956,3 +956,36 @@ export type {
   EmailChangeRequestPort,
   EmailChangeRequestRecord,
 } from './ports/customer';
+
+// --- 作家さま運営（P1-2） -------------------------------------------------
+export {
+  EARNINGS_CSV_COLUMNS,
+  buildEarningsCsv,
+  estimateFromDraft,
+  summarizeByArtwork,
+  toEarningsCsvRows,
+} from './creator/earnings';
+export type { ArtworkSales, CreatorPeriodEarnings } from './creator/earnings';
+export {
+  CREATOR_BIO_MAX_LENGTH,
+  CREATOR_LINK_LABEL_MAX_LENGTH,
+  CREATOR_LINK_MAX_COUNT,
+  CREATOR_SETUP_KEYS,
+  CREATOR_SHOP_NAME_MAX_LENGTH,
+  INVOICE_NUMBER_PATTERN,
+  creatorSetupChecklist,
+  validateCreatorProfile,
+} from './creator/profile';
+export type {
+  CreatorLink,
+  CreatorProfileDraft,
+  CreatorSetupItem,
+  CreatorSetupKey,
+  ProfileDecision,
+  ProfileRejection,
+} from './creator/profile';
+export type {
+  CreatorEarningsPort,
+  CreatorProfilePort,
+  CreatorProfileRecord,
+} from './ports/creator';

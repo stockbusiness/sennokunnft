@@ -197,6 +197,21 @@ export const ACTIONS = [
    * 「作品を 1 つ作らないと名乗れない」という順序を強いない。
    */
   'profile.manage_own',
+  /**
+   * 自分の売上を見る（P1-2）。
+   *
+   * ⚠️ **`_own` である。** 誰の分かを指定する引数を持たない。売上は
+   * その方の商いの中身そのもので、他人のものを覗く口を作らない。
+   * 運営が作家さまの支払いを見るときは `payout.view` を使う。
+   *
+   * ⚠️ **会員なら誰でも持つ。** この場では会員なら誰でも出品できる
+   * （`UD-806`）ので、「買う人」と「売る人」は同じロールである。
+   * 一度も売っていない方には、空の売上が返るだけ。
+   *
+   * ⚠️ **`auditor` には渡さない。** 監査は「運営が何をしたか」を見る
+   * 仕事で、自分名義の商いを持たない。
+   */
+  'creator.earnings.view_own',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -260,6 +275,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'legal.consent',
     // ⚠️ 自分の分だけ。他人の表示名は書き換えられない。
     'profile.manage_own',
+    // ⚠️ 自分の分だけ。売っていなければ空が返る。
+    'creator.earnings.view_own',
   ],
   operator: [
     'artwork.view_public',
@@ -329,6 +346,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'payout.mark_paid',
     // 運営も自分名義で出品できる（`artwork.create_own` と同じ考え方）。
     'profile.manage_own',
+    // ⚠️ **自分名義の売上だけ。** 作家さまの支払いは `payout.view` で見る。
+    'creator.earnings.view_own',
   ],
   auditor: [
     'artwork.view_public',

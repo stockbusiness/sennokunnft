@@ -112,6 +112,12 @@ import type {
   EmailChangeRequestPort,
   EmailChangeRequestRecord,
   IdentityVerificationMethod,
+  // 作家さま運営（P1-2）。
+  CreatorEarningsPort,
+  CreatorLink,
+  CreatorProfilePort,
+  CreatorProfileRecord,
+  PayoutLineDraft,
 } from '@sengoku/domain';
 import { DEFAULT_OPERATIONS_THRESHOLDS, NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
 import {
@@ -2754,6 +2760,8 @@ export interface TestHarness extends AppDependencies {
   readonly attestations: InMemoryAttestations;
   readonly mailTestSender: FakeMailTestSender;
   readonly customerDirectory: InMemoryCustomerDirectory;
+  readonly creatorProfileDetails: InMemoryCreatorProfileDetails;
+  readonly creatorEarnings: InMemoryCreatorEarnings;
   readonly accountNotes: InMemoryAccountNotes;
   readonly emailChangeRequests: InMemoryEmailChangeRequests;
   readonly entitlementAdmin: InMemoryEntitlementAdmin;
@@ -2971,6 +2979,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const attestations = new InMemoryAttestations();
   const mailTestSender = new FakeMailTestSender();
   const customerDirectory = new InMemoryCustomerDirectory();
+  const creatorProfileDetails = new InMemoryCreatorProfileDetails();
+  const creatorEarnings = new InMemoryCreatorEarnings();
   const accountNotes = new InMemoryAccountNotes();
   const emailChangeRequests = new InMemoryEmailChangeRequests();
   const entitlementAdmin = new InMemoryEntitlementAdmin();
@@ -2995,6 +3005,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     customerDirectory,
     accountNotes,
     emailChangeRequests,
+    // 作家さま運営（P1-2）。⚠️ 保存した値を試験から覗くため、実体の型で持つ。
+    creatorProfileDetails,
+    creatorEarnings,
+    creatorOperations: {
+      profiles: creatorProfileDetails,
+      earnings: creatorEarnings,
+    },
     customers: {
       directory: customerDirectory,
       notes: accountNotes,
@@ -4095,5 +4112,74 @@ export class InMemoryEmailChangeRequests implements EmailChangeRequestPort {
       return;
     }
     this.rows[index] = change(row);
+  }
+}
+
+/**
+ * 作家さまのプロフィールの中身（試験用・P1-2）。
+ *
+ * ⚠️ **表示名の代替実装（`InMemoryCreatorProfiles`）とは別物。** あちらは
+ * 一意性を持つ表示名、こちらは紹介文や画像。名前が似ているので、
+ * 取り違えないよう別の名前にしてある。
+ */
+export class InMemoryCreatorProfileDetails implements CreatorProfilePort {
+  readonly rows = new Map<string, CreatorProfileRecord>();
+
+  find(accountId: string): Promise<CreatorProfileRecord | null> {
+    return Promise.resolve(this.rows.get(accountId) ?? null);
+  }
+
+  save(input: {
+    readonly accountId: string;
+    readonly shopName: string | null;
+    readonly bio: string | null;
+    readonly links: readonly CreatorLink[];
+    readonly invoiceNumber: string | null;
+    readonly now: Date;
+  }): Promise<CreatorProfileRecord> {
+    const current = this.rows.get(input.accountId);
+    const next: CreatorProfileRecord = {
+      accountId: input.accountId,
+      shopName: input.shopName,
+      bio: input.bio,
+      links: input.links,
+      // ⚠️ 画像の鍵に触れない（本物と同じ）。触ると、直すたびに画像が消える。
+      iconKey: current?.iconKey ?? null,
+      coverKey: current?.coverKey ?? null,
+      invoiceNumber: input.invoiceNumber,
+    };
+    this.rows.set(input.accountId, next);
+    return Promise.resolve(next);
+  }
+
+  saveImageKey(input: {
+    readonly accountId: string;
+    readonly slot: 'icon' | 'cover';
+    readonly key: string;
+    readonly now: Date;
+  }): Promise<void> {
+    const current = this.rows.get(input.accountId) ?? {
+      accountId: input.accountId,
+      shopName: null,
+      bio: null,
+      links: [],
+      iconKey: null,
+      coverKey: null,
+      invoiceNumber: null,
+    };
+    this.rows.set(input.accountId, {
+      ...current,
+      ...(input.slot === 'icon' ? { iconKey: input.key } : { coverKey: input.key }),
+    });
+    return Promise.resolve();
+  }
+}
+
+/** 締めた精算の明細（試験用）。 */
+export class InMemoryCreatorEarnings implements CreatorEarningsPort {
+  readonly lines = new Map<string, PayoutLineDraft[]>();
+
+  linesOf(payoutId: string): Promise<readonly PayoutLineDraft[]> {
+    return Promise.resolve(this.lines.get(payoutId) ?? []);
   }
 }

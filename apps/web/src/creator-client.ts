@@ -1,10 +1,16 @@
 import {
   adminArtworkSchema,
   adminListingSchema,
+  creatorEarningsDetailResponseSchema,
+  creatorEarningsResponseSchema,
+  creatorProfileDetailSchema,
   creatorProfileSchema,
   uploadImageResponseSchema,
   type CreatorArtwork,
+  type CreatorEarningsDetailResponse,
+  type CreatorEarningsResponse,
   type CreatorListing,
+  type CreatorProfileDetailView,
   type CreatorProfileView,
 } from '@sengoku/contracts';
 import { z } from '@sengoku/validation';
@@ -246,4 +252,76 @@ export function fetchMyProfile(): Promise<CreatorResult<CreatorProfileView>> {
 /** 自分の表示名を決める・変える。 */
 export function updateMyProfile(displayName: string): Promise<CreatorResult<CreatorProfileView>> {
   return call('/api/v1/creator/profile', creatorProfileSchema, json({ displayName }, 'PUT'));
+}
+
+// --- 売上とプロフィール（P1-2）------------------------------------------
+
+/*
+  ⚠️ **どの口にも「誰の分か」を渡さない。** アカウントは API 側が
+     トークンから取る。ここで渡せる形にすると、そこが他人の売上を
+     覗く道になる——売上は、その方の商いの中身そのものである。
+*/
+
+export function fetchMyEarnings(): Promise<CreatorResult<CreatorEarningsResponse>> {
+  return call('/api/v1/creator/earnings', creatorEarningsResponseSchema);
+}
+
+/** ある期間の明細。⚠️ 省略なら進行中の期間。 */
+export function fetchMyEarningsDetail(
+  periodKey?: string,
+): Promise<CreatorResult<CreatorEarningsDetailResponse>> {
+  const query = periodKey === undefined ? '' : `?periodKey=${encodeURIComponent(periodKey)}`;
+  return call(`/api/v1/creator/earnings/detail${query}`, creatorEarningsDetailResponseSchema);
+}
+
+export function fetchMyProfileDetail(): Promise<CreatorResult<CreatorProfileDetailView>> {
+  return call('/api/v1/creator/profile/detail', creatorProfileDetailSchema);
+}
+
+export function saveMyProfileDetail(input: {
+  shopName: string | null;
+  bio: string | null;
+  links: readonly { label: string; url: string }[];
+  invoiceNumber: string | null;
+}): Promise<CreatorResult<CreatorProfileDetailView>> {
+  return call('/api/v1/creator/profile/detail', creatorProfileDetailSchema, json(input, 'PUT'));
+}
+
+/**
+ * 明細の CSV。
+ *
+ * ⚠️ **`call()` を使わない。** あちらは JSON を前提に スキーマで検証する。
+ * CSV はそのまま渡す。
+ *
+ * ⚠️ **本文を画面へ埋め込まない。** 受け取ったものを、そのまま
+ * ダウンロードとして返す（route handler 側）。
+ */
+export async function fetchMyEarningsCsv(
+  periodKey?: string,
+): Promise<CreatorResult<{ body: string }>> {
+  const token = await creatorToken();
+  if (token === null) {
+    return { ok: false, reason: 'unauthorized' };
+  }
+  const query = periodKey === undefined ? '' : `?periodKey=${encodeURIComponent(periodKey)}`;
+  const { WEB_API_BASE_URL } = getWebEnv();
+  let response: Response;
+  try {
+    response = await fetch(`${WEB_API_BASE_URL}/api/v1/creator/earnings/csv${query}`, {
+      headers: { authorization: `Bearer ${token}`, accept: 'text/csv' },
+      cache: 'no-store',
+    });
+  } catch {
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, reason: 'unauthorized' };
+  }
+  if (response.status >= 400 && response.status < 500) {
+    return { ok: false, reason: 'rejected', ...(await errorCodeOf(response)) };
+  }
+  if (!response.ok) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  return { ok: true, data: { body: await response.text() } };
 }

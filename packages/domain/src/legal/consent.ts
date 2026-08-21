@@ -14,7 +14,20 @@ import type { LegalDocumentKind, LegalDocumentVersion } from './document';
  */
 
 /** 同意を求める文書。⚠️ 増やすときは、なぜ同意が要るのかを書くこと。 */
-export const CONSENT_REQUIRED_KINDS = ['terms'] as const;
+export const CONSENT_REQUIRED_KINDS = [
+  'terms',
+  /**
+   * 販売規約（作家さま向け・P1-2）。
+   *
+   * **こちらと作家さまのあいだの取り決めなので、承諾が要る。** 手数料の
+   * 率、返金が起きたときの扱い、精算の時期——どれも一方的に決めて従わせて
+   * よいものではない。
+   *
+   * ⚠️ **買う人向けの利用規約とは別に取る。** 同意すべき内容も時点も違う。
+   * 束ねると、買っただけの人が販売規約に同意したことになる。
+   */
+  'creator_terms',
+] as const;
 export type ConsentRequiredKind = (typeof CONSENT_REQUIRED_KINDS)[number];
 
 export function requiresConsent(kind: LegalDocumentKind): kind is ConsentRequiredKind {

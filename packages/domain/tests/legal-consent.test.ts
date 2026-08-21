@@ -45,9 +45,16 @@ describe('同意を求める文書', () => {
        原則「公表」で足り、「同意」が要るのは第三者提供などの場面。
        束ねると、必要な同意が取れていないのに取れたつもりになる。
   */
-  it('利用規約だけ', () => {
-    expect(CONSENT_REQUIRED_KINDS).toEqual(['terms']);
+  it('利用規約と販売規約', () => {
+    expect(CONSENT_REQUIRED_KINDS).toEqual(['terms', 'creator_terms']);
     expect(requiresConsent('terms')).toBe(true);
+    /*
+      ⚠️ **販売規約は「同意が要る文書」だが、ログイン時には求めない**（P1-2）。
+         こちらと作家さまのあいだの取り決めなので承諾が要る一方、
+         **買うだけの方に販売規約を承諾させない**。ログイン時の判定は
+         `LegalService` が `'terms'` だけを見る（束ねていない）。
+    */
+    expect(requiresConsent('creator_terms')).toBe(true);
     expect(requiresConsent('privacy')).toBe(false);
     expect(requiresConsent('tokushoho')).toBe(false);
   });

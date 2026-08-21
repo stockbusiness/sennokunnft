@@ -59,6 +59,9 @@ import type {
   AccountNotePort,
   CustomerDirectoryPort,
   EmailChangeRequestPort,
+  // 作家さま運営（P1-2）。
+  CreatorEarningsPort,
+  CreatorProfilePort,
 } from '@sengoku/domain';
 import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
@@ -148,6 +151,8 @@ import { BuyerNotifier } from './notification/buyer-notifier';
 import { NotificationSweepService } from './notification/sweep.service';
 import { OperationsController } from './operations/operations.controller';
 import { CustomerController } from './customer/customer.controller';
+import { CreatorOperationsController } from './catalog/creator-operations.controller';
+import { CreatorOperationsService } from './catalog/creator-operations.service';
 import { CustomerSupportService } from './customer/customer.service';
 import { OperationsDashboardService } from './operations/dashboard.service';
 import { ProductionController } from './production/production.controller';
@@ -507,6 +512,16 @@ export interface AppDependencies {
     readonly notes: AccountNotePort;
     readonly emailChanges: EmailChangeRequestPort;
   };
+  /**
+   * 作家さま運営（P1-2）。
+   *
+   * ⚠️ **誰の分かを要求から受け取る口を、この形に足さない。** 売上は
+   * その方の商いの中身そのもので、他人が覗いてよいものではない。
+   */
+  readonly creatorOperations: {
+    readonly profiles: CreatorProfilePort;
+    readonly earnings: CreatorEarningsPort;
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -637,6 +652,7 @@ export class AppModule implements NestModule {
         // 本番販売ガード（P0-7）。⚠️ 判定そのものは支払い口を作る側が行う。
         ProductionController,
         CustomerController,
+        CreatorOperationsController,
       ],
       providers: [
         {
@@ -862,6 +878,34 @@ export class AppModule implements NestModule {
               deps.audit,
               deps.production.environment,
               deps.production.mailTestSender,
+            ),
+        },
+        {
+          provide: CreatorOperationsService,
+          /*
+            ⚠️ **見込みは `PayoutService` を通す。** 締めるときと同じ関数を
+               使うことが、この画面の唯一の存在理由である。別に計算する
+               口をここへ足さないこと。
+          */
+          inject: [PayoutService],
+          useFactory: (payoutService: PayoutService): CreatorOperationsService =>
+            new CreatorOperationsService(
+              payoutService,
+              deps.payouts,
+              deps.creatorOperations.earnings,
+              deps.creatorOperations.profiles,
+              deps.profiles,
+              /*
+                ⚠️ **`null` は「この配備では同意を確かめられない」。** 法務
+                   文書の仕組みを繋いでいない配備がある。繋いでいなければ
+                   「未同意」として出す——**同意したことにしない**。
+              */
+              deps.legalDocuments?.consents ?? null,
+              deps.settlement,
+              deps.storage,
+              deps.integrations?.appEnvironment ?? 'staging',
+              deps.clock,
+              deps.audit,
             ),
         },
         {

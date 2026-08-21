@@ -370,6 +370,47 @@ suite('規約への同意（`UD-126`）', () => {
     ).rejects.toSatisfy((error: unknown) => violatesConstraint(error, 'legal_consents_kind_valid'));
   });
 
+  /*
+    ⚠️ **販売規約は同意を記録できる**（P1-2）。文書の側の語彙は 4 つに
+       広げたが、**同意の側は 2 つのまま**である。両者を同じ語彙へ
+       揃えたくなるが、揃えた瞬間に上の穴（取っていない同意を取ったことに
+       できる）が開く。ここでその 2 つを釘付けにする。
+  */
+  it('販売規約は同意を記録できる（同意の語彙は利用規約と販売規約の 2 つだけ）', async () => {
+    const draft = await repo.create({
+      kind: 'creator_terms',
+      title: '販売規約',
+      bodyText: '本文',
+      tokushoho: null,
+      createdByAccountId: accountId,
+    });
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "legal_consents" ("account_id", "kind", "version_id", "version")
+         VALUES ($1::uuid, 'creator_terms', $2::uuid, 1)`,
+        accountId,
+        draft.id,
+      ),
+    ).resolves.toBe(1);
+
+    /*
+      ⚠️ **語彙そのものを釘付けにする。** 行を 1 件ずつ試すやり方だと、
+         種類が増えたときに試し忘れる。制約の本文を読んで、
+         `terms` と `creator_terms` **以外が入っていないこと**を確かめる。
+         特商法（表示義務であって承諾するものではない）も、
+         プライバシーポリシーも、ここには現れてはいけない。
+    */
+    const [constraint] = await prisma.$queryRawUnsafe<{ definition: string }[]>(
+      `SELECT pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = 'legal_consents_kind_valid'`,
+    );
+    expect(constraint?.definition).toContain("'terms'");
+    expect(constraint?.definition).toContain("'creator_terms'");
+    expect(constraint?.definition).not.toContain("'privacy'");
+    expect(constraint?.definition).not.toContain("'tokushoho'");
+  });
+
   it('再同意の印は、印が立った版より前に同意した人にだけ効く', async () => {
     const consents = new PrismaLegalConsentRepository(prisma);
     const first = await publishTerms(1);

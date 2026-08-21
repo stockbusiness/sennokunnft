@@ -15,7 +15,7 @@ import { DraftForm, PublishForm } from '../forms';
  *
  * ⚠️ **過去の版を消す操作を置かない。** API にも無い。
  */
-const KINDS: readonly LegalDocumentKind[] = ['terms', 'privacy', 'tokushoho'];
+const KINDS: readonly LegalDocumentKind[] = ['terms', 'privacy', 'tokushoho', 'creator_terms'];
 
 function isKind(value: string): value is LegalDocumentKind {
   return (KINDS as readonly string[]).includes(value);
