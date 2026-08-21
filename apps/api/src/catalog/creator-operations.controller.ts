@@ -3,9 +3,11 @@ import type {
   CreatorEarningsDetailResponse,
   CreatorEarningsResponse,
   CreatorProfileDetailView,
+  PayoutAccountResponse,
 } from '@sengoku/contracts';
 import {
   creatorEarningsQuerySchema,
+  savePayoutAccountRequestSchema,
   updateCreatorProfileDetailRequestSchema,
 } from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
@@ -85,11 +87,43 @@ export class CreatorOperationsController {
     return this.creator.saveProfile(requireAccountId(actor), parsed);
   }
 
+  /* --- お振込先（P1-3・`UD-124` 決定 2026-08-21）--- */
+
+  /**
+   * ご自分のお振込先を見る。
+   *
+   * ⚠️ **口座番号そのものは返らない。** 返るのは伏せた表記（`***4567`）まで。
+   */
+  @Get('payout-account')
+  @RequireAction('profile.manage_own')
+  payoutAccount(@CurrentActor() actor: Actor): Promise<PayoutAccountResponse> {
+    return this.creator.payoutAccountOf(requireAccountId(actor));
+  }
+
+  /**
+   * お振込先を登録する・差し替える。
+   *
+   * ⚠️ **誰の分かを受け取らない。** アカウントはトークンから取る。受け取れる
+   * 形にすると、**そこが他人の支払先を差し替える道になる**——この仕組みで
+   * いちばん実入りのある攻撃である。
+   *
+   * ⚠️ **差し替えたらご本人へ知らせが飛ぶ**（気づけるのは本人だけ）。
+   */
+  @Put('payout-account')
+  @RequireAction('profile.manage_own')
+  savePayoutAccount(
+    @CurrentActor() actor: Actor,
+    @Body() body: unknown,
+  ): Promise<PayoutAccountResponse> {
+    const parsed = parseOrThrow(savePayoutAccountRequestSchema, body);
+    return this.creator.savePayoutAccount(requireAccountId(actor), parsed);
+  }
+
   /*
     ⚠️ **ここに置かないもの:**
       - 誰の分かを指定して売上を見る口（他人の商いの中身が見える）
       - 作品審査の申請・承認（`UD-102` と衝突。決定待ち）
-      - お振込先の登録（P1-3）
+      - 他人のお振込先を見る口（支払先を差し替える道になる）
   */
 }
 

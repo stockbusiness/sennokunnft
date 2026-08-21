@@ -171,12 +171,27 @@ describe('売る準備', () => {
   });
 
   /*
-    ⚠️ **登録できるかのように見せない。** 振込先を預かる仕組みは
-       まだ無い（P1-3）。
+    ⚠️ **未登録なら、どこで登録するかまで伝える。** 「未登録」とだけ出すと、
+       登録する場所を探させてしまう（P1-3）。
   */
-  it('振込先は「準備中」と伝える', () => {
+  it('振込先が未登録なら、登録する場所を伝える', () => {
     const rows = creatorSetupChecklist({ ...READY, hasPayoutAccount: false });
-    expect(rows.find((row) => row.key === 'payout_account')?.detail).toContain('準備中');
+    const detail = rows.find((row) => row.key === 'payout_account')?.detail ?? '';
+    expect(detail).toContain('お店の情報');
+    // ⚠️ 「準備中」はもう出さない（預かれるようになった）。
+    expect(detail).not.toContain('準備中');
+  });
+
+  /*
+    ⚠️ **「確認済み」と書かない**（`UD-124`）。確かめられるのは形だけで、
+       口座が実在するかは振込を試みたときに初めて分かる。
+  */
+  it('登録済みでも「確認済み」とは言わない', () => {
+    const rows = creatorSetupChecklist({ ...READY, hasPayoutAccount: true });
+    const row = rows.find((candidate) => candidate.key === 'payout_account');
+    expect(row?.done).toBe(true);
+    expect(row?.detail).toContain('登録済み');
+    expect(row?.detail).not.toContain('確認済み');
   });
 
   it('同意していなければ、そう出る', () => {

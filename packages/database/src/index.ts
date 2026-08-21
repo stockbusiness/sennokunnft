@@ -108,4 +108,5 @@ export {
 export {
   PrismaCreatorEarningsRepository,
   PrismaCreatorProfileDetailRepository,
+  PrismaPayoutAccountRepository,
 } from './repositories/creator.repository';

@@ -427,6 +427,9 @@ export {
   creatorLinkSchema,
   creatorPeriodEarningsSchema,
   creatorProfileDetailSchema,
+  payoutAccountResponseSchema,
+  payoutAccountViewSchema,
+  savePayoutAccountRequestSchema,
   updateCreatorProfileDetailRequestSchema,
 } from './creator-operations';
 export type {
@@ -435,4 +438,6 @@ export type {
   CreatorEarningsResponse,
   CreatorPeriodEarningsView,
   CreatorProfileDetailView,
+  PayoutAccountResponse,
+  PayoutAccountView,
 } from './creator-operations';

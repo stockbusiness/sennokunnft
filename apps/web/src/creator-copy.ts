@@ -140,9 +140,43 @@ export const CREATOR_COPY = {
        登録する場所を探させてしまう。まだ無いことをこちらから言う。
   */
   payoutAccountTitle: 'お振込先',
-  payoutAccountPending: 'まだご登録いただけません（準備中）',
-  payoutAccountPendingHint:
-    'お振込先をご登録いただく仕組みを、いま用意しています。整い次第こちらでご案内しますので、いまは何もなさらなくて大丈夫です。',
+  /*
+    ⚠️ **「確認します」と書かない**（`UD-124` 決定 2026-08-21）。こちらが
+       確かめられるのは形だけで、口座が実在するかは振込を試みたときに
+       初めて分かる。書くと、間違って登録した方が「確認されたはず」と思う。
+  */
+  payoutAccountDescription: '売上をお振込みする口座です。お通帳の表記どおりにご入力ください。',
+  payoutAccountMissing: 'まだご登録いただいていません',
+  payoutAccountMissingHint:
+    'ご登録いただくまで、お振込みができません。締めの前までにご登録ください。',
+  fieldBankName: '金融機関名',
+  fieldBankNameHint: '例: 千ノ国銀行、ゆうちょ銀行',
+  fieldBranchName: '支店名',
+  fieldBranchNameHint: '例: 本店、稲葉山支店',
+  fieldAccountType: '預金種別',
+  fieldAccountNumber: '口座番号',
+  /*
+    ⚠️ **桁数を書かない。** 金融機関によって違う。「7桁」と書くと、
+       違う方が「間違っているのでは」と手を止める。
+  */
+  fieldAccountNumberHint: '数字でご入力ください。ハイフンや空白は入れても大丈夫です。',
+  fieldAccountHolder: '口座名義',
+  /*
+    ⚠️ **ここがいちばん詰まる。** カナであることを、はっきり書く。
+  */
+  fieldAccountHolderHint:
+    'カタカナでご入力ください（漢字はお使いいただけません）。お通帳の表記どおりにお願いします。',
+  submitPayoutAccount: 'この内容で登録する',
+  payoutAccountSaved: 'お振込先を登録しました',
+  /*
+    ⚠️ **変えたら知らせが飛ぶことを、押す前に伝える。** あとから届くと、
+       身に覚えのない知らせに見える。
+  */
+  payoutAccountChangeHint:
+    'あとから変更できます。変更されると、ご登録のご連絡先へお知らせが届きます。',
+  payoutAccountUnavailable: 'ただいまお振込先をお預かりできません',
+  payoutAccountUnavailableHint:
+    'こちらの不具合です。お手数ですが、時間をおいてからお試しください。',
 
   notSellableNotice: 'ご購入の受付はまだ開始できません',
   notSellableHint:

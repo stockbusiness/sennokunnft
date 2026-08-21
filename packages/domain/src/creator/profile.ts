@@ -163,8 +163,12 @@ export interface CreatorSetupItem {
 /**
  * 何が済んでいて、何が済んでいないか。
  *
- * ⚠️ **振込先は「まだこの仕組みに無い」。** 登録の口は P1-3。無いものを
- * 「未登録」と出すのは正しいが、**登録できるかのように見せない**。
+ * ⚠️ **ここで「売らせない」判定をしない。** 案内であって、門ではない。
+ * 門にすると、判定が画面と API の 2 か所に分かれる。
+ *
+ * ⚠️ **お振込先は「登録済み」までしか言わない**（`UD-124` 決定 2026-08-21）。
+ * 確かめられるのは形だけで、口座が実在するかは振込を試みたときに初めて
+ * 分かる。**「確認済み」と書かない。**
  */
 export function creatorSetupChecklist(input: {
   readonly hasDisplayName: boolean;
@@ -197,9 +201,14 @@ export function creatorSetupChecklist(input: {
       label: 'お振込先',
       done: input.hasPayoutAccount,
       required: true,
+      /*
+        ⚠️ **「確認済み」と書かない**（`UD-124`）。確かめられるのは形だけで、
+           口座が実在するかは振込を試みたときに初めて分かる。「登録済み」で
+           止める。
+      */
       detail: input.hasPayoutAccount
         ? '登録済みです。'
-        : 'お振込先をお預かりする仕組みは準備中です。決まりましたらご案内します。',
+        : 'お振込みに必要です。お店の情報の画面からご登録ください。',
     },
     {
       key: 'invoice_number',

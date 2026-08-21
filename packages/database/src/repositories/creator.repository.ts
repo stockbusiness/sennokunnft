@@ -1,8 +1,11 @@
+import { isPayoutAccountType } from '@sengoku/domain';
 import type {
   CreatorEarningsPort,
   CreatorLink,
   CreatorProfilePort,
   CreatorProfileRecord,
+  PayoutAccountPort,
+  PayoutAccountRecord,
   PayoutLineDraft,
 } from '@sengoku/domain';
 import type { PrismaClient } from '../../generated/client';
@@ -155,4 +158,86 @@ function toLinks(value: unknown): readonly CreatorLink[] {
     }
     return [{ label, url }];
   });
+}
+
+/**
+ * 作家さまのお振込先（P1-3）。
+ *
+ * ⚠️ **口座番号は包んだまま出し入れする。** このクラスは中身を知らない。
+ * 解けるのは、鍵を持つ側（`PayoutAccountCipherPort`）だけ。
+ *
+ * ⚠️ **消す口を置かない。** 「登録をやめる」は、いまのところ要らない
+ * （振り込めなくなるだけで、作家さまの得にならない）。要るとなったら、
+ * そのときに**何が起きるか**を決めてから足す。
+ */
+export class PrismaPayoutAccountRepository implements PayoutAccountPort {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async find(creatorAccountId: string): Promise<PayoutAccountRecord | null> {
+    const row = await this.prisma.creatorPayoutAccount.findUnique({
+      where: { creatorAccountId },
+    });
+    if (row === null) {
+      return null;
+    }
+    if (!isPayoutAccountType(row.accountType)) {
+      /*
+        ⚠️ **知らない種別を黙って通さない。** DB の CHECK が守っているので
+           ここへは来ないはずだが、来たなら CHECK が外れているということ。
+           そのまま振込の画面へ出すより、止めたほうがよい。
+      */
+      throw new Error(`unknown payout account type: ${row.accountType}`);
+    }
+    return {
+      creatorAccountId: row.creatorAccountId,
+      bankName: row.bankName,
+      branchName: row.branchName,
+      accountType: row.accountType,
+      sealedAccountNumber: {
+        ciphertext: row.accountNumberCiphertext,
+        nonce: row.accountNumberNonce,
+        authTag: row.accountNumberAuthTag,
+        keyVersion: row.keyVersion,
+        /*
+          ⚠️ **`lastFour` は保存していない。** 伏せた表記から取り出す。
+             同じ値を 2 か所に持つと、片方だけ古くなる。
+        */
+        lastFour: row.maskedAccountNumber.replace(/^\*+/u, ''),
+      },
+      maskedAccountNumber: row.maskedAccountNumber,
+      accountHolderKana: row.accountHolderKana,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async save(record: PayoutAccountRecord): Promise<{ readonly replaced: boolean }> {
+    const data = {
+      bankName: record.bankName,
+      branchName: record.branchName,
+      accountType: record.accountType,
+      accountNumberCiphertext: record.sealedAccountNumber.ciphertext,
+      accountNumberNonce: record.sealedAccountNumber.nonce,
+      accountNumberAuthTag: record.sealedAccountNumber.authTag,
+      keyVersion: record.sealedAccountNumber.keyVersion,
+      maskedAccountNumber: record.maskedAccountNumber,
+      accountHolderKana: record.accountHolderKana,
+      updatedAt: record.updatedAt,
+    };
+
+    /*
+      ⚠️ **差し替えだったかを返す。** 知らせの文面が変わる——初めての登録に
+         「変更されました」と届くと、身に覚えのない知らせになる。
+    */
+    const existing = await this.prisma.creatorPayoutAccount.findUnique({
+      where: { creatorAccountId: record.creatorAccountId },
+      select: { creatorAccountId: true },
+    });
+
+    await this.prisma.creatorPayoutAccount.upsert({
+      where: { creatorAccountId: record.creatorAccountId },
+      create: { creatorAccountId: record.creatorAccountId, ...data },
+      update: data,
+    });
+    return { replaced: existing !== null };
+  }
 }

@@ -128,6 +128,8 @@ model Account {
   accountNotes                 AccountNote[]                @relation("AccountNoteSubject")
   authoredAccountNotes         AccountNote[]                @relation("AccountNoteAuthor")
   emailChangeRequests          EmailChangeRequest[]         @relation("EmailChangeSubject")
+  /// お振込先（P1-3）。⚠️ 1 人につき 1 件。
+  payoutAccount                CreatorPayoutAccount?        @relation("CreatorPayoutAccount")
   openedEmailChanges           EmailChangeRequest[]         @relation("EmailChangeOpener")
   verifiedEmailChanges         EmailChangeRequest[]         @relation("EmailChangeVerifier")
   settledEmailChanges          EmailChangeRequest[]         @relation("EmailChangeSettler")
@@ -1629,4 +1631,34 @@ model CreatorProfile {
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@map("creator_profiles")
+}
+
+/// 作家さまのお振込先（P1-3・`UD-124` 決定 2026-08-21）。
+///
+/// ⚠️ **本人確認書類は取らない。** 口座情報の確認をもって足りるとする決定。
+/// 書類の画像もマイナンバーも持たない。**持たないと決めたものは列を作らない。**
+///
+/// ⚠️ **作家さま 1 人につき 1 件。** 主キーをアカウントIDにしてある。
+/// 「どちらへ振り込むか」を人が選ぶ形にすると、選び間違いが送金の間違いになる。
+model CreatorPayoutAccount {
+  creatorAccountId        String   @id @map("creator_account_id") @db.Uuid
+  bankName                String   @map("bank_name")
+  branchName              String   @map("branch_name")
+  /// ordinary / checking。⚠️ CHECK で縛る（振込依頼書に載る値）。
+  accountType             String   @map("account_type")
+  /// 口座番号（包んだもの）。⚠️ **平文の列は無い。**
+  accountNumberCiphertext String   @map("account_number_ciphertext")
+  accountNumberNonce      String   @map("account_number_nonce")
+  accountNumberAuthTag    String   @map("account_number_auth_tag")
+  keyVersion              String   @map("key_version")
+  /// 画面用（`***4567`）。⚠️ ここから元へは戻せない。
+  maskedAccountNumber     String   @map("masked_account_number")
+  accountHolderKana       String   @map("account_holder_kana")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// ⚠️ お振込先が残っているあいだ、アカウントは消せない（Restrict）。
+  creator Account @relation("CreatorPayoutAccount", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+
+  @@map("creator_payout_accounts")
 }

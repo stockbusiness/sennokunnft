@@ -23,7 +23,7 @@ import {
  *  1. **他人の売上が見えないこと。** 誰の分かを指定する口が無い
  *  2. **CSV に買った方の情報が入らないこと**
  *  3. **見込みが「まだ締めていない」と分かること**
- *  4. **お振込先が「準備中」と正直に出ること**（P1-3）
+ *  4. **お振込先を、他人が差し替えられないこと**（P1-3）
  */
 
 let app: INestApplication;
@@ -367,11 +367,7 @@ describe('プロフィール', () => {
 });
 
 describe('売る準備', () => {
-  /*
-    ⚠️ **お振込先を預かる仕組みは、まだこの中に無い**（P1-3）。
-       あるふりをしない。
-  */
-  it('お振込先は「準備中」と出る', async () => {
+  it('お振込先が未登録なら、そう出る', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/creator/profile/detail')
       .set(auth(actorToken('operator')))
@@ -379,18 +375,6 @@ describe('売る準備', () => {
 
     const payout = response.body.setup.find((row: { key: string }) => row.key === 'payout_account');
     expect(payout.done).toBe(false);
-    expect(payout.detail).toContain('準備中');
-  });
-
-  /*
-    ⚠️ **お振込先を登録する口を作っていない**（P1-3）。
-  */
-  it('お振込先を登録する口は存在しない', async () => {
-    await request(app.getHttpServer())
-      .put('/api/v1/creator/payout-account')
-      .set(auth(actorToken('operator')))
-      .send({ bankName: 'テスト銀行' })
-      .expect(404);
   });
 
   /*
@@ -436,5 +420,229 @@ describe('作品審査の口が無いこと（`UD-102` と衝突・決定待ち�
       .post(path)
       .set(auth(actorToken('operator')))
       .expect(404);
+  });
+});
+
+/**
+ * お振込先（P1-3・`UD-124` 決定 2026-08-21）。
+ *
+ * ⚠️ **この組の主題は 3 つ。**
+ *  1. **他人の支払先を差し替えられないこと**——この仕組みでいちばん実入りの
+ *     ある攻撃である
+ *  2. **口座番号が、応答にも記録にも平文で出ないこと**
+ *  3. **差し替えたらご本人へ知らせが飛ぶこと**——気づけるのは本人だけ
+ */
+describe('お振込先', () => {
+  const ACCOUNT = {
+    bankName: '千ノ国銀行',
+    branchName: '本店',
+    accountType: 'ordinary' as const,
+    accountNumber: '1234567',
+    accountHolderKana: 'センゴク タロウ',
+  };
+
+  function noticesFor(): typeof harness.notifications.rows {
+    return harness.notifications.rows.filter(
+      (row) => row.record.eventType === 'payout_account.changed',
+    );
+  }
+
+  it('未登録なら null で返る', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/creator/payout-account')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(response.body.account).toBeNull();
+  });
+
+  it('登録して読み戻せる', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .expect(200);
+    expect(response.body.account).toMatchObject({
+      bankName: '千ノ国銀行',
+      branchName: '本店',
+      accountType: 'ordinary',
+      accountHolderKana: 'センゴク タロウ',
+    });
+  });
+
+  /*
+    ⚠️ **この組でいちばん大事な 1 本。** 番号が応答に出ると、画面を開く
+       たびに経路へ流れる。返すのは伏せた表記まで。
+  */
+  it('口座番号そのものは応答に出ない', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .expect(200);
+    expect(JSON.stringify(response.body)).not.toContain('1234567');
+    expect(response.body.account.maskedAccountNumber).toBe('***4567');
+  });
+
+  /*
+    ⚠️ **記録に番号が残れば、包んだ意味が無くなる。**
+  */
+  it('監査ログに口座番号が残らない', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(actorToken('operator')))
+      .send(ACCOUNT)
+      .expect(200);
+
+    const recorded = harness.audit.entries.filter((row) => row.action === 'payout_account.saved');
+    expect(recorded).toHaveLength(1);
+    expect(JSON.stringify(recorded[0])).not.toContain('1234567');
+  });
+
+  /*
+    ⚠️ **保管も包んでおく。** 平文で置く逃げ道があると、鍵の設定を忘れた
+       配備で静かに平文が溜まる。
+  */
+  it('保管されている値も平文ではない', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    const stored = [...harness.payoutAccounts.rows.values()];
+    expect(JSON.stringify(stored)).not.toContain('1234567');
+    // ⚠️ 末尾 4 桁は伏せた表記に残る（どの口座かを本人と確かめるため）。
+    expect(stored[0]?.maskedAccountNumber).toBe('***4567');
+  });
+
+  /*
+    ⚠️ **初めての登録に「変更されました」と届かせない。** 身に覚えのない
+       知らせになる。
+  */
+  it('初めての登録では知らせない', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(actorToken('operator')))
+      .send(ACCOUNT)
+      .expect(200);
+    expect(noticesFor()).toHaveLength(0);
+  });
+
+  /*
+    ⚠️ **差し替えたら必ず知らせる。** お金の行き先が変わる操作で、
+       気づけるのは本人だけである。
+  */
+  it('差し替えたらご本人へ知らせる', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    harness.clock.set(new Date(TEST_NOW.getTime() + 60_000));
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send({ ...ACCOUNT, accountNumber: '7654321' })
+      .expect(200);
+
+    const notices = noticesFor();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.record.accountId).toBe('account-user-operator');
+    /*
+      ⚠️ **新しい口座の情報を載せない。** 載せると、乗っ取った側が
+         このメールを見れば済むことになる。
+    */
+    expect(notices[0]?.record.renderedBody).not.toContain('7654321');
+  });
+
+  /*
+    ⚠️ **2 回目の差し替えも知らせる。** 対象をアカウントだけにすると
+       重複として捨てられ、**乗っ取りの 2 回目が知らされない**。
+  */
+  it('2 回差し替えたら、2 回とも知らせる', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    for (const [index, accountNumber] of ['7654321', '1111222'].entries()) {
+      harness.clock.set(new Date(TEST_NOW.getTime() + 60_000 * (index + 1)));
+      await request(app.getHttpServer())
+        .put('/api/v1/creator/payout-account')
+        .set(auth(token))
+        .send({ ...ACCOUNT, accountNumber })
+        .expect(200);
+    }
+    expect(noticesFor()).toHaveLength(2);
+  });
+
+  /*
+    ⚠️ **誰の分かを受け取る口が無い。** 受け取れる形にすると、そこが
+       他人の支払先を差し替える道になる。
+  */
+  it('問い合わせで別のアカウントを指定しても、自分の分が変わる', async () => {
+    const other = 'aa11bb22-0000-4000-8000-000000000009';
+    await request(app.getHttpServer())
+      .put(`/api/v1/creator/payout-account?creatorAccountId=${other}&accountId=${other}`)
+      .set(auth(actorToken('operator')))
+      .send(ACCOUNT)
+      .expect(200);
+
+    expect(harness.payoutAccounts.rows.has(other)).toBe(false);
+    expect(harness.payoutAccounts.rows.has('account-user-operator')).toBe(true);
+  });
+
+  it('未認証では登録できない', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .send(ACCOUNT)
+      .expect(401);
+  });
+
+  /*
+    ⚠️ **どの項目がどう悪かったかを断定しない。** 直しに行ける場所だけを
+       伝える（名義がカナであることは、はっきり書く）。
+  */
+  it('漢字の名義は断る', async () => {
+    const response = await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(actorToken('operator')))
+      .send({ ...ACCOUNT, accountHolderKana: '戦国 太郎' })
+      .expect(422);
+    expect(response.body.error.code).toBe('PAYOUT_ACCOUNT_INVALID');
+    expect(response.body.error.message).toContain('カタカナ');
+  });
+
+  it('登録すると、ご準備の状況が「済」になる', async () => {
+    const token = actorToken('operator');
+    await request(app.getHttpServer())
+      .put('/api/v1/creator/payout-account')
+      .set(auth(token))
+      .send(ACCOUNT)
+      .expect(200);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/creator/profile/detail')
+      .set(auth(token))
+      .expect(200);
+    const payout = response.body.setup.find((row: { key: string }) => row.key === 'payout_account');
+    expect(payout.done).toBe(true);
   });
 });

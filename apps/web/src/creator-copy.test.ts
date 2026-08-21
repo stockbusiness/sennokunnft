@@ -94,9 +94,39 @@ describe('お知らせの言葉', () => {
     ⚠️ **お振込先は「未登録」で終わらせない**（P1-3）。探しても見つからない。
        まだ用意できていないと、こちらから言う。
   */
-  it('お振込先は、まだ用意できていないと書く', () => {
-    expect(CREATOR_COPY.payoutAccountPending).toContain('準備中');
-    expect(CREATOR_COPY.payoutAccountPendingHint).toContain('いまは何もなさらなくて大丈夫');
+  /*
+    ⚠️ **「確認します」と書かない**（`UD-124` 決定 2026-08-21）。こちらが
+       確かめられるのは形だけで、口座が実在するかは振込を試みたときに
+       初めて分かる。書くと、間違えて登録した方が「確認されたはず」と思う。
+  */
+  it('お振込先を「確認する」と書かない', () => {
+    const all = Object.values(CREATOR_COPY).join('\n');
+    expect(all).not.toContain('確認いたします');
+    expect(CREATOR_COPY.payoutAccountDescription).not.toContain('確認');
+  });
+
+  /*
+    ⚠️ **口座名義がカナであることを、はっきり書く。** ここがいちばん詰まる。
+  */
+  it('口座名義はカタカナだと、はっきり書く', () => {
+    expect(CREATOR_COPY.fieldAccountHolderHint).toContain('カタカナ');
+    expect(CREATOR_COPY.fieldAccountHolderHint).toContain('漢字');
+  });
+
+  /*
+    ⚠️ **桁数を書かない。** 金融機関によって違う。「7桁」と書くと、違う方が
+       「間違っているのでは」と手を止める。
+  */
+  it('口座番号の桁数を書かない', () => {
+    expect(CREATOR_COPY.fieldAccountNumberHint).not.toContain('桁');
+  });
+
+  /*
+    ⚠️ **変えたら知らせが飛ぶことを、押す前に伝える。** あとから届くと、
+       身に覚えのない知らせに見える。
+  */
+  it('変更するとお知らせが届くことを、先に伝える', () => {
+    expect(CREATOR_COPY.payoutAccountChangeHint).toContain('お知らせが届きます');
   });
 
   /*

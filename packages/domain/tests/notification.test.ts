@@ -25,7 +25,7 @@ describe('知らせの種別', () => {
       ⚠️ **数を書いておく。** 種別を足すのは「全購入者へ届く経路が増える」
          ということ。ここが落ちて手が止まるのは、そのための仕掛けである。
     */
-    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(10);
+    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(11);
   });
 
   it('⚠️ 差し込み語彙に氏名・メール・住所を入れない（UD-503）', () => {

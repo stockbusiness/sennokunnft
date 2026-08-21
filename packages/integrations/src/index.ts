@@ -84,6 +84,9 @@ export {
   type AeadSecretBoxOptions,
 } from './aead-secret-box';
 
+// お振込先の口座番号（P1-3）。⚠️ 結び付ける相手はアカウントID。
+export { PayoutAccountSecretBox } from './payout-account-secret-box';
+
 export {
   ReachabilityProbe,
   type ReachabilityProbeOptions,

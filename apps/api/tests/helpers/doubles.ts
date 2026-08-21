@@ -104,6 +104,9 @@ import type {
   AccountNotePort,
   AccountNoteRecord,
   CustomerDirectoryPort,
+  PayoutAccountCipherPort,
+  PayoutAccountPort,
+  PayoutAccountRecord,
   RecipientResolverPort,
   RecipientResolution,
   CustomerEntitlement,
@@ -2808,6 +2811,7 @@ export interface TestHarness extends AppDependencies {
   readonly mailTestSender: FakeMailTestSender;
   readonly customerDirectory: InMemoryCustomerDirectory;
   readonly creatorProfileDetails: InMemoryCreatorProfileDetails;
+  readonly payoutAccounts: InMemoryPayoutAccounts;
   readonly creatorEarnings: InMemoryCreatorEarnings;
   readonly customerRecipients: InMemoryRecipientResolver;
   readonly accountNotes: InMemoryAccountNotes;
@@ -3029,6 +3033,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const mailTestSender = new FakeMailTestSender();
   const customerDirectory = new InMemoryCustomerDirectory();
   const creatorProfileDetails = new InMemoryCreatorProfileDetails();
+  const payoutAccounts = new InMemoryPayoutAccounts();
   const creatorEarnings = new InMemoryCreatorEarnings();
   const customerRecipients = new InMemoryRecipientResolver();
   const accountNotes = new InMemoryAccountNotes();
@@ -3058,10 +3063,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     emailChangeRequests,
     // 作家さま運営（P1-2）。⚠️ 保存した値を試験から覗くため、実体の型で持つ。
     creatorProfileDetails,
+    payoutAccounts,
     creatorEarnings,
     creatorOperations: {
       profiles: creatorProfileDetails,
       earnings: creatorEarnings,
+      // ⚠️ 試験では既定で預かれる。預かれない配備は個別の試験で外す。
+      payoutAccounts: { store: payoutAccounts, cipher: new FakePayoutAccountCipher() },
     },
     customers: {
       directory: customerDirectory,
@@ -4226,6 +4234,51 @@ export class InMemoryEmailChangeRequests implements EmailChangeRequestPort {
  * 一意性を持つ表示名、こちらは紹介文や画像。名前が似ているので、
  * 取り違えないよう別の名前にしてある。
  */
+/**
+ * お振込先の代役（P1-3）。
+ *
+ * ⚠️ **包むところは本物と同じ形にする。** 平文で持つ代役にすると、
+ * 「包み忘れ」を試験がすり抜ける。
+ */
+export class InMemoryPayoutAccounts implements PayoutAccountPort {
+  readonly rows = new Map<string, PayoutAccountRecord>();
+
+  find(creatorAccountId: string): Promise<PayoutAccountRecord | null> {
+    return Promise.resolve(this.rows.get(creatorAccountId) ?? null);
+  }
+
+  save(record: PayoutAccountRecord): Promise<{ readonly replaced: boolean }> {
+    const replaced = this.rows.has(record.creatorAccountId);
+    this.rows.set(record.creatorAccountId, record);
+    return Promise.resolve({ replaced });
+  }
+}
+
+/**
+ * 包む・解くの代役。
+ *
+ * ⚠️ **結び付ける相手を必ず見る。** 見ない代役にすると、別の作家さまの行へ
+ * 貼り替えても通ってしまい、**本物なら塞げている穴**を試験が見逃す。
+ */
+export class FakePayoutAccountCipher implements PayoutAccountCipherPort {
+  seal(plaintext: string, accountId: string): SealedSecret {
+    return {
+      ciphertext: Buffer.from(`${accountId}|${plaintext}`, 'utf8').toString('base64'),
+      nonce: 'test-nonce',
+      authTag: 'test-tag',
+      keyVersion: 'v1',
+      lastFour: plaintext.slice(-4),
+    };
+  }
+
+  open(sealed: SealedSecret, accountId: string): string | null {
+    const decoded = Buffer.from(sealed.ciphertext, 'base64').toString('utf8');
+    const separator = decoded.indexOf('|');
+    // ⚠️ 別の作家さまの行なら解けない（本物と同じ振る舞い）。
+    return decoded.slice(0, separator) === accountId ? decoded.slice(separator + 1) : null;
+  }
+}
+
 export class InMemoryCreatorProfileDetails implements CreatorProfilePort {
   readonly rows = new Map<string, CreatorProfileRecord>();
 

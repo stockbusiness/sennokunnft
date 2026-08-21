@@ -60,6 +60,7 @@ import {
   PrismaCustomerDirectoryRepository,
   PrismaCreatorEarningsRepository,
   PrismaCreatorProfileDetailRepository,
+  PrismaPayoutAccountRepository,
   PrismaEmailChangeRequestRepository,
   PrismaNotificationSweepRepository,
   PrismaOperationsRepository,
@@ -85,6 +86,7 @@ import {
   createPlatformFeeRateResolver,
   generateStorageKey,
   AeadSecretBox,
+  PayoutAccountSecretBox,
   parseEncryptionKeys,
   ReachabilityProbe,
   probeStripeAccount,
@@ -773,6 +775,20 @@ async function bootstrap(): Promise<void> {
       creatorOperations: {
         profiles: new PrismaCreatorProfileDetailRepository(prisma),
         earnings: new PrismaCreatorEarningsRepository(prisma),
+        /*
+          お振込先（P1-3）。
+          ⚠️ **暗号鍵が無ければ預からない。** 平文で置く逃げ道を作らない——
+             作れば、鍵の設定を忘れた配備で静かに平文が溜まる。
+          ⚠️ 画面は「まだご登録いただけません」と断る（起動はする）。
+        */
+        ...(secretCipher === null
+          ? {}
+          : {
+              payoutAccounts: {
+                store: new PrismaPayoutAccountRepository(prisma),
+                cipher: new PayoutAccountSecretBox(secretCipher),
+              },
+            }),
       },
       customers: {
         directory: new PrismaCustomerDirectoryRepository(prisma),
