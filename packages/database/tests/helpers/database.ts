@@ -82,6 +82,7 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
       payment_credentials, settlement_settings,
       notification_deliveries,
       account_notes, email_change_requests,
+      creator_profiles,
       /*
         ⚠️ **時計仕掛けの記録も消す。** 残すと、次の試験が
            「一度も動いていない」を作れなくなる——止まった時計に

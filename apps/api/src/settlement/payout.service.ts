@@ -273,6 +273,33 @@ export class PayoutService {
   }
 
   /**
+   * まだ締めていない期間の見込み（P1-2）。
+   *
+   * ⚠️ **締めるときと同じ関数を通す。** 見込みを別の式で出すと、締めた
+   * ときに額が変わり、そのたびに作家さまから「話が違う」と言われる。
+   * **見込みと実額がずれないことが、あの画面の唯一の存在理由**である。
+   *
+   * ⚠️ **設定はいまの値。** 見込みなので焼き付けない。締めた時点の値で
+   * 確定するのは、締める側の仕事。
+   */
+  async estimateFor(creatorAccountId: string, period: PayoutPeriod): Promise<PayoutDraft> {
+    const settings = await this.config.settings.find(this.config.appEnvironment);
+    return this.buildFor(
+      creatorAccountId,
+      period,
+      {
+        /*
+          ⚠️ **設定が無ければ 0 と `creator`。** 既定値をここで作らない。
+             「決めていない」ことが、そのまま見込みに現れるほうがよい。
+        */
+        minimumPayoutAmount: settings?.minimumPayoutAmount ?? 0,
+        transferFeeBearer: settings?.transferFeeBearer ?? 'creator',
+      },
+      this.config.clock.now(),
+    );
+  }
+
+  /**
    * 締めるときの集計。
    *
    * ⚠️ **保存された金額と比べ直す用途に使わない。** 比べて差があったら

@@ -335,6 +335,16 @@ export const DOMAIN_ERROR_CODES = [
    * 状態から作る（状態は一覧に出ている）。
    */
   'EMAIL_CHANGE_NOT_ALLOWED',
+
+  // --- 作家さま運営（P1-2） ---
+  /**
+   * プロフィールの内容を受け付けられない。
+   *
+   * ⚠️ **理由を分けていない。** 長すぎる・HTML が混じっている・リンクが
+   * `https` でない——どれも「書き直してください」に落ちる。何が悪いかは
+   * 画面側が入力欄ごとに案内する（そちらのほうが直しやすい）。
+   */
+  'CREATOR_PROFILE_INVALID',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

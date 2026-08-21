@@ -73,6 +73,19 @@ export default async function CreatorHomePage() {
         </a>
       </p>
 
+      {/*
+        ⚠️ **売上とお店の情報を、作品の一覧と同じ高さに置く。** 作家さまが
+           いちばん確かめたいのは「売れたか」である。奥に隠さない。
+      */}
+      <p className="sengoku-creator-actions">
+        <a className="sengoku-button sengoku-button--quiet" href="/creator/earnings">
+          {CREATOR_COPY.earningsTitle}
+        </a>{' '}
+        <a className="sengoku-button sengoku-button--quiet" href="/creator/shop">
+          {CREATOR_COPY.shopTitle}
+        </a>
+      </p>
+
       {!result.ok ? (
         <EmptyState title={creatorErrorMessage(result.reason)} hint="" />
       ) : result.data.items.length === 0 ? (

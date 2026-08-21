@@ -58,6 +58,8 @@ import {
   PrismaProductionReadinessRepository,
   PrismaAccountNoteRepository,
   PrismaCustomerDirectoryRepository,
+  PrismaCreatorEarningsRepository,
+  PrismaCreatorProfileDetailRepository,
   PrismaEmailChangeRequestRepository,
   PrismaNotificationSweepRepository,
   PrismaOperationsRepository,
@@ -750,6 +752,15 @@ async function bootstrap(): Promise<void> {
         ⚠️ **付け替えの口をここに足さない。** 注文・受取権・ウォレットの
            持ち主を人が変えられる依存は、この形に存在しない。
       */
+      /*
+        作家さま運営（P1-2）。
+        ⚠️ **誰の分かを要求から受け取る口を足さない。** 売上はその方の
+           商いの中身そのもので、他人が覗いてよいものではない。
+      */
+      creatorOperations: {
+        profiles: new PrismaCreatorProfileDetailRepository(prisma),
+        earnings: new PrismaCreatorEarningsRepository(prisma),
+      },
       customers: {
         directory: new PrismaCustomerDirectoryRepository(prisma),
         notes: new PrismaAccountNoteRepository(prisma),

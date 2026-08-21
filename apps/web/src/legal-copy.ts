@@ -14,12 +14,21 @@ export const LEGAL_KIND_LABEL: Readonly<Record<LegalDocumentKind, string>> = {
   terms: '利用規約',
   privacy: 'プライバシーポリシー',
   tokushoho: '特定商取引法に基づく表記',
+  // ⚠️ 購入者ではなく、作品を売る方に向けた規約（P1-2）。
+  creator_terms: '販売規約（作品を出される方へ）',
 };
 
 export const LEGAL_KIND_PATH: Readonly<Record<LegalDocumentKind, string>> = {
   terms: '/legal/terms',
   privacy: '/legal/privacy',
   tokushoho: '/legal/tokushoho',
+  /*
+    ⚠️ **`/legal/` の下に置く。** 公開の仕組み（版・適用開始）は
+       ほかの 3 つとまったく同じで、読み手が違うだけである。
+    ⚠️ **符号をそのまま道の名前にする。** 別の綴りへ直すと、
+       `/legal/[kind]` の突き合わせに変換の一手間が要り、そこがずれる。
+  */
+  creator_terms: '/legal/creator_terms',
 };
 
 /** 特商法の項目名。⚠️ 法で定められた呼び方に寄せる。 */

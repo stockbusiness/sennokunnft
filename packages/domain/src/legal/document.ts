@@ -17,7 +17,23 @@ import { domainError, type DomainError } from '../shared/errors';
  * もう戻せない。
  */
 
-export const LEGAL_DOCUMENT_KINDS = ['terms', 'privacy', 'tokushoho'] as const;
+export const LEGAL_DOCUMENT_KINDS = [
+  'terms',
+  'privacy',
+  'tokushoho',
+  /**
+   * 販売規約（作家さま向け・P1-2）。
+   *
+   * ⚠️ **買う人向けの規約とは別。** 売る人と買う人では、同意すべき内容も
+   * 同意すべき時点も違う。同じ種別にすると、買う人が販売規約に同意した
+   * ことになってしまう。
+   *
+   * ⚠️ **同意の仕組みを作り直さない。** 版管理・施行日・再同意の判定は
+   * すでにここにある（`UD-126`）。並行して別の仕組みを作ると、
+   * 「どちらの同意が有効か」が分からなくなる。
+   */
+  'creator_terms',
+] as const;
 export type LegalDocumentKind = (typeof LEGAL_DOCUMENT_KINDS)[number];
 
 export function isLegalDocumentKind(value: string): value is LegalDocumentKind {

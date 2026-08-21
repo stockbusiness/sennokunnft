@@ -322,12 +322,20 @@ function feeRateCheck(bps: number): ProductionReadinessCheck {
  * 販売そのものが法に触れる（支払い口の作成でも同じ判定をしている）。
  */
 function legalCheck(published: readonly LegalDocumentKind[]): ProductionReadinessCheck {
+  /*
+    ⚠️ **販売規約（`creator_terms`）はここに入れない。** あれは作家さまと
+       こちらの取り決めで、買う人へ掲げる義務のあるものではない。作家さまが
+       売り始める前に要るのは確かだが、それは**別の関門**（プロフィールの
+       「売る準備」）で見る。ここへ混ぜると、作家さまがまだ 1 人も居ない
+       立ち上げ期に本番販売が開けなくなる。
+  */
   const required: readonly LegalDocumentKind[] = ['terms', 'privacy', 'tokushoho'];
   const missing = required.filter((kind) => !published.includes(kind));
   const names: Readonly<Record<LegalDocumentKind, string>> = {
     terms: '利用規約',
     privacy: 'プライバシーポリシー',
     tokushoho: '特定商取引法に基づく表記',
+    creator_terms: '販売規約（作家さま向け）',
   };
   return {
     key: 'legal_documents_published',

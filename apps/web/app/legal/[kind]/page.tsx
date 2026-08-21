@@ -18,7 +18,12 @@ import type { LegalBlock, LegalDocumentKind } from '../../../src/legal-types';
  */
 export const dynamic = 'force-dynamic';
 
-const KINDS: readonly LegalDocumentKind[] = ['terms', 'privacy', 'tokushoho'];
+/*
+  ⚠️ **`creator_terms` も載せる。** まだ公開していないので、いまは
+     「まだ公開されていません」と出る。載せておかないと、公開した日に
+     404 のままになり、原因を探すことになる。
+*/
+const KINDS: readonly LegalDocumentKind[] = ['terms', 'privacy', 'tokushoho', 'creator_terms'];
 
 function isKind(value: string): value is LegalDocumentKind {
   return (KINDS as readonly string[]).includes(value);
