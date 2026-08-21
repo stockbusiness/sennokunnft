@@ -74,7 +74,11 @@ import {
   operationsDashboardResponseSchema,
   redeliverResponseSchema,
   retryIssuanceResponseSchema,
+  customerDetailResponseSchema,
+  customerSearchResponseSchema,
   type ConsistencyResponse,
+  type CustomerDetailResponse,
+  type CustomerSearchResponse,
   type EntitlementAdminDetailView,
   type EntitlementAdminListResponse,
   type NotificationHistoryListResponse,
@@ -953,3 +957,83 @@ export function resendNotification(id: string): Promise<AdminResult<{ requeued: 
  * 戻らなかったことを、押した人に伝える必要がある。
  */
 const resendNotificationResponseSchema = z.object({ requeued: z.boolean() });
+
+// --- 顧客サポート（P1-1） -------------------------------------------------
+
+/**
+ * 顧客を探す。
+ *
+ * ⚠️ **`POST` で送る。** 手がかりに平文のアドレスを含むので、URL に載せると
+ * アクセスログと履歴と Referer に残る。
+ */
+export function searchCustomers(criteria: {
+  readonly email?: string;
+  readonly commonUserId?: string;
+  readonly orderNumber?: string;
+  readonly accountId?: string;
+}): Promise<AdminResult<CustomerSearchResponse>> {
+  return callAdmin(
+    '/api/v1/admin/customers/search',
+    customerSearchResponseSchema,
+    json(criteria, 'POST'),
+  );
+}
+
+export function fetchCustomer(accountId: string): Promise<AdminResult<CustomerDetailResponse>> {
+  return callAdmin(
+    `/api/v1/admin/customers/${encodeURIComponent(accountId)}`,
+    customerDetailResponseSchema,
+  );
+}
+
+/** 申し送りを書く。⚠️ 追記のみ。直す口も消す口も無い。 */
+export function addCustomerNote(
+  accountId: string,
+  body: string,
+): Promise<AdminResult<{ ok: true }>> {
+  return callAdmin(
+    `/api/v1/admin/customers/${encodeURIComponent(accountId)}/notes`,
+    okResponseSchema,
+    json({ body }, 'POST'),
+  );
+}
+
+/** ご連絡先の変更を申し出として受ける。⚠️ **この操作でアドレスは変わらない。** */
+export function openEmailChange(
+  accountId: string,
+  newEmail: string,
+): Promise<AdminResult<{ id: string }>> {
+  return callAdmin(
+    `/api/v1/admin/customers/${encodeURIComponent(accountId)}/email-changes`,
+    z.object({ id: z.string() }),
+    json({ newEmail }, 'POST'),
+  );
+}
+
+/** 本人確認を記録する。⚠️ 「誰が」が必ず残る。 */
+export function verifyEmailChangeIdentity(
+  id: string,
+  method: string,
+  note: string | null,
+): Promise<AdminResult<{ ok: true }>> {
+  return callAdmin(
+    `/api/v1/admin/customers/email-changes/${encodeURIComponent(id)}/verify`,
+    okResponseSchema,
+    json({ method, note }, 'POST'),
+  );
+}
+
+/** 決着させる。⚠️ **本人確認を飛ばして「済」にはできない**（API が断る）。 */
+export function settleEmailChange(
+  id: string,
+  status: 'completed' | 'rejected',
+  note: string | null,
+): Promise<AdminResult<{ ok: true }>> {
+  return callAdmin(
+    `/api/v1/admin/customers/email-changes/${encodeURIComponent(id)}/settle`,
+    okResponseSchema,
+    json({ status, note }, 'POST'),
+  );
+}
+
+const okResponseSchema = z.object({ ok: z.literal(true) });

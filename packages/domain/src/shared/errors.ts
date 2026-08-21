@@ -307,6 +307,16 @@ export const DOMAIN_ERROR_CODES = [
   'ISSUANCE_UNAVAILABLE',
   /** この配備ではウォレットへの再配送ができない（連携が無効）。 */
   'WALLET_DELIVERY_UNAVAILABLE',
+
+  // --- 顧客サポート（P1-1） ---
+  /**
+   * ご連絡先の変更申請を、いまその状態から動かせない。
+   *
+   * ⚠️ **理由を分けていない。** 「本人確認がまだ」「もう決着している」の
+   * 違いは、押した運営には「いまはできない」としか読めない。文言は画面側で
+   * 状態から作る（状態は一覧に出ている）。
+   */
+  'EMAIL_CHANGE_NOT_ALLOWED',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

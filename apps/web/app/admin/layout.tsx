@@ -39,6 +39,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <a href="/admin/artworks">作品</a>
         <a href="/admin/listings">販売</a>
         <a href="/admin/orders">注文</a>
+        <a href="/admin/customers">お客さま</a>
         {/*
           ⚠️ 出しっぱなしでよい。開けるのはオーナーだけで、
              ほかの人には「権限がありません」と出る。隠すことは保護ではない。

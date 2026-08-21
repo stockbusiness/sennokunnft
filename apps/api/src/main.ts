@@ -54,6 +54,9 @@ import {
   PrismaNotificationHistoryRepository,
   PrismaNotificationOutboxRepository,
   PrismaEntitlementAdminRepository,
+  PrismaAccountNoteRepository,
+  PrismaCustomerDirectoryRepository,
+  PrismaEmailChangeRequestRepository,
   PrismaNotificationSweepRepository,
   PrismaOperationsRepository,
   PrismaNotificationTemplateRepository,
@@ -714,6 +717,16 @@ async function bootstrap(): Promise<void> {
         entitlements: new PrismaEntitlementAdminRepository(prisma),
         thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
         jobKeys: WATCHED_JOB_KEYS,
+      },
+      /*
+        顧客サポート（P1-1）。
+        ⚠️ **付け替えの口をここに足さない。** 注文・受取権・ウォレットの
+           持ち主を人が変えられる依存は、この形に存在しない。
+      */
+      customers: {
+        directory: new PrismaCustomerDirectoryRepository(prisma),
+        notes: new PrismaAccountNoteRepository(prisma),
+        emailChanges: new PrismaEmailChangeRequestRepository(prisma),
       },
       // 作家さまへの精算（`UD-119`）。
       payouts: new PrismaPayoutRepository(prisma),

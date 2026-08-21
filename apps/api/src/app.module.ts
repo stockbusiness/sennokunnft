@@ -55,6 +55,10 @@ import type {
   OperationsThresholds,
   OperationsMetricsPort,
   EntitlementAdminPort,
+  // 顧客サポート（P1-1）。
+  AccountNotePort,
+  CustomerDirectoryPort,
+  EmailChangeRequestPort,
 } from '@sengoku/domain';
 import type { NotifiableEntitlement as NotifiableEntitlementRow } from '@sengoku/database';
 import { canDiscloseCheckoutTerms } from '@sengoku/domain';
@@ -138,6 +142,8 @@ import { NotificationSendService } from './notification/send.service';
 import { BuyerNotifier } from './notification/buyer-notifier';
 import { NotificationSweepService } from './notification/sweep.service';
 import { OperationsController } from './operations/operations.controller';
+import { CustomerController } from './customer/customer.controller';
+import { CustomerSupportService } from './customer/customer.service';
 import { OperationsDashboardService } from './operations/dashboard.service';
 import {
   AdminSettlementController,
@@ -466,6 +472,17 @@ export interface AppDependencies {
     /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
     readonly jobKeys: readonly string[];
   };
+  /**
+   * 顧客サポート（P1-1）。
+   *
+   * ⚠️ **付け替えの口をここに足さない。** 注文・受取権・ウォレットの
+   * 持ち主を人が変えられる依存は、この形に存在しない。
+   */
+  readonly customers: {
+    readonly directory: CustomerDirectoryPort;
+    readonly notes: AccountNotePort;
+    readonly emailChanges: EmailChangeRequestPort;
+  };
   readonly clock: ClockPort;
   readonly ids: IdGeneratorPort;
   readonly storage: StoragePort;
@@ -593,6 +610,7 @@ export class AppModule implements NestModule {
         NotificationController,
         // 運営ダッシュボード（P0-6）。⚠️ 見るのと動かすので権限が違う。
         OperationsController,
+        CustomerController,
       ],
       providers: [
         {
@@ -788,6 +806,22 @@ export class AppModule implements NestModule {
                   new NotificationSweepService(deps.notification.sweepSource!, notifier),
               },
             ]),
+        {
+          provide: CustomerSupportService,
+          /*
+            ⚠️ **平文のアドレスを持ち回らない。** 受け取った瞬間に照合値と
+               伏せた表記へ変え、元の値は捨てる（`emailHasher` がその境界）。
+          */
+          useFactory: (): CustomerSupportService =>
+            new CustomerSupportService(
+              deps.customers.directory,
+              deps.customers.notes,
+              deps.customers.emailChanges,
+              deps.emailHasher,
+              deps.clock,
+              deps.audit,
+            ),
+        },
         {
           provide: OperationsDashboardService,
           /*

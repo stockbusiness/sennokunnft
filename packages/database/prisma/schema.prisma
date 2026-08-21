@@ -113,6 +113,12 @@ model Account {
   payouts                      Payout[]                     @relation("PayoutCreator")
   paidPayouts                  Payout[]                     @relation("PayoutPayer")
   resolvedOperationsReviews    OperationsReview[]           @relation("OperationsReviewResolver")
+  accountNotes                 AccountNote[]                @relation("AccountNoteSubject")
+  authoredAccountNotes         AccountNote[]                @relation("AccountNoteAuthor")
+  emailChangeRequests          EmailChangeRequest[]         @relation("EmailChangeSubject")
+  openedEmailChanges           EmailChangeRequest[]         @relation("EmailChangeOpener")
+  verifiedEmailChanges         EmailChangeRequest[]         @relation("EmailChangeVerifier")
+  settledEmailChanges          EmailChangeRequest[]         @relation("EmailChangeSettler")
   notifications                NotificationDelivery[]       @relation("NotificationRecipient")
 
   @@unique([authProvider, authSubject])
@@ -1466,4 +1472,64 @@ model JobRun {
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("job_runs")
+}
+
+/// アカウント単位の申し送り（実運営 指示書 P1-1）。
+///
+/// ⚠️ **注文単位のメモ（`OrderNote`）とは別。** あちらは「この注文で何が
+/// あったか」、こちらは「この方について何を知っておくべきか」。片方に寄せると、
+/// 注文をまたぐ事情がどの注文にも属さないまま行き場を失う。
+model AccountNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  accountId       String   @map("account_id") @db.Uuid
+  /// 書いた運営スタッフ。⚠️ 氏名やメールではなくアカウントIDで持つ。
+  authorAccountId String   @map("author_account_id") @db.Uuid
+  body            String
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  account Account @relation("AccountNoteSubject", fields: [accountId], references: [id], onDelete: Restrict)
+  author  Account @relation("AccountNoteAuthor", fields: [authorAccountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@map("account_notes")
+}
+
+/// ご連絡先の変更申請（実運営 指示書 P1-1）。
+///
+/// ⚠️ **ここでアドレスは変わらない。** 認証の正は認証基盤側にあり、こちらが
+/// 持つのは照合用の値だけ（`UD-503`）。この表が受け持つのは「申し出があった」
+/// 「本人確認をした」「向こうで変えた」の 3 つの記録。
+///
+/// ⚠️ **本人確認を飛ばして `completed` にできない**（CHECK で縛る）。飛ばされた
+/// ことは、乗っ取られるまで誰にも分からない。
+///
+/// ⚠️ 決着していない申請は、同じ方について 1 件まで（部分 UNIQUE 索引）。
+/// Prisma では条件付き索引を書けないため、手書きのマイグレーション側にだけ存在する。
+model EmailChangeRequest {
+  id                   String    @id @default(uuid()) @db.Uuid
+  accountId            String    @map("account_id") @db.Uuid
+  /// ⚠️ 伏せた表記。**ここから元へは戻せない。**
+  requestedMaskedEmail String    @map("requested_masked_email")
+  /// ⚠️ 鍵付きハッシュ。突き合わせにだけ使う。
+  requestedEmailHash   String    @map("requested_email_hash")
+  /// requested / identity_verified / completed / rejected
+  status               String    @default("requested")
+  /// ⚠️ 自由文にしない。何をしたのか分からない記録が並ぶ。
+  verificationMethod   String?   @map("verification_method")
+  verifiedByAccountId  String?   @map("verified_by_account_id") @db.Uuid
+  verifiedAt           DateTime? @map("verified_at") @db.Timestamptz(6)
+  settledByAccountId   String?   @map("settled_by_account_id") @db.Uuid
+  settledAt            DateTime? @map("settled_at") @db.Timestamptz(6)
+  note                 String?
+  openedByAccountId    String    @map("opened_by_account_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account    Account  @relation("EmailChangeSubject", fields: [accountId], references: [id], onDelete: Restrict)
+  openedBy   Account  @relation("EmailChangeOpener", fields: [openedByAccountId], references: [id], onDelete: Restrict)
+  verifiedBy Account? @relation("EmailChangeVerifier", fields: [verifiedByAccountId], references: [id], onDelete: Restrict)
+  settledBy  Account? @relation("EmailChangeSettler", fields: [settledByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@map("email_change_requests")
 }

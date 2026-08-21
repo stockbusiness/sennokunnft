@@ -100,6 +100,18 @@ import type {
   JobHeartbeat,
   OperationsCounts,
   OperationsMetricsPort,
+  // 顧客サポート（P1-1）。
+  AccountNotePort,
+  AccountNoteRecord,
+  CustomerDirectoryPort,
+  CustomerEntitlement,
+  CustomerOrderRow,
+  CustomerRefundRow,
+  CustomerSummary,
+  DuplicateCandidate,
+  EmailChangeRequestPort,
+  EmailChangeRequestRecord,
+  IdentityVerificationMethod,
 } from '@sengoku/domain';
 import { DEFAULT_OPERATIONS_THRESHOLDS, NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
 import {
@@ -2703,6 +2715,9 @@ export interface TestHarness extends AppDependencies {
   readonly notifications: InMemoryNotifications;
   /** ⚠️ 置いた数から正しい色が出るかを見るため、実体の型で持つ。 */
   readonly operationsMetrics: InMemoryOperations;
+  readonly customerDirectory: InMemoryCustomerDirectory;
+  readonly accountNotes: InMemoryAccountNotes;
+  readonly emailChangeRequests: InMemoryEmailChangeRequests;
   readonly entitlementAdmin: InMemoryEntitlementAdmin;
   readonly notificationTemplates: InMemoryNotificationTemplates;
   readonly collectibles: InMemoryCollectibles;
@@ -2907,6 +2922,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const operationsReviews = new InMemoryOperationsReviews();
   const notifications = new InMemoryNotifications();
   const operationsMetrics = new InMemoryOperations();
+  const customerDirectory = new InMemoryCustomerDirectory();
+  const accountNotes = new InMemoryAccountNotes();
+  const emailChangeRequests = new InMemoryEmailChangeRequests();
   const entitlementAdmin = new InMemoryEntitlementAdmin();
   const notificationTemplates = new InMemoryNotificationTemplates();
   const collectibles = new InMemoryCollectibles();
@@ -2925,6 +2943,15 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     // 運営ダッシュボード（P0-6）。⚠️ 置いた数から色が決まるかを見る。
     operationsMetrics,
     entitlementAdmin,
+    // 顧客サポート（P1-1）。⚠️ 積んだ行を試験から覗くため、実体の型で持つ。
+    customerDirectory,
+    accountNotes,
+    emailChangeRequests,
+    customers: {
+      directory: customerDirectory,
+      notes: accountNotes,
+      emailChanges: emailChangeRequests,
+    },
     operations: {
       repository: operationsMetrics,
       entitlements: entitlementAdmin,
@@ -3706,5 +3733,185 @@ export class InMemoryEntitlementAdmin implements EntitlementAdminPort {
         .slice(0, limit)
         .map((row) => row.id),
     );
+  }
+}
+
+/**
+ * 顧客サポート（P1-1・試験用）。
+ *
+ * ⚠️ **氏名とメールアドレスの平文を持たない。** 本物と同じく、持っていない
+ * ものは返せない。
+ */
+export class InMemoryCustomerDirectory implements CustomerDirectoryPort {
+  summaries: CustomerSummary[] = [];
+  entitlementRows: (CustomerEntitlement & { accountId: string })[] = [];
+  orderRows: (CustomerOrderRow & { accountId: string })[] = [];
+  refundRows: (CustomerRefundRow & { accountId: string })[] = [];
+  candidates = new Map<string, DuplicateCandidate[]>();
+  /** 照合値 → アカウントID。⚠️ 平文は持たない。 */
+  byEmailHash = new Map<string, string[]>();
+
+  findByEmailHash(emailHash: string, limit: number): Promise<readonly CustomerSummary[]> {
+    const ids = this.byEmailHash.get(emailHash) ?? [];
+    return Promise.resolve(
+      ids.flatMap((id) => this.summaries.filter((row) => row.accountId === id)).slice(0, limit),
+    );
+  }
+
+  findByCommonUserId(commonUserId: string, limit: number): Promise<readonly CustomerSummary[]> {
+    return Promise.resolve(
+      this.summaries.filter((row) => row.commonUserId === commonUserId).slice(0, limit),
+    );
+  }
+
+  findByAccountId(accountId: string): Promise<CustomerSummary | null> {
+    return Promise.resolve(this.summaries.find((row) => row.accountId === accountId) ?? null);
+  }
+
+  findByOrderNumber(orderNumber: string): Promise<CustomerSummary | null> {
+    const order = this.orderRows.find((row) => row.orderNumber === orderNumber);
+    return order === undefined ? Promise.resolve(null) : this.findByAccountId(order.accountId);
+  }
+
+  entitlements(accountId: string, limit: number): Promise<readonly CustomerEntitlement[]> {
+    return Promise.resolve(
+      this.entitlementRows.filter((row) => row.accountId === accountId).slice(0, limit),
+    );
+  }
+
+  orders(accountId: string, limit: number): Promise<readonly CustomerOrderRow[]> {
+    return Promise.resolve(
+      this.orderRows.filter((row) => row.accountId === accountId).slice(0, limit),
+    );
+  }
+
+  refunds(accountId: string, limit: number): Promise<readonly CustomerRefundRow[]> {
+    return Promise.resolve(
+      this.refundRows.filter((row) => row.accountId === accountId).slice(0, limit),
+    );
+  }
+
+  duplicateCandidates(accountId: string, limit: number): Promise<readonly DuplicateCandidate[]> {
+    return Promise.resolve((this.candidates.get(accountId) ?? []).slice(0, limit));
+  }
+}
+
+/** アカウント単位の申し送り（試験用）。⚠️ 追記のみ。 */
+export class InMemoryAccountNotes implements AccountNotePort {
+  readonly rows: (AccountNoteRecord & { accountId: string })[] = [];
+
+  add(input: {
+    readonly accountId: string;
+    readonly authorAccountId: string;
+    readonly body: string;
+    readonly now: Date;
+  }): Promise<string> {
+    const id = `note-${String(this.rows.length + 1)}`;
+    this.rows.unshift({
+      id,
+      accountId: input.accountId,
+      authorAccountId: input.authorAccountId,
+      body: input.body,
+      createdAt: input.now,
+    });
+    return Promise.resolve(id);
+  }
+
+  list(accountId: string, limit: number): Promise<readonly AccountNoteRecord[]> {
+    return Promise.resolve(this.rows.filter((row) => row.accountId === accountId).slice(0, limit));
+  }
+}
+
+/**
+ * ご連絡先の変更申請（試験用）。
+ *
+ * ⚠️ **本物と同じく、決着した申請は動かない。** 代替実装が緩いと、
+ * 「本人確認を飛ばせない」ことを確かめる試験が空振りする。
+ */
+export class InMemoryEmailChangeRequests implements EmailChangeRequestPort {
+  readonly rows: EmailChangeRequestRecord[] = [];
+
+  open(input: {
+    readonly accountId: string;
+    readonly requestedMaskedEmail: string;
+    readonly requestedEmailHash: string;
+    readonly openedByAccountId: string;
+    readonly now: Date;
+  }): Promise<string> {
+    const id = `ecr-${String(this.rows.length + 1)}`;
+    this.rows.unshift({
+      id,
+      accountId: input.accountId,
+      requestedMaskedEmail: input.requestedMaskedEmail,
+      status: 'requested',
+      verificationMethod: null,
+      verifiedByAccountId: null,
+      verifiedAt: null,
+      settledByAccountId: null,
+      settledAt: null,
+      note: null,
+      openedByAccountId: input.openedByAccountId,
+      createdAt: input.now,
+    });
+    return Promise.resolve(id);
+  }
+
+  findById(id: string): Promise<EmailChangeRequestRecord | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  list(accountId: string, limit: number): Promise<readonly EmailChangeRequestRecord[]> {
+    return Promise.resolve(this.rows.filter((row) => row.accountId === accountId).slice(0, limit));
+  }
+
+  verify(input: {
+    readonly id: string;
+    readonly method: IdentityVerificationMethod;
+    readonly note: string | null;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<void> {
+    this.replace(input.id, (row) => ({
+      ...row,
+      status: 'identity_verified',
+      verificationMethod: input.method,
+      verifiedByAccountId: input.actorAccountId,
+      verifiedAt: input.now,
+      note: input.note,
+    }));
+    return Promise.resolve();
+  }
+
+  settle(input: {
+    readonly id: string;
+    readonly status: 'completed' | 'rejected';
+    readonly note: string | null;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<void> {
+    this.replace(input.id, (row) => ({
+      ...row,
+      status: input.status,
+      settledByAccountId: input.actorAccountId,
+      settledAt: input.now,
+      note: input.note,
+    }));
+    return Promise.resolve();
+  }
+
+  /** ⚠️ 決着した行は動かさない（本物の条件付き UPDATE と同じ）。 */
+  private replace(
+    id: string,
+    change: (row: EmailChangeRequestRecord) => EmailChangeRequestRecord,
+  ): void {
+    const index = this.rows.findIndex((row) => row.id === id);
+    const row = this.rows[index];
+    if (row === undefined) {
+      return;
+    }
+    if (row.status === 'completed' || row.status === 'rejected') {
+      return;
+    }
+    this.rows[index] = change(row);
   }
 }

@@ -51,6 +51,30 @@ export const ACTIONS = [
    * ⚠️ **`auditor` には渡さない。** お金が動く操作である。
    */
   'order.refund',
+  /**
+   * 顧客の詳細を見る（P1-1）。
+   *
+   * ⚠️ **`order.view_any` と分けてある。** 注文を一覧で見ることと、
+   * 「この方が何を買い、何を受け取り、いくら返金されたか」を 1 人ぶん
+   * まとめて見ることは、別の力である。まとめて見えるということは、
+   * その方の行動が 1 画面に集まるということでもある。
+   */
+  'customer.view',
+  /**
+   * 顧客について申し送りを書く（P1-1）。
+   *
+   * ⚠️ **追記のみ。** 直す口も消す口も無い（`order.note` と同じ）。
+   */
+  'customer.note',
+  /**
+   * ご連絡先の変更申請を扱う（P1-1）。
+   *
+   * ⚠️ **`auditor` には渡さない。** 本人確認の記録は、乗っ取りを止める
+   * 最後の砦である。見るだけの人が「確認した」と押せてはいけない。
+   *
+   * ⚠️ **この操作でアドレスは変わらない。** 変えるのは認証基盤側で人が行う。
+   */
+  'customer.email_change',
   'checkout.create',
   'claim.inspect',
   'claim.accept',
@@ -240,6 +264,10 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'order.note',
     // ⚠️ お金が動く。`auditor` には渡さない（記録は見られる）。
     'order.refund',
+    // 問い合わせ対応（P1-1）。⚠️ 本人確認は `auditor` には渡さない。
+    'customer.view',
+    'customer.note',
+    'customer.email_change',
     'collection.view',
     'mint_job.retry',
     'audit_log.view',
@@ -290,6 +318,11 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'artwork.view_unpublished',
     'order.view',
     'order.view_any',
+    /*
+      ⚠️ **顧客の詳細は渡さない。** 監査は「運営が何をしたか」を見る仕事で、
+         「その方が何を買ったか」を 1 画面で見る必要は無い。まとめて
+         見えることそのものが力なので、必要のない人には渡さない。
+    */
     'collection.view',
     'audit_log.view',
     // 状態と履歴は見られるが、変更も再送もできない（指示書 §8）。

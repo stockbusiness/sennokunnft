@@ -91,3 +91,10 @@ export type {
   EntitlementAdminQuery,
   EntitlementAdminRow,
 } from './repositories/entitlement-admin.repository';
+
+// 顧客サポート（P1-1）。
+export {
+  PrismaAccountNoteRepository,
+  PrismaCustomerDirectoryRepository,
+  PrismaEmailChangeRequestRepository,
+} from './repositories/customer.repository';

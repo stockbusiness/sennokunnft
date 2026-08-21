@@ -168,6 +168,8 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 404 ではない。「無い」のではなく「この配備では使えない」。
   ISSUANCE_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
   WALLET_DELIVERY_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  // ⚠️ 状態が合わないので断る。要求そのものは正しい形をしている。
+  EMAIL_CHANGE_NOT_ALLOWED: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -343,6 +345,11 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   ISSUANCE_UNAVAILABLE: 'この環境では受取権の発行をやり直せません。設定をご確認ください。',
   WALLET_DELIVERY_UNAVAILABLE:
     'この環境ではウォレットへの再送ができません。外部サービスの設定をご確認ください。',
+
+  // --- 顧客サポート（P1-1）---
+  // ⚠️ 「できません」で終わらせず、次に何を見ればよいかを書く。
+  EMAIL_CHANGE_NOT_ALLOWED:
+    'この申請は、いまの状態では進められません。本人確認が済んでいるか、すでに決着していないかをご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
