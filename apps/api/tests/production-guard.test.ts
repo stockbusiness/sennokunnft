@@ -425,6 +425,74 @@ describe('人が残す証跡', () => {
   });
 });
 
+/**
+ * 暗号鍵を持たない配備。
+ *
+ * ⚠️ **この組が無かったせいで e2e が落ちた**（2026-08-21）。試験の代替実装は
+ * 外部連携を必ず配線していたので、「配線されていない配備」を誰も通していなかった。
+ * 起動そのものが落ちる類の壊れ方は、単体の試験では見つからない。
+ */
+describe('外部連携を配線していない配備', () => {
+  beforeEach(async () => {
+    await app.close();
+    harness = buildHarness(
+      new DevTokenVerifier({
+        secret: TEST_TOKEN_SECRET,
+        issuer: TEST_ISSUER,
+        audience: TEST_AUDIENCE,
+        now: () => TEST_NOW,
+      }),
+    );
+    const { integrations: _omitted, ...withoutIntegrations } = harness;
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.register(withoutIntegrations)],
+    }).compile();
+    app = moduleRef.createNestApplication({ rawBody: true });
+    app.useGlobalFilters(new DomainErrorFilter());
+    await app.init();
+  });
+
+  /*
+    ⚠️ **起動できることが本題。** 必須の依存にすると、ここで例外が飛ぶ。
+  */
+  it('起動でき、10 条件の画面も開ける', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/production/readiness')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+  });
+
+  /*
+    ⚠️ **口は生やして、押されたら断る。** 口ごと消すと、画面が配備ごとに
+       変わってしまい、「押せるはずのボタンが無い」という問い合わせに変わる。
+  */
+  it('試し送りの口はあるが、断る', async () => {
+    harness.accounts.seed('user-operator', 'operator');
+    harness.staffMembers.setStaffEmail('account-user-operator', 'ops@example.test');
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/production/mail-check')
+      .set(auth(actorToken('operator')))
+      .expect(503);
+  });
+
+  /*
+    ⚠️ **記録できないなら送らない。** 記録の残らない試し送りは、本番販売
+       ガードから見れば「やっていない」のと変わらない。
+  */
+  it('記録できないので、送りもしない', async () => {
+    harness.accounts.seed('user-operator', 'operator');
+    harness.staffMembers.setStaffEmail('account-user-operator', 'ops@example.test');
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/production/mail-check')
+      .set(auth(actorToken('operator')))
+      .expect(503);
+
+    expect(harness.mailTestSender.sent).toHaveLength(0);
+  });
+});
+
 describe('メールの試し送り', () => {
   it('運営は押せる', async () => {
     harness.accounts.seed('user-operator', 'operator');

@@ -828,10 +828,17 @@ export class AppModule implements NestModule {
         },
         {
           provide: MailCheckService,
-          inject: [IntegrationService_],
-          useFactory: (integrations: IntegrationService_): MailCheckService =>
+          /*
+            ⚠️ **`optional`。** 外部連携の設定一式は、暗号鍵を持たない配備には
+               存在しない。必須にすると、鍵の無い配備で**起動そのものが落ちる**
+               ——実際に e2e がそれで落ちた（2026-08-21）。
+            ⚠️ **見つからない依存に Nest が渡すのは `undefined`。** `null` では
+               ないので、境界で揃える。
+          */
+          inject: [{ token: IntegrationService_, optional: true }],
+          useFactory: (integrations: IntegrationService_ | undefined): MailCheckService =>
             new MailCheckService(
-              integrations,
+              integrations ?? null,
               deps.staffMembers,
               deps.clock,
               deps.audit,

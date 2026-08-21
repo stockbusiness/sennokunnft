@@ -9,8 +9,8 @@ import {
   type MailAttemptOutcome,
   type StaffMemberRepository,
 } from '@sengoku/domain';
+import type { ConnectionCheckKind, IntegrationService } from '@sengoku/domain';
 import { DomainErrorException } from '../common/domain-error.filter';
-import type { IntegrationService_ } from '../integration/integration.service';
 
 /**
  * メールの試し送り（実運営 指示書 P0-7 の 6 番目）。
@@ -29,6 +29,29 @@ import type { IntegrationService_ } from '../integration/integration.service';
  * ⚠️ **この試し送りを OVEW Wallet へ広げない。** あちらの受け口は
  * 受取権を作る口で、試し打ちしてよい相手ではない（要決定 06 は未解決）。
  */
+
+/**
+ * 確かめた結果を残す口。
+ *
+ * ⚠️ **外部連携の設定一式ではなく、記録する口だけを要求する。** あちらは
+ * 暗号鍵を持たない配備には存在しない（`IntegrationService_` は条件付き
+ * provider）。丸ごと必須にすると、鍵の無い配備で**起動そのものが落ちる**
+ * ——実際に e2e がそれで落ちた。
+ */
+export interface ConnectionCheckRecorder {
+  recordCheck(input: {
+    readonly service: IntegrationService;
+    readonly environment: IntegrationEnvironment;
+    readonly kind: ConnectionCheckKind;
+    readonly succeeded: boolean;
+    readonly failureCode: string | null;
+    readonly httpStatus: number | null;
+    readonly durationMs: number;
+    readonly secretId: string | null;
+    readonly actorAccountId: string;
+    readonly correlationId: string | null;
+  }): Promise<unknown>;
+}
 
 /** 試し送りの手段。⚠️ 持たない配備では `null`。 */
 export interface MailTestSender {
@@ -53,7 +76,11 @@ const BODY = [
 @Injectable()
 export class MailCheckService {
   constructor(
-    private readonly integrations: IntegrationService_,
+    /**
+     * ⚠️ **`null` は「この配備では確かめられない」。** 記録できない試し送りは
+     * 意味が無い——本番販売ガードが読むのは、送った事実ではなく**記録**だから。
+     */
+    private readonly integrations: ConnectionCheckRecorder | null,
     private readonly staff: StaffMemberRepository,
     private readonly clock: ClockPort,
     private readonly audit: AuditLogPort,
@@ -71,7 +98,11 @@ export class MailCheckService {
       // ⚠️ ここへ来るのは配線の誤り。認可ガードが先に弾いている。
       throw new ForbiddenException();
     }
-    if (this.sender === null) {
+    /*
+      ⚠️ **送れないことと、記録できないことを同じ扱いにする。** 記録の残らない
+         試し送りは、本番販売ガードから見れば「やっていない」のと変わらない。
+    */
+    if (this.sender === null || this.integrations === null) {
       throw new DomainErrorException('MAIL_UNAVAILABLE');
     }
 
@@ -100,7 +131,8 @@ export class MailCheckService {
     const finishedAt = this.clock.now();
     const verdict = classify(outcome);
 
-    await this.integrations.recordCheck({
+    const recorder = this.integrations;
+    await recorder.recordCheck({
       service: 'mail',
       environment: this.environment,
       // ⚠️ 到達性ではない。資格情報で実際に受け付けられたかを見ている。
