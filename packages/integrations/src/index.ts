@@ -105,3 +105,12 @@ export { ResolvingPaymentGateway } from './resolving-payment';
 export { probeStripeAccount } from './stripe-payment';
 
 export { HmacEmailHasher, normalizeEmail } from './email-hash';
+
+// --- 購入者への知らせ（P0-4） ---------------------------------------------
+export { ResendMailSender } from './resend-mail-sender';
+export type { ResendMailSenderOptions } from './resend-mail-sender';
+export { SupabaseRecipientResolver } from './supabase-recipient-resolver';
+export type {
+  AuthSubjectLookup,
+  SupabaseRecipientResolverOptions,
+} from './supabase-recipient-resolver';

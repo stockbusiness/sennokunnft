@@ -80,7 +80,21 @@ import type {
   RecordCredentialCheckCommand,
   ActivateCredentialCommand,
   OpenedPaymentCredential,
+  NotificationEnqueueInput,
+  NotificationEnqueueOutcome,
+  NotificationEventType,
+  NotificationFailureInput,
+  NotificationHistoryPage,
+  NotificationHistoryPort,
+  NotificationHistoryQuery,
+  NotificationHistoryRecord,
+  NotificationOutboxPort,
+  NotificationRecord,
+  NotificationTemplateRecord,
+  NotificationTemplateRepository,
+  NotificationTemplateStatus,
 } from '@sengoku/domain';
+import { NOTIFICATION_EVENT_TYPES } from '@sengoku/domain';
 import {
   canManuallyResend,
   domainError,
@@ -1593,6 +1607,9 @@ export class InMemoryRefunds implements RefundRepository {
     const paid = order.paymentStatus === 'succeeded';
     return {
       orderId,
+      // ⚠️ 知らせの宛先の本人と注文番号（P0-4）。判定には使わない。
+      accountId: order.accountId,
+      orderNumber: order.orderNumber,
       totalAmount: order.totalAmount,
       currency: order.currency,
       // ⚠️ 焼き付けた値をそのまま返す。設定から計算し直さない。
@@ -2675,6 +2692,9 @@ export interface TestHarness extends AppDependencies {
   readonly issuance: InMemoryEntitlementIssuance;
   /** ⚠️ 積まれた確認事項を覗くため、実体の型で持つ。 */
   readonly operationsReviews: InMemoryOperationsReviews;
+  /** ⚠️ 積まれた知らせを覗くため、実体の型で持つ。 */
+  readonly notifications: InMemoryNotifications;
+  readonly notificationTemplates: InMemoryNotificationTemplates;
   readonly collectibles: InMemoryCollectibles;
 }
 
@@ -2875,6 +2895,8 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   legalRepository.seed(publishedTokushoho());
   const issuance = new InMemoryEntitlementIssuance();
   const operationsReviews = new InMemoryOperationsReviews();
+  const notifications = new InMemoryNotifications();
+  const notificationTemplates = new InMemoryNotificationTemplates();
   const collectibles = new InMemoryCollectibles();
   const legalConsents = new InMemoryLegalConsents(legalRepository);
   return {
@@ -2888,6 +2910,19 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     refunds,
     // 運用確認キュー（M3a）。⚠️ 積めたかどうかを試験から覗く。
     operationsReviews,
+    // 購入者への知らせ（P0-4）。⚠️ 積めたかどうかを試験から覗く。
+    notifications,
+    notificationTemplates,
+    notification: {
+      templates: notificationTemplates,
+      outbox: notifications,
+      history: notifications,
+      // ⚠️ 試験では既定で有効。無効の経路は個別の試験で差し替える。
+      generationEnabled: true,
+      siteName: 'テスト市',
+      siteUrl: 'https://example.test',
+      logger: silentLogger,
+    },
     // 受取権の発行（P0-1）。⚠️ 対象の注文は試験ごとに `seedOrder` で置く。
     issuance,
     // ご自分が受け取ったもの（P0-3）。⚠️ 試験ごとに `seed` で置く。
@@ -3275,5 +3310,264 @@ export class InMemoryCollectibles implements CollectibleRepository {
     const mine = this.rows.filter((row) => this.owners.get(row.entitlementId) === input.accountId);
     const items = mine.slice(0, Math.max(input.limit, 1));
     return Promise.resolve({ items, nextCursor: null });
+  }
+}
+
+/**
+ * 知らせの文面（試験用）。
+ *
+ * ⚠️ **既定で 9 種別すべてを公開済みにしておく。** 文面が無ければ知らせは
+ * 積まれない決まりなので、これが無いと通知の試験がすべて「文面が無い」で
+ * 空振りする。**その決まり自体を確かめる試験は `unpublish` で外す。**
+ */
+export class InMemoryNotificationTemplates implements NotificationTemplateRepository {
+  private readonly rows: NotificationTemplateRecord[] = [];
+
+  constructor(seedAll = true) {
+    if (seedAll) {
+      for (const eventType of NOTIFICATION_EVENT_TYPES) {
+        this.rows.push({
+          eventType,
+          version: 1,
+          subject: `[test] ${eventType} {{orderNumber}}`,
+          body: `本文 {{orderNumber}} / {{siteName}}`,
+          status: 'published',
+          publishedAt: TEST_NOW,
+          updatedAt: TEST_NOW,
+        });
+      }
+    }
+  }
+
+  /** その種別の文面を取り下げる。⚠️ 「文面が無い」経路を試すため。 */
+  unpublish(eventType: NotificationEventType): void {
+    for (let i = this.rows.length - 1; i >= 0; i -= 1) {
+      if (this.rows[i]!.eventType === eventType) {
+        this.rows.splice(i, 1);
+      }
+    }
+  }
+
+  /** 差し込み語を差し替える。⚠️ 値が足りない経路を試すため。 */
+  setBody(eventType: NotificationEventType, subject: string, body: string): void {
+    const index = this.rows.findIndex((row) => row.eventType === eventType);
+    const next = { ...this.rows[index]!, subject, body };
+    this.rows[index] = next;
+  }
+
+  findPublished(eventType: NotificationEventType): Promise<NotificationTemplateRecord | null> {
+    const published = this.rows
+      .filter((row) => row.eventType === eventType && row.status === 'published')
+      .sort((a, b) => b.version - a.version);
+    return Promise.resolve(published[0] ?? null);
+  }
+
+  listAll(): Promise<readonly NotificationTemplateRecord[]> {
+    return Promise.resolve([...this.rows]);
+  }
+
+  listVersions(eventType: NotificationEventType): Promise<readonly NotificationTemplateRecord[]> {
+    return Promise.resolve(this.rows.filter((row) => row.eventType === eventType));
+  }
+
+  createVersion(input: {
+    readonly eventType: NotificationEventType;
+    readonly subject: string;
+    readonly body: string;
+    readonly status: NotificationTemplateStatus;
+    readonly actorAccountId: string | null;
+    readonly now: Date;
+  }): Promise<NotificationTemplateRecord> {
+    const latest = this.rows
+      .filter((row) => row.eventType === input.eventType)
+      .reduce((max, row) => Math.max(max, row.version), 0);
+    const record: NotificationTemplateRecord = {
+      eventType: input.eventType,
+      version: latest + 1,
+      subject: input.subject,
+      body: input.body,
+      status: input.status,
+      publishedAt: input.status === 'published' ? input.now : null,
+      updatedAt: input.now,
+    };
+    this.rows.push(record);
+    return Promise.resolve(record);
+  }
+
+  publish(input: {
+    readonly eventType: NotificationEventType;
+    readonly version: number;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const index = this.rows.findIndex(
+      (row) =>
+        row.eventType === input.eventType &&
+        row.version === input.version &&
+        row.status === 'draft',
+    );
+    if (index < 0) {
+      return Promise.resolve(false);
+    }
+    this.rows[index] = {
+      ...this.rows[index]!,
+      status: 'published',
+      publishedAt: input.now,
+      updatedAt: input.now,
+    };
+    return Promise.resolve(true);
+  }
+}
+
+/** 送信待ちと送信履歴（試験用）。⚠️ 重複は「作らない」で受ける。 */
+export class InMemoryNotifications implements NotificationOutboxPort, NotificationHistoryPort {
+  readonly rows: {
+    record: NotificationRecord;
+    maskedRecipient: string | null;
+    recipientHash: string | null;
+    skippedReasonCode: string | null;
+    lastErrorCode: string | null;
+    nextRetryAt: Date;
+    sentAt: Date | null;
+    createdAt: Date;
+  }[] = [];
+
+  enqueue(input: NotificationEnqueueInput): Promise<NotificationEnqueueOutcome> {
+    const existing = this.rows.find(
+      (row) =>
+        row.record.eventType === input.eventType &&
+        row.record.subjectType === input.subjectType &&
+        row.record.subjectId === input.subjectId,
+    );
+    if (existing !== undefined) {
+      // ⚠️ 例外にしない。業務側のトランザクションを巻き戻さない。
+      return Promise.resolve({ kind: 'duplicate', id: existing.record.id });
+    }
+    this.rows.push({
+      record: {
+        id: input.id,
+        eventType: input.eventType,
+        subjectType: input.subjectType,
+        subjectId: input.subjectId,
+        accountId: input.accountId,
+        renderedSubject: input.renderedSubject,
+        renderedBody: input.renderedBody,
+        templateVersion: input.templateVersion,
+        status: 'PENDING',
+        attemptCount: 0,
+        maxAttempts: 5,
+        correlationId: input.correlationId,
+      },
+      maskedRecipient: null,
+      recipientHash: null,
+      skippedReasonCode: null,
+      lastErrorCode: null,
+      nextRetryAt: input.now,
+      sentAt: null,
+      createdAt: input.now,
+    });
+    return Promise.resolve({ kind: 'created', id: input.id });
+  }
+
+  claimBatch(input: { readonly limit: number; readonly now: Date }): Promise<NotificationRecord[]> {
+    const picked: NotificationRecord[] = [];
+    for (const row of this.rows) {
+      if (picked.length >= input.limit) break;
+      if (row.record.status !== 'PENDING') continue;
+      if (row.nextRetryAt.getTime() > input.now.getTime()) continue;
+      row.record = {
+        ...row.record,
+        status: 'PROCESSING',
+        attemptCount: row.record.attemptCount + 1,
+      };
+      picked.push(row.record);
+    }
+    return Promise.resolve(picked);
+  }
+
+  markSent(input: {
+    readonly id: string;
+    readonly providerMessageId: string | null;
+    readonly maskedRecipient: string;
+    readonly recipientHash: string | null;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const row = this.rows.find((candidate) => candidate.record.id === input.id);
+    if (row === undefined || row.record.status !== 'PROCESSING') {
+      return Promise.resolve(false);
+    }
+    row.record = { ...row.record, status: 'SENT' };
+    row.maskedRecipient = input.maskedRecipient;
+    row.recipientHash = input.recipientHash;
+    row.sentAt = input.now;
+    return Promise.resolve(true);
+  }
+
+  recordFailure(input: NotificationFailureInput): Promise<boolean> {
+    const row = this.rows.find((candidate) => candidate.record.id === input.id);
+    if (row === undefined || row.record.status !== 'PROCESSING') {
+      return Promise.resolve(false);
+    }
+    row.record = { ...row.record, status: input.status };
+    row.lastErrorCode = input.errorCode;
+    row.nextRetryAt = input.nextRetryAt;
+    return Promise.resolve(true);
+  }
+
+  markSkipped(input: { readonly id: string; readonly reasonCode: string }): Promise<boolean> {
+    const row = this.rows.find((candidate) => candidate.record.id === input.id);
+    if (row === undefined || row.record.status !== 'PROCESSING') {
+      return Promise.resolve(false);
+    }
+    row.record = { ...row.record, status: 'SKIPPED' };
+    row.skippedReasonCode = input.reasonCode;
+    return Promise.resolve(true);
+  }
+
+  reclaimStale(): Promise<number> {
+    return Promise.resolve(0);
+  }
+
+  requeue(input: { readonly id: string; readonly now: Date }): Promise<boolean> {
+    const row = this.rows.find((candidate) => candidate.record.id === input.id);
+    if (row === undefined || (row.record.status !== 'FAILED' && row.record.status !== 'DEAD')) {
+      return Promise.resolve(false);
+    }
+    row.record = { ...row.record, status: 'PENDING', attemptCount: 0 };
+    row.nextRetryAt = input.now;
+    row.lastErrorCode = null;
+    return Promise.resolve(true);
+  }
+
+  list(query: NotificationHistoryQuery): Promise<NotificationHistoryPage> {
+    const items = this.rows
+      .filter((row) => query.status === undefined || row.record.status === query.status)
+      .filter((row) => query.eventType === undefined || row.record.eventType === query.eventType)
+      .filter((row) => query.subjectId === undefined || row.record.subjectId === query.subjectId)
+      .slice(0, query.limit)
+      .map((row) => this.toHistory(row));
+    return Promise.resolve({ items, nextCursor: null });
+  }
+
+  findById(id: string): Promise<NotificationHistoryRecord | null> {
+    const row = this.rows.find((candidate) => candidate.record.id === id);
+    return Promise.resolve(row === undefined ? null : this.toHistory(row));
+  }
+
+  private toHistory(row: InMemoryNotifications['rows'][number]): NotificationHistoryRecord {
+    return {
+      id: row.record.id,
+      eventType: row.record.eventType,
+      subjectType: row.record.subjectType,
+      subjectId: row.record.subjectId,
+      maskedRecipient: row.maskedRecipient,
+      templateVersion: row.record.templateVersion,
+      subject: row.record.renderedSubject,
+      status: row.record.status,
+      attemptCount: row.record.attemptCount,
+      lastErrorCode: row.lastErrorCode,
+      skippedReasonCode: row.skippedReasonCode,
+      sentAt: row.sentAt,
+      createdAt: row.createdAt,
+    };
   }
 }

@@ -77,6 +77,16 @@ export const ACTIONS = [
   //    「誰が確認したか」が記録に残る。
   'operations_review.view',
   'operations_review.resolve',
+  // --- 購入者への知らせ（P0-4）---
+  // ⚠️ **閲覧は閲覧者にも開く。** 「送ったつもりで送れていない」件数は、
+  //    監査の対象そのもの。ただし出るのは伏せた宛先だけ（`UD-503`）。
+  'notification.view',
+  // ⚠️ **文面を書けるのは運営。公開はオーナー**（下の `OWNER_ONLY_ACTIONS`）。
+  //    公開した文面はそのまま全購入者へ届く。書く人と決める人を分ける。
+  'notification.edit',
+  'notification.publish',
+  // ⚠️ 再送は運営の日常業務。本文は確定済みで、新しく何かを決める操作ではない。
+  'notification.resend',
   // --- 法務文書（利用規約・プライバシーポリシー・特商法表記）---
   // ⚠️ 下書きは運営スタッフが書ける。**公開はオーナーだけ**（下の
   //    `OWNER_ONLY_ACTIONS`）。公開した版は取り消せず、そこに書いた
@@ -242,6 +252,11 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     //    「確認した」という印を付けるだけの操作である。
     'operations_review.view',
     'operations_review.resolve',
+    'notification.view',
+    'notification.edit',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'notification.publish',
+    'notification.resend',
     'legal.view',
     'legal.edit',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
@@ -272,6 +287,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'integration.view',
     // ⚠️ 見るだけ。対応済みにはできない。
     'operations_review.view',
+    // ⚠️ 見るだけ。文面は書けず、送り直しもできない。
+    'notification.view',
     // ⚠️ 過去の版も見られる。「その時点でどう書いてあったか」を
     //    確かめるのは、まさに監査の仕事。
     'legal.view',
@@ -316,6 +333,9 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   //    足すことしかできない）。書いた内容は購入者への約束になるので、
   //    下書き（`legal.edit`）と決裁を分ける。
   'legal.publish',
+  // ⚠️ **公開した文面は、そのまま全購入者へ届く。** 直したつもりの 1 文字が
+  //    数千通に載る。書く（`notification.edit`）人と決める人を分ける。
+  'notification.publish',
   // ⚠️ **入金先が変わる操作。** 運営の 1 人が乗っ取られただけで、
   //    売上の振込先を差し替えられてしまう。
   'payment_credential.manage',

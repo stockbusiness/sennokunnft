@@ -13,14 +13,21 @@ import type {
   IssueEntitlementsResponse,
   ReconcileRevocationsResponse,
   ReleaseExpiredResponse,
+  SendNotificationsResponse,
 } from '@sengoku/contracts';
-import { AUTO_DELIVERY_BATCH_SIZE, ISSUANCE_BATCH_SIZE, RELEASE_BATCH_SIZE } from '@sengoku/domain';
+import {
+  AUTO_DELIVERY_BATCH_SIZE,
+  ISSUANCE_BATCH_SIZE,
+  NOTIFICATION_BATCH_SIZE,
+  RELEASE_BATCH_SIZE,
+} from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
 import {
   REVOCATION_RECONCILE_BATCH_SIZE,
   type RevocationReconcileService,
 } from '../claim/revocation-reconcile.service';
+import type { NotificationSendService } from '../notification/send.service';
 import { EntitlementIssuanceService } from './issuance.service';
 import { OrderService } from './order.service';
 
@@ -45,6 +52,14 @@ export interface InternalJobConfig {
    * 作り続ける——「止めたはずのものが別の入口から動く」状態になる。
    */
   readonly revocationReconcile: RevocationReconcileService | null;
+  /**
+   * 購入者への知らせを送る処理（P0-4）。
+   *
+   * ⚠️ **`null` は「まだ送らない」を意味する。** 送らない配備でも口だけは
+   * 生やし、**呼ばれたら 0 件を返す**。口ごと消すと、時計の設定を配備ごとに
+   * 変えることになり、送り始めた日に設定漏れで動かない。
+   */
+  readonly notificationSend: NotificationSendService | null;
 }
 
 /**
@@ -187,6 +202,40 @@ export class InternalJobsController {
    * 変わるため、繰り返し呼んで測ると 1 文字ずつ言い当てられる。
    * ⚠️ 失敗の理由を返さない。「長さが違う」も「値が違う」も同じ 401。
    */
+  /**
+   * 積まれた知らせを送る（P0-4）。
+   *
+   * ⚠️ **業務処理の側では送らない。** 注文や返金のトランザクションから
+   * 外部へ送ると、相手の応答を待つあいだ行を握り続ける。積むところまでを
+   * 業務と同じトランザクションで行い、送るのはここ。
+   *
+   * ⚠️ **重なって走っても二重に届かない。** 掴むのが排他的で、
+   * 送信事業者側の冪等キーも行の識別子から決まるため。
+   */
+  @Post('send-notifications')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async sendNotifications(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<SendNotificationsResponse> {
+    this.assertAuthorized(token);
+    if (this.config.notificationSend === null) {
+      // まだ送らない配備。⚠️ 黙って 0 を返す（異常ではない）。
+      return { pickedCount: 0, sentCount: 0, skippedCount: 0, failedCount: 0 };
+    }
+    const result = await this.config.notificationSend.sweep(NOTIFICATION_BATCH_SIZE);
+    /*
+      ⚠️ **宛先も注文番号も返さない。** これは時計が叩く口で、
+         応答は監視の数値として読まれる。人の情報を混ぜない。
+    */
+    return {
+      pickedCount: result.picked,
+      sentCount: result.sent,
+      skippedCount: result.skipped,
+      failedCount: result.failed,
+    };
+  }
+
   private assertAuthorized(token: string | undefined): void {
     if (token === undefined) {
       throw new UnauthorizedException();

@@ -289,6 +289,18 @@ export const DOMAIN_ERROR_CODES = [
    * 最初に確認した人の記録が、あとから押した人で置き換わる。
    */
   'OPERATIONS_REVIEW_NOT_OPEN',
+
+  // --- 購入者への知らせ（P0-4） ---
+  /** 文面として成立していない（件名が空・長すぎる・改行が入っている等）。 */
+  'NOTIFICATION_TEMPLATE_INVALID',
+  /** 差し込み語彙に無い語が書かれている。⚠️ 公開の時点で弾く。 */
+  'NOTIFICATION_TEMPLATE_UNKNOWN_VARIABLE',
+  /** 差し込む値が足りない。⚠️ 空文字で埋めずに落とす。 */
+  'NOTIFICATION_RENDER_INCOMPLETE',
+  /** その種別の文面がまだ公開されていない。 */
+  'NOTIFICATION_TEMPLATE_NOT_PUBLISHED',
+  /** その状態の知らせは送り直せない（送信中・送信済み・送らないと決めた）。 */
+  'NOTIFICATION_NOT_RESENDABLE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

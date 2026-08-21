@@ -16,6 +16,7 @@ import {
 } from '@sengoku/domain';
 import type { Logger } from '@sengoku/observability';
 import { DomainErrorException } from '../common/domain-error.filter';
+import { BuyerNotifier, NULL_NOTIFIER } from '../notification/buyer-notifier';
 
 /**
  * 返金の実行（`UD-104` / `UD-120`）。
@@ -87,6 +88,8 @@ export class RefundService {
     private readonly planRevocation: RevocationPlanner | null = null,
     /** 機械が決められなかったことを積む先。 */
     private readonly reviews: OperationsReviewRepository | null = null,
+    /** 購入者への知らせ（P0-4）。⚠️ 例外を投げない実装を渡す。 */
+    private readonly notifier: BuyerNotifier = NULL_NOTIFIER,
   ) {}
 
   listByOrder(orderId: string): Promise<readonly RefundRecordView[]> {
@@ -141,6 +144,21 @@ export class RefundService {
     if (gateway === null) {
       throw new DomainErrorException('PAYMENT_PROVIDER_DISABLED');
     }
+
+    /*
+      ご返金の手続きを始めた知らせ（P0-4）。
+
+      ⚠️ **記録の直後、事業者へ投げる前に積む。** 投げたあとにすると、
+         投げた直後に落ちたときへ「返金を始めました」が届かない。
+         逆（積んだが投げられなかった）は、返金の行が `requested` のまま
+         残るので運用で拾える。
+    */
+    await this.notifier.refundRequested({
+      refundId: refund.id,
+      accountId: context.accountId,
+      orderId: context.orderId,
+      orderNumber: context.orderNumber,
+    });
 
     const executed = await gateway.refundPayment({
       // ⚠️ 決済した当時の世代で投げる（`UD-118` §2）。
@@ -208,6 +226,21 @@ export class RefundService {
     });
 
     this.reportRevocation(context.orderId, settlement);
+
+    /*
+      ご返金が完了した知らせ（P0-4）。
+
+      ⚠️ **反映が済んでから積む。** 先に積むと、反映に失敗したときに
+         「返金が完了しました」だけが届く。
+    */
+    await this.notifier.refundCompleted({
+      refundId: refund.id,
+      accountId: context.accountId,
+      orderId: context.orderId,
+      orderNumber: context.orderNumber,
+      refundAmount: executed.value.amount,
+      currency: context.currency,
+    });
 
     const refreshed = await this.refunds.listByOrder(context.orderId);
     return { refund: refreshed.find((row) => row.id === refund.id) ?? refund, settlement };
@@ -317,6 +350,19 @@ export class RefundService {
       */
       await this.reviewPartialRefund(context.orderId, refund.id, input.now);
     }
+
+    /*
+      ⚠️ **事業者の画面からの返金でも知らせる。** こちらを経由していない
+         だけで、買った方から見れば同じ「返金された」である。
+    */
+    await this.notifier.refundCompleted({
+      refundId: refund.id,
+      accountId: context.accountId,
+      orderId: context.orderId,
+      orderNumber: context.orderNumber,
+      refundAmount: delta,
+      currency: context.currency,
+    });
 
     return { refund, settlement };
   }

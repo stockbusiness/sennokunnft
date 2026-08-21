@@ -101,6 +101,15 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   */
   'operations_review.view': { anonymous: false, buyer: false, operator: true, auditor: true },
   'operations_review.resolve': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // --- 購入者への知らせ（P0-4）---
+  // ⚠️ 監査役も「送ったつもりで送れていない」件数を見られる。
+  //    ただし出るのは伏せた宛先だけ（`UD-503`）。
+  'notification.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  // ⚠️ 文面を書けるのは運営。**公開はオーナーだけ**（`OWNER_ONLY_ACTIONS`）。
+  'notification.edit': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // ⚠️ **印が無ければ operator でも拒否。** 公開した文面はそのまま全員へ届く。
+  'notification.publish': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'notification.resend': { anonymous: false, buyer: false, operator: true, auditor: false },
   // --- 法務文書 ---
   // ⚠️ 監査役も過去の版を見られる。「その時点でどう書いてあったか」を
   //    確かめるのは監査の仕事そのもの。
@@ -299,6 +308,8 @@ describe('オーナーの印', () => {
     'integration.manage',
     'integration.manage_secret',
     'legal.publish',
+    // ⚠️ 公開した文面は、そのまま全購入者へ届く（P0-4）。
+    'notification.publish',
     'payout.mark_paid',
     'payment_credential.manage',
     // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
