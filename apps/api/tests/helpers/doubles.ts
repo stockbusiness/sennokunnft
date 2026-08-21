@@ -130,6 +130,16 @@ import {
   scheduleIssuanceRetry,
   PAYMENT_API_ENDPOINT,
   TOKUSHOHO_FIELD_KEYS,
+  // 本番販売ガード（P0-7）。
+  DEFAULT_PRODUCTION_READINESS_THRESHOLDS,
+  type AttestationFact,
+  type AttestationKind,
+  type AttestationPort,
+  type AttestationRecord,
+  type MailAttemptOutcome,
+  type ProductionReadinessFacts,
+  type ProductionReadinessPort,
+  type RecordAttestationCommand,
 } from '@sengoku/domain';
 import type {
   CollectibleListPage,
@@ -357,6 +367,7 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       status?: AccountRecord['status'];
       isOwner?: boolean;
       emailHash?: string | null;
+      lastAal2At?: Date | null;
     } = {},
   ): AccountRecord {
     const record: AccountRecord = {
@@ -367,6 +378,8 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       status: options.status ?? 'active',
       isOwner: options.isOwner ?? false,
       emailHash: options.emailHash ?? null,
+      // ⚠️ 既定は「記録が無い」。既定で満たされる状態を作らない（P0-7）。
+      lastAal2At: options.lastAal2At ?? null,
     };
     this.items.set(`dev:${subject}`, record);
     return record;
@@ -386,6 +399,7 @@ export class InMemoryAccountRepository implements AccountLookupPort {
       status: 'active',
       isOwner: false,
       emailHash,
+      lastAal2At: null,
     };
     this.items.set(`${provider}:${subject}`, record);
     return Promise.resolve(record);
@@ -399,6 +413,21 @@ export class InMemoryAccountRepository implements AccountLookupPort {
     for (const [key, record] of this.items) {
       if (record.id === accountId) {
         this.items.set(key, { ...record, emailHash });
+      }
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * 二要素で入ったことを覚える（P0-7）。
+   *
+   * ⚠️ **時刻を巻き戻さない**（本番実装と同じ向き）。
+   */
+  rememberMfa(accountId: string, at: Date): Promise<void> {
+    for (const [key, record] of this.items) {
+      const current = record.lastAal2At ?? null;
+      if (record.id === accountId && (current === null || current < at)) {
+        this.items.set(key, { ...record, lastAal2At: at });
       }
     }
     return Promise.resolve();
@@ -440,6 +469,11 @@ export class InMemoryStaffMemberRepository implements StaffMemberRepository {
 
   /** 連絡先は `AccountRecord` に無いので、ここで持つ。 */
   private readonly emails = new Map<string, string>();
+
+  /** 試験から業務用アドレスを置く（P0-7 の試し送りで使う）。 */
+  setStaffEmail(accountId: string, email: string): void {
+    this.emails.set(accountId, email);
+  }
 
   listStaff(): Promise<readonly StaffMember[]> {
     return Promise.resolve(
@@ -2703,6 +2737,10 @@ export interface TestHarness extends AppDependencies {
   readonly notifications: InMemoryNotifications;
   /** ⚠️ 置いた数から正しい色が出るかを見るため、実体の型で持つ。 */
   readonly operationsMetrics: InMemoryOperations;
+  /** 本番販売ガード（P0-7）。⚠️ 条件を 1 つずつ崩すため実体の型で持つ。 */
+  readonly productionReadiness: InMemoryProductionReadiness;
+  readonly attestations: InMemoryAttestations;
+  readonly mailTestSender: FakeMailTestSender;
   readonly entitlementAdmin: InMemoryEntitlementAdmin;
   readonly notificationTemplates: InMemoryNotificationTemplates;
   readonly collectibles: InMemoryCollectibles;
@@ -2876,6 +2914,13 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       missing: [],
       publicUrl: 'https://auth.example.com/.well-known/jwks.json',
     },
+    /*
+      メール（P0-7 の 6 番目）。
+      ⚠️ **`publicUrl` は `null`。** 到達性の確認を走らせない。確かめたいのは
+         「届くホストがあるか」ではなく「この鍵で受け付けられるか」で、
+         それは試し送りでしか分からない。
+    */
+    mail: { provider: 'resend', complete: true, missing: [], publicUrl: null },
   };
   const deliveries = new InMemoryWalletDeliveries();
   const auditLogReader = new InMemoryAuditLogReader(audit);
@@ -2907,6 +2952,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const operationsReviews = new InMemoryOperationsReviews();
   const notifications = new InMemoryNotifications();
   const operationsMetrics = new InMemoryOperations();
+  const productionReadiness = new InMemoryProductionReadiness();
+  const attestations = new InMemoryAttestations();
+  const mailTestSender = new FakeMailTestSender();
   const entitlementAdmin = new InMemoryEntitlementAdmin();
   const notificationTemplates = new InMemoryNotificationTemplates();
   const collectibles = new InMemoryCollectibles();
@@ -2930,6 +2978,21 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       entitlements: entitlementAdmin,
       thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
       jobKeys: ['issue-entitlements', 'deliver-entitlements', 'send-notifications'],
+    },
+    /*
+      本番販売ガード（P0-7）。
+      ⚠️ **既定は `staging`。** 判定はするが止めない。本番で止まることを
+         確かめる試験だけが `production` へ差し替える。
+    */
+    productionReadiness,
+    attestations,
+    mailTestSender,
+    production: {
+      readiness: productionReadiness,
+      attestations,
+      environment: 'staging' as const,
+      thresholds: DEFAULT_PRODUCTION_READINESS_THRESHOLDS,
+      mailTestSender,
     },
     // 購入者への知らせ（P0-4）。⚠️ 積めたかどうかを試験から覗く。
     notifications,
@@ -3706,5 +3769,124 @@ export class InMemoryEntitlementAdmin implements EntitlementAdminPort {
         .slice(0, limit)
         .map((row) => row.id),
     );
+  }
+}
+
+/**
+ * 本番販売ガードの事実（試験用）。
+ *
+ * ⚠️ **既定は「何も無い」。** 立ち上げた直後の姿がこれで、10 条件すべてが
+ * 未達になる。既定で満たされる形にすると、条件を 1 つずつ確かめる試験が
+ * すべて空振りしたまま緑になる。
+ */
+export class InMemoryProductionReadiness implements ProductionReadinessPort {
+  facts_: ProductionReadinessFacts = {
+    acceptingCredential: null,
+    platformFeeRateBps: 0,
+    publishedLegalKinds: [],
+    walletCheck: null,
+    mailCheck: null,
+    jobs: [],
+    owners: [],
+    latestE2eSaleTest: null,
+    latestOwnerApproval: null,
+  };
+
+  /** 10 条件すべてを満たした姿にする。⚠️ 試験が明示的に呼んだときだけ。 */
+  makeReady(now: Date, credentialId = 'credential-1'): void {
+    const recent = new Date(now.getTime() - 60 * 60_000);
+    this.facts_ = {
+      acceptingCredential: {
+        id: credentialId,
+        generation: 1,
+        lastCheckSucceeded: true,
+        lastCheckAt: recent,
+        lastWebhookReceivedAt: recent,
+      },
+      platformFeeRateBps: 2000,
+      publishedLegalKinds: ['terms', 'privacy', 'tokushoho'],
+      walletCheck: { succeeded: true, executedAt: recent },
+      mailCheck: { succeeded: true, executedAt: recent },
+      jobs: [
+        {
+          jobKey: 'issue-entitlements',
+          lastSucceededAt: recent,
+          lastFailedAt: null,
+          lastOutcome: 'succeeded',
+        },
+        {
+          jobKey: 'deliver-entitlements',
+          lastSucceededAt: recent,
+          lastFailedAt: null,
+          lastOutcome: 'succeeded',
+        },
+      ],
+      owners: [{ accountId: 'account-user-owner', lastAal2At: recent }],
+      latestE2eSaleTest: { succeeded: true, credentialId, attestedAt: recent },
+      latestOwnerApproval: { succeeded: true, credentialId, attestedAt: recent },
+    };
+  }
+
+  facts(): Promise<ProductionReadinessFacts> {
+    return Promise.resolve(this.facts_);
+  }
+}
+
+/** 人が残す証跡（試験用）。⚠️ **更新も削除も実装しない**（本物と同じ）。 */
+export class InMemoryAttestations implements AttestationPort {
+  readonly rows: AttestationRecord[] = [];
+
+  record(command: RecordAttestationCommand, now: Date): Promise<string> {
+    const id = `attestation-${String(this.rows.length + 1)}`;
+    this.rows.push({
+      id,
+      kind: command.kind,
+      succeeded: command.succeeded,
+      credentialId: command.credentialId,
+      attestedByAccountId: command.attestedByAccountId,
+      note: command.note,
+      attestedAt: now,
+    });
+    return Promise.resolve(id);
+  }
+
+  latest(kind: AttestationKind): Promise<AttestationFact | null> {
+    // ⚠️ 「どこかに成功がある」ではなく「最新が成功か」（本物と同じ）。
+    const rows = this.rows.filter((row) => row.kind === kind);
+    const last = rows[rows.length - 1];
+    return Promise.resolve(
+      last === undefined
+        ? null
+        : {
+            succeeded: last.succeeded,
+            credentialId: last.credentialId,
+            attestedAt: last.attestedAt,
+          },
+    );
+  }
+
+  list(limit: number): Promise<readonly AttestationRecord[]> {
+    return Promise.resolve([...this.rows].reverse().slice(0, limit));
+  }
+}
+
+/**
+ * メールの試し送り（試験用）。
+ *
+ * ⚠️ **宛先を覚えておく。** 「押した本人の業務用アドレスへ送っているか」を
+ * 試験が確かめられるようにするため。**本物は宛先を保存しない。**
+ */
+export class FakeMailTestSender {
+  outcome: MailAttemptOutcome = { kind: 'accepted', providerMessageId: 'msg-1' };
+  readonly sent: { readonly to: string; readonly subject: string }[] = [];
+
+  send(input: {
+    readonly to: string;
+    readonly subject: string;
+    readonly body: string;
+    readonly idempotencyKey: string;
+  }): Promise<MailAttemptOutcome> {
+    this.sent.push({ to: input.to, subject: input.subject });
+    return Promise.resolve(this.outcome);
   }
 }

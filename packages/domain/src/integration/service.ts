@@ -6,7 +6,14 @@
  * 綴り違いの設定名が黙って保存され、どれが効いているのか分からなくなる。
  */
 
-export const INTEGRATION_SERVICES = ['ovew_wallet', 'payment', 'storage', 'auth'] as const;
+/*
+  ⚠️ **`mail` は「設定を持つ」からではなく「確かめたい」から居る**（P0-7）。
+     鍵は配備環境の環境変数にあり、管理画面からは触れない
+     （`MANAGED_INTEGRATION_SERVICES` に入れていない）。それでも、
+     **本番販売の前に送信経路が生きていることを確かめる**必要がある。
+     確かめた記録の置き場が要るので、ここへ名前を通す。
+*/
+export const INTEGRATION_SERVICES = ['ovew_wallet', 'payment', 'storage', 'auth', 'mail'] as const;
 export type IntegrationService = (typeof INTEGRATION_SERVICES)[number];
 
 /**

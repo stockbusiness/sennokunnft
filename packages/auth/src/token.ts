@@ -32,6 +32,22 @@ export interface VerifiedIdentity {
    * そのまま入れると、宛先を騙って招待を横取りできる。
    */
   readonly email?: string;
+  /**
+   * 認証の強さ（Supabase の `aal` クレーム・`UD-801` の段階導入 段 1）。
+   *
+   * `aal1` はパスワードやマジックリンクだけ、`aal2` は二要素まで済んでいる。
+   * 読めない・載っていないときは `undefined`。
+   *
+   * ⚠️ **これで誰も拒否しない**（段 1）。いま使うのは、本番販売ガードが
+   * 「オーナーが二要素で入った記録」を残すためだけ。拒否を入れるのは
+   * オーナーが登録を済ませたあと（段 3）。順序を飛ばすと、
+   * **オーナーが自分の管理画面から締め出される**——人事権を持つのは
+   * オーナーだけなので、締め出されると DB を直接触る以外に戻る道がない。
+   *
+   * ⚠️ **権限の根拠にしない。** 二要素で入っていることは、権限が
+   * あることを意味しない。権限は DB のロールとオーナーの印で決める。
+   */
+  readonly assuranceLevel?: 'aal1' | 'aal2';
 }
 
 export type TokenVerificationFailure =
@@ -75,6 +91,12 @@ export interface AccountRecord {
    * ⚠️ **認可に使わない。** 誰であるかは `id` が決める。
    */
   readonly emailHash: string | null;
+  /**
+   * 二要素で入った最後の時刻（P0-7 の 8 番目）。
+   *
+   * ⚠️ **「入ったことがある」であって、いまの設定ではない。**
+   */
+  readonly lastAal2At?: Date | null;
 }
 
 export interface AccountLookupPort {
@@ -97,4 +119,23 @@ export interface AccountLookupPort {
    * 既に持っていた照合値が消える。実装は `null` を無視する。
    */
   rememberEmailHash(accountId: string, emailHash: string | null): Promise<void>;
+
+  /**
+   * 二要素で入ったことを覚える（P0-7 の 8 番目・`UD-801` の段 1）。
+   *
+   * ⚠️ **毎回書かない。** 読むだけの要求まで書き込みになる。呼ぶのは
+   * 記録が無いか、十分に古いときだけ（`MFA_RECORD_INTERVAL_MS`）。
+   * ⚠️ **消さない側へ倒す。** `aal1` で入り直したからといって、
+   * 過去の記録を消さない。二要素を外したことは、こちらからは分からない
+   * ——判定の側で期限を切る。
+   */
+  rememberMfa(accountId: string, at: Date): Promise<void>;
 }
+
+/**
+ * 二要素の記録を書き直す間隔。
+ *
+ * ⚠️ **短くしない。** 要求のたびに書くと、読むだけの画面が全部
+ * 書き込みになる。判定は日の単位で見るので、1 時間で十分細かい。
+ */
+export const MFA_RECORD_INTERVAL_MS = 60 * 60 * 1000;

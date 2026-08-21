@@ -14,6 +14,8 @@ function toAccount(row: AccountRow): AccountRecord {
     isOwner: row.isOwner,
     // ⚠️ 照合用の値だけ（`UD-121`）。平文は列に無い（`UD-503`）。
     emailHash: row.emailHash,
+    // ⚠️ 二要素で入った記録（P0-7）。認可には使わない。
+    lastAal2At: row.lastAal2At,
   };
 }
 
@@ -82,6 +84,27 @@ export class PrismaAccountRepository implements AccountLookupPort {
     await this.prisma.account.update({
       where: { id: accountId },
       data: { emailHash },
+    });
+  }
+
+  /**
+   * 二要素で入ったことを覚える（P0-7 の 8 番目・`UD-801` の段 1）。
+   *
+   * ⚠️ **消さない側へ倒す。** `aal1` で入り直したときにここは呼ばれない
+   * （呼び出し側が `aal2` のときだけ呼ぶ）。二要素を外したことは
+   * こちらからは分からないので、判定の側で期限を切る。
+   *
+   * ⚠️ **時刻を巻き戻さない。** 別の要求が先に新しい時刻を書いていたら
+   * そのまま。並行した要求どうしで古い値が勝つと、記録が実際より
+   * 古く見え、判定が余計に厳しくなる。
+   */
+  async rememberMfa(accountId: string, at: Date): Promise<void> {
+    await this.prisma.account.updateMany({
+      where: {
+        id: accountId,
+        OR: [{ lastAal2At: null }, { lastAal2At: { lt: at } }],
+      },
+      data: { lastAal2At: at },
     });
   }
 }

@@ -15,8 +15,19 @@
  * 画面には必ず、何を確かめていないかを併記すること。
  */
 
-/** 確認の種別。⚠️ いまは 1 種類だけ。増やすときは要決定 06 の再確認から。 */
-export const CONNECTION_CHECK_KINDS = ['reachability'] as const;
+/**
+ * 確認の種別。
+ *
+ * ⚠️ **`test_send` を OVEW Wallet へ広げない。** これはメール専用である。
+ * メールの試し送りが安全なのは、**宛先が運営自身の業務用アドレス**で、
+ * 誰の手元にも届かないから。Wallet の受け口は受取権を作る口で、
+ * 試し打ちしてよい相手ではない（要決定 06 は未解決のまま）。
+ *
+ * ⚠️ **2 つは確かめている中身が違う。** 混ぜて「テスト成功」と出さない。
+ *   `reachability`: ホストへ届くこと。**資格情報が正しいかは分からない**
+ *   `test_send`:    資格情報で実際に受け付けられること。こちらは強い
+ */
+export const CONNECTION_CHECK_KINDS = ['reachability', 'test_send'] as const;
 export type ConnectionCheckKind = (typeof CONNECTION_CHECK_KINDS)[number];
 
 export function isConnectionCheckKind(value: string): value is ConnectionCheckKind {

@@ -90,6 +90,7 @@ export class SupabaseTokenVerifier implements TokenVerifierPort {
           expiresAt: new Date(payload.exp * 1000),
           ...(typeof payload.iat === 'number' ? { issuedAt: new Date(payload.iat * 1000) } : {}),
           email: verifiedEmail(payload),
+          ...assuranceLevel(payload),
         },
       };
     } catch (error) {
@@ -169,4 +170,24 @@ function verifiedEmail(payload: Record<string, unknown>): string | undefined {
       : undefined;
 
   return payload.email_verified === true || fromMetadata === true ? email : undefined;
+}
+
+/**
+ * 認証の強さ（Supabase の `aal` クレーム）。
+ *
+ * ⚠️ **知らない値を `aal1` に丸めない。** 「弱いほうへ倒す」のは安全に
+ * 見えるが、Supabase が段を増やしたときに、二要素以上で入った人が
+ * 「一要素」として記録される。読めなければ**載せない**。
+ *
+ * ⚠️ **これで誰も拒否しない**（`UD-801` の段 1）。使うのは、本番販売
+ * ガードが「オーナーが二要素で入った記録」を残すためだけ。
+ */
+function assuranceLevel(payload: Record<string, unknown>): {
+  readonly assuranceLevel?: 'aal1' | 'aal2';
+} {
+  const aal = payload.aal;
+  if (aal === 'aal1' || aal === 'aal2') {
+    return { assuranceLevel: aal };
+  }
+  return {};
 }
