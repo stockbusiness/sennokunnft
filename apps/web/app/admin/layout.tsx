@@ -53,6 +53,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <a href="/admin/notifications">知らせ</a>
         <a href="/admin/integrations">外部サービス</a>
         <a href="/admin/payment-credentials">決済の鍵</a>
+        <a href="/admin/refund-requests">返金のお申し出</a>
         <a href="/admin/settlement-settings">返金と精算</a>
         <a href="/admin/payouts">お支払い</a>
         <a href="/admin/legal">規約・法務</a>
