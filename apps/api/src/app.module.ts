@@ -843,7 +843,19 @@ export class AppModule implements NestModule {
             logger: payments?.logger ?? SILENT_LOGGER,
           }),
         },
-        RefundRequestService,
+        {
+          /*
+            ⚠️ **知らせを渡す。** 渡さないと、作家さまは事実確認が来たことに
+               ログインするまで気づけない——ご回答の期限は営業日で進むのに。
+          */
+          provide: RefundRequestService,
+          inject: [REFUND_REQUEST_CONFIG, RefundService, BuyerNotifier],
+          useFactory: (
+            config: RefundRequestConfig,
+            refunds: RefundService,
+            notifier: BuyerNotifier,
+          ) => new RefundRequestService(config, refunds, notifier),
+        },
         {
           // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
           provide: REPORTING_CONFIG,
