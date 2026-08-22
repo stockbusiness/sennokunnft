@@ -558,6 +558,13 @@ export interface AppDependencies {
     /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
     readonly jobKeys: readonly string[];
     /**
+     * 人が意図して止めている時計仕掛け（2026-08-22）。
+     *
+     * ⚠️ **`jobKeys` から引かない。** 引くと画面から項目ごと消え、
+     * 「止めている」ではなく「そんな処理は無い」に見える。
+     */
+    readonly pausedJobKeys?: readonly string[];
+    /**
      * 運営への知らせ（`UD-1102` の一部）。
      *
      * ⚠️ **省略できる。** 繋いでいない配備がある。必須にすると、そこで
@@ -1172,6 +1179,7 @@ export class AppModule implements NestModule {
               deps.audit,
               deps.operations.thresholds,
               deps.operations.jobKeys,
+              deps.operations.pausedJobKeys ?? [],
               issuance,
               // ⚠️ `undefined` を `null` へ寄せる（P0-2 で同型の不具合を出した）。
               autoDelivery ?? null,

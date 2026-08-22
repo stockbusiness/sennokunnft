@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALERT_MIN_SEVERITIES,
   alertFingerprint,
   buildAlertMessage,
   decideAlert,
   isValidAlertWebhookUrl,
+  meetsThreshold,
   validateAlertRecipients,
   type AlertSettings,
   type AlertState,
@@ -75,6 +77,27 @@ describe('指紋', () => {
 
   it('平常の項目は指紋に入らない', () => {
     expect(alertFingerprint([indicator({ severity: 'normal' })])).toBe('');
+  });
+
+  /*
+    ⚠️ **止めている項目も指紋に入らない（2026-08-22）。** 入れると、
+       フラグを下ろしているだけの配備で「異常あり」の指紋ができ、
+       **知らせが止まらなくなる**。
+  */
+  it('止めている項目は指紋に入らない', () => {
+    expect(alertFingerprint([indicator({ severity: 'paused' })])).toBe('');
+  });
+});
+
+describe('止めている項目としきい値', () => {
+  /*
+    ⚠️ **どのしきい値でも知らせない。** 止めていることを毎回知らせても、
+       受け取った人にできることは無い。
+  */
+  it('いちばん低いしきい値でも届かない', () => {
+    for (const min of ALERT_MIN_SEVERITIES) {
+      expect(meetsThreshold('paused', min)).toBe(false);
+    }
   });
 });
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DISPUTE_REASONS, DISPUTE_STATUSES, DISPUTE_URGENCIES } from '@sengoku/contracts';
+import {
+  DISPUTE_REASONS,
+  DISPUTE_STATUSES,
+  DISPUTE_URGENCIES,
+  OPERATIONS_SEVERITIES,
+} from '@sengoku/contracts';
 import {
   formatJst,
   indicatorValue,
@@ -167,5 +172,41 @@ describe('争いの見出し', () => {
     expect(disputeUrgencyTone('due_soon')).toBe('danger');
     expect(disputeUrgencyTone('open')).toBe('warning');
     expect(disputeUrgencyTone('closed')).toBe('neutral');
+  });
+});
+
+/**
+ * 深刻度の言葉が全種類そろっているか（2026-08-22）。
+ *
+ * ⚠️ **`JOB_LABELS` で同じ穴を作ったことがある。** 書き漏らすと画面へ
+ * 英字がそのまま出るか、空欄になる。運営は「これは何か」を判断できず、
+ * 止まっていても素通りする。
+ */
+describe('深刻度の言葉', () => {
+  it('すべての深刻度に呼び名がある', () => {
+    for (const severity of OPERATIONS_SEVERITIES) {
+      expect(severityLabel(severity), severity).toBeTruthy();
+    }
+  });
+
+  it('すべての深刻度に色がある', () => {
+    for (const severity of OPERATIONS_SEVERITIES) {
+      expect(severityTone(severity), severity).toBeTruthy();
+    }
+  });
+
+  it('すべての深刻度に全体の一言がある', () => {
+    for (const severity of OPERATIONS_SEVERITIES) {
+      expect(overallMessage(severity), severity).toBeTruthy();
+    }
+  });
+
+  /*
+    ⚠️ **止めているものを赤や黄にしない。** 消えない色を作ると、運営は
+       その行を読み飛ばすようになる。
+  */
+  it('止めているものは灰色で、「平常」とは別の言葉になる', () => {
+    expect(severityTone('paused')).toBe('neutral');
+    expect(severityLabel('paused')).not.toBe(severityLabel('normal'));
   });
 });

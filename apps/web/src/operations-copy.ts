@@ -32,6 +32,12 @@ export function severityTone(severity: OperationsSeverity): StatusToneName {
       return 'warning';
     case 'normal':
       return 'neutral';
+    /*
+      ⚠️ **止めているものに色を付けない（2026-08-22）。** 黄色にすると
+         消えない警告になり、運営がその行を読み飛ばすようになる。
+    */
+    case 'paused':
+      return 'neutral';
   }
 }
 
@@ -43,6 +49,12 @@ export function severityLabel(severity: OperationsSeverity): string {
       return '確認';
     case 'normal':
       return '平常';
+    /*
+      ⚠️ **「平常」と分けて書く。** 同じ灰色でも、動いていて何事も
+         ないのか、そもそも動かしていないのかは別の話である。
+    */
+    case 'paused':
+      return '止めています';
   }
 }
 
@@ -54,6 +66,14 @@ export function overallMessage(severity: OperationsSeverity): string {
     case 'warning':
       return '急ぎではありませんが、今日中に確かめたいものがあります。';
     case 'normal':
+      return OPERATIONS_COPY.allClear;
+    /*
+      ⚠️ **全体が `paused` になることは無い。** `overallSeverity` は
+         `critical` / `warning` / `normal` しか返さない。それでも
+         switch を網羅しておく——将来 `overallSeverity` を触ったときに、
+         ここが漏れると画面が空文字になる。
+    */
+    case 'paused':
       return OPERATIONS_COPY.allClear;
   }
 }

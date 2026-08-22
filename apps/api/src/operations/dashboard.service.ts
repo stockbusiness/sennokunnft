@@ -52,6 +52,14 @@ export class OperationsDashboardService {
     /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
     private readonly jobKeys: readonly string[],
     /**
+     * 人が意図して止めている時計仕掛け（2026-08-22）。
+     *
+     * ⚠️ **一覧から外さない。** 外すと画面から項目ごと消え、
+     * 「止めている」ではなく「そんな処理は無い」に見える。
+     * 出したうえで灰色にする。
+     */
+    private readonly pausedJobKeys: readonly string[] = [],
+    /**
      * 発行のやり直し。
      *
      * ⚠️ **`null` は「この配備では押せない」を意味する。** 口は生やし、
@@ -78,6 +86,7 @@ export class OperationsDashboardService {
     const indicators = buildIndicators({
       counts,
       jobs,
+      pausedJobKeys: this.pausedJobKeys,
       thresholds: this.thresholds,
       now,
     });
