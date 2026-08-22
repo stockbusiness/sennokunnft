@@ -182,6 +182,19 @@ export const ACTIONS = [
   // ⚠️ **やり直しは運営だけ。** 発行のやり直しも再配送も、外部へ
   //    実際に送る操作である。見るのと動かすのを分ける。
   'operations.retry',
+  /**
+   * 異常の知らせの宛先と条件を変える（`UD-1102` の一部・2026-08-22）。
+   *
+   * ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。**知らせの宛先を
+   * 差し替えられるということは、異常に気づく相手を選べるということ**である。
+   * 乗っ取った側が宛先を自分だけに向ければ、運営は何が起きても気づけない。
+   * `payment_credential.manage`（入金先が変わる）と同じ性質の操作である。
+   *
+   * ⚠️ **見るのは `operations.view` で足りる**（`auditor` にも開く）。
+   * 「知らせが設定されているか」は監査の対象そのものだが、変える力とは
+   * 分けて配る。
+   */
+  'operations.alert_manage',
   // --- 本番販売ガード（P0-7）---
   // ⚠️ **閲覧は閲覧者にも開く。** 「本番販売を始めてよい状態か」は
   //    監査の対象そのもの。出るのは条件の充足状況までで、鍵は含まない。
@@ -451,6 +464,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'notification.resend',
     'operations.view',
     'operations.retry',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'operations.alert_manage',
     'production.view',
     // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
     'production.attest',
@@ -572,6 +587,11 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
   // ⚠️ **入金先が変わる操作。** 運営の 1 人が乗っ取られただけで、
   //    売上の振込先を差し替えられてしまう。
   'payment_credential.manage',
+  /*
+    ⚠️ **異常に気づく相手を選べる操作**（`UD-1102`）。宛先を自分だけへ
+       向ければ、運営は何が起きても気づけない。
+  */
+  'operations.alert_manage',
   // ⚠️ **返金と支払いの両方を動かす操作**（`UD-104` / `UD-119`）。
   //    「返金を受け付けない」「支払いを止める」に書き換えられる。
   'settlement.manage',
