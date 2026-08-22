@@ -370,6 +370,32 @@ describe('事業者の画面からの返金に追随する', () => {
     });
   });
 
+  it('全額返金なら、代理店へ渡す出来事を積む', async () => {
+    const orderId = await paidOrder();
+    await webhook(refundedEvent(orderId)).expect(200);
+
+    /*
+      ⚠️ **いま送る先は無い。** 行が溜まるだけである（`UD-1003` が
+         決まるまで）。それでも**起きた時点で積む**——あとから
+         `refunds` を読めば「いつ返金になったか」は組み直せるが、
+         そのとき積むはずだった出来事は作り直せない。
+    */
+    expect(harness.refunds.agencyRefundEvents.has(orderId)).toBe(true);
+  });
+
+  it('一部返金では、代理店へ渡す出来事を積まない', async () => {
+    const orderId = await paidOrder();
+    await webhook(
+      refundedEvent(orderId, { refunded_total: 3000, refund_ref: 're_part_agency' }),
+    ).expect(200);
+
+    /*
+      ⚠️ **一部返金は「返金された注文」ではない。** 積むと、受け取る側が
+         売上を丸ごと取り消す判断をしうる。
+    */
+    expect(harness.refunds.agencyRefundEvents.has(orderId)).toBe(false);
+  });
+
   it('同じ返金の知らせが 2 回来ても、二重に積まない', async () => {
     const orderId = await paidOrder();
     await webhook(refundedEvent(orderId)).expect(200);

@@ -185,6 +185,8 @@ export class PrismaRefundRepository implements RefundRepository {
           supersededGrantedEvents: 0,
           revocationsNeedingReview: [],
           revocationPayloadConflicts: [],
+          // ⚠️ 二度目は積まない。積むと同じ注文で 2 件流れる。
+          agencyRefundEventCreated: false,
         };
       }
 
@@ -278,6 +280,40 @@ export class PrismaRefundRepository implements RefundRepository {
         restoredSupply += reservation.quantity;
       }
 
+      /*
+        7. 代理店へ渡す出来事（`UD-1003` の手前）。
+
+        ⚠️ **全額返ったときだけ積む。** 一部返金は「返金された注文」では
+           ない。積むと、受け取る側が売上を丸ごと取り消す判断をしうる。
+
+        ⚠️ **いま送る先は無い。** 行が溜まるだけである。それでも
+           **起きた時点で積む**——あとから「いつ返金になったか」を
+           `refunds` から組み直すことはできても、**そのとき積むはずだった
+           出来事**は作り直せない。`order.paid` と対に揃えておく。
+
+        ⚠️ **重複は握りつぶす。** `ON CONFLICT DO NOTHING`（部分 UNIQUE
+           索引）。ここで例外を出すと、**決済事業者へ届いている返金の
+           記録ごと巻き戻る**——出来事を 1 件取りこぼすより悪い。
+      */
+      let agencyRefundEventCreated = false;
+      if (command.outboxEventId !== null && refundStatus === 'refunded') {
+        const appended = await tx.outboxEvent.createMany({
+          data: [
+            {
+              id: command.outboxEventId,
+              eventName: 'order.refunded',
+              aggregateType: 'order',
+              aggregateId: command.orderId,
+              // ⚠️ 個人情報も金額も入れない。読む側は注文IDから引く（`order.paid` と同じ）。
+              payload: { orderId: command.orderId },
+              occurredAt: refund.settledAt ?? command.now,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        agencyRefundEventCreated = appended.count === 1;
+      }
+
       return {
         alreadySettled: false,
         refundStatus,
@@ -291,6 +327,7 @@ export class PrismaRefundRepository implements RefundRepository {
         supersededGrantedEvents: revocation.superseded,
         revocationsNeedingReview: revocation.needsReview,
         revocationPayloadConflicts: revocation.conflicts,
+        agencyRefundEventCreated,
       };
     });
   }

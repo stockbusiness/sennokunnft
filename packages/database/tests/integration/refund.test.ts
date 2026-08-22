@@ -220,6 +220,7 @@ suite('返金の反映', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     });
@@ -256,6 +257,7 @@ suite('返金の反映', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     };
@@ -268,6 +270,272 @@ suite('返金の反映', () => {
     const artwork = await prisma.artwork.findUniqueOrThrow({ where: { id: seeded.artworkId } });
     // ⚠️ 0 のまま。マイナスにならない。
     expect(artwork.reservedCount).toBe(0);
+  });
+
+  /* --- 代理店へ渡す「返金された」（`UD-1003` の手前）---------------- */
+
+  it('全額返ったら、代理店へ渡す出来事を 1 件積む', async () => {
+    const seeded = await seedPaidOrder();
+    const refund = await startRefund(seeded);
+    const outboxEventId = randomUUID();
+
+    const settlement = await repo.settle({
+      refundId: refund.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_full',
+      amountRefundedTotal: 3000,
+      revokeEntitlement: true,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId,
+      planRevocation: null,
+      now: NOW,
+    });
+
+    expect(settlement.agencyRefundEventCreated).toBe(true);
+
+    const events = await prisma.outboxEvent.findMany({
+      where: { eventName: 'order.refunded', aggregateId: seeded.orderId },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(outboxEventId);
+    // ⚠️ **金額も個人情報も載せない。** 読む側は注文IDから引く。
+    expect(events[0]?.payload).toEqual({ orderId: seeded.orderId });
+    // ⚠️ 現在時刻ではなく、返金が成立した時刻。
+    expect(events[0]?.occurredAt).toEqual(NOW);
+  });
+
+  it('一部返金では積まない', async () => {
+    const seeded = await seedPaidOrder();
+    const refund = await startRefund(seeded, { amount: 1000 });
+
+    const settlement = await repo.settle({
+      refundId: refund.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_part_outbox',
+      amountRefundedTotal: 1000,
+      revokeEntitlement: false,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
+      planRevocation: null,
+      now: NOW,
+    });
+
+    /*
+      ⚠️ **一部返金は「返金された注文」ではない。** 積むと、受け取る側が
+         売上を丸ごと取り消す判断をしうる。
+    */
+    expect(settlement.refundStatus).toBe('partially_refunded');
+    expect(settlement.agencyRefundEventCreated).toBe(false);
+    await expect(
+      prisma.outboxEvent.count({ where: { eventName: 'order.refunded' } }),
+    ).resolves.toBe(0);
+  });
+
+  it('一部 → 残り、と 2 回に分かれて返っても 1 件しか積まない', async () => {
+    const seeded = await seedPaidOrder();
+
+    const first = await startRefund(seeded, { amount: 1000 });
+    await repo.settle({
+      refundId: first.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_step1',
+      amountRefundedTotal: 1000,
+      revokeEntitlement: false,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
+      planRevocation: null,
+      now: NOW,
+    });
+
+    const second = await startRefund(seeded, { amount: 2000 });
+    const settlement = await repo.settle({
+      refundId: second.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_step2',
+      amountRefundedTotal: 3000,
+      revokeEntitlement: true,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
+      planRevocation: null,
+      now: NOW,
+    });
+
+    expect(settlement.refundStatus).toBe('refunded');
+    expect(settlement.agencyRefundEventCreated).toBe(true);
+    await expect(
+      prisma.outboxEvent.count({
+        where: { eventName: 'order.refunded', aggregateId: seeded.orderId },
+      }),
+    ).resolves.toBe(1);
+  });
+
+  it('同じ注文に 2 件目を積もうとしても、返金の記録ごと巻き戻らない', async () => {
+    const seeded = await seedPaidOrder();
+    const refund = await startRefund(seeded);
+    await repo.settle({
+      refundId: refund.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_once',
+      amountRefundedTotal: 3000,
+      revokeEntitlement: true,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
+      planRevocation: null,
+      now: NOW,
+    });
+
+    /*
+      ⚠️ **部分 UNIQUE 索引が止めることを、DB へ直に確かめる。**
+         リポジトリ経由では二重成立の歯止めに阻まれて、索引そのものが
+         効いているかを見られない。
+
+      ⚠️ **索引の定義そのものも確かめる。** 一意制約違反は Prisma でも
+         生の SQL でも索引名まで届かず、「何かに止められた」しか読めない。
+         それだけだと、**別の索引が偶然止めていても通ってしまう**。
+    */
+    const [index] = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes
+       WHERE indexname = 'outbox_events_order_refunded_once'
+    `;
+    expect(index?.indexdef).toContain('UNIQUE');
+    expect(index?.indexdef).toContain('(aggregate_id)');
+    // ⚠️ **部分索引であること。** 素の UNIQUE だと `order.paid` を巻き添えにする。
+    expect(index?.indexdef).toContain(`WHERE (event_name = 'order.refunded'`);
+
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "outbox_events" ("id","event_name","aggregate_type","aggregate_id","payload")
+         VALUES ($1::uuid, 'order.refunded', 'order', $2::uuid, '{}'::jsonb)`,
+        randomUUID(),
+        seeded.orderId,
+      ),
+    ).rejects.toSatisfy(violatesUniqueConstraint);
+
+    // ⚠️ 返金の記録は生きている。索引違反で巻き戻っていない。
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: seeded.orderId } });
+    expect(order.refundStatus).toBe('refunded');
+  });
+
+  it('すでに積まれていても、返金の記録は成立する（巻き戻らない）', async () => {
+    const seeded = await seedPaidOrder();
+
+    /*
+      ⚠️ **返金より先に行があった、という筋を作る。** 手で入れ直した、
+         別経路が先に積んだ——どれも起こりうる。ここで索引違反を
+         そのまま投げると、**決済事業者へ届いている返金の記録ごと
+         巻き戻る**。出来事を 1 件取りこぼすより、そちらが悪い。
+    */
+    await prisma.outboxEvent.create({
+      data: {
+        id: randomUUID(),
+        eventName: 'order.refunded',
+        aggregateType: 'order',
+        aggregateId: seeded.orderId,
+        payload: { orderId: seeded.orderId },
+        occurredAt: NOW,
+      },
+    });
+
+    const refund = await startRefund(seeded);
+    const settlement = await repo.settle({
+      refundId: refund.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_after_existing',
+      amountRefundedTotal: 3000,
+      revokeEntitlement: true,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
+      planRevocation: null,
+      now: NOW,
+    });
+
+    // ⚠️ 返金は成立している。積めなかっただけ。
+    expect(settlement.alreadySettled).toBe(false);
+    expect(settlement.refundStatus).toBe('refunded');
+    expect(settlement.agencyRefundEventCreated).toBe(false);
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: seeded.orderId } });
+    expect(order.refundStatus).toBe('refunded');
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: seeded.paymentId } });
+    expect(payment.amountRefunded).toBe(3000);
+
+    await expect(
+      prisma.outboxEvent.count({
+        where: { eventName: 'order.refunded', aggregateId: seeded.orderId },
+      }),
+    ).resolves.toBe(1);
+  });
+
+  it('索引は `order.refunded` にだけ効く（`order.paid` を巻き添えにしない）', async () => {
+    const seeded = await seedPaidOrder();
+
+    /*
+      ⚠️ **これが通らないと、決済の確定そのものが壊れる。**
+         `aggregate_id` へ素の UNIQUE を掛けてしまうと、同じ注文の
+         `order.paid` と `order.refunded` がぶつかる。**部分**索引で
+         あることを、ここで確かめる。
+    */
+    await prisma.outboxEvent.create({
+      data: {
+        id: randomUUID(),
+        eventName: 'order.paid',
+        aggregateType: 'order',
+        aggregateId: seeded.orderId,
+        payload: { orderId: seeded.orderId },
+        occurredAt: NOW,
+      },
+    });
+    await prisma.outboxEvent.create({
+      data: {
+        id: randomUUID(),
+        eventName: 'order.refunded',
+        aggregateType: 'order',
+        aggregateId: seeded.orderId,
+        payload: { orderId: seeded.orderId },
+        occurredAt: NOW,
+      },
+    });
+
+    await expect(
+      prisma.outboxEvent.count({ where: { aggregateId: seeded.orderId } }),
+    ).resolves.toBe(2);
+  });
+
+  it('積まない配備では積まない（`outboxEventId` が `null`）', async () => {
+    const seeded = await seedPaidOrder();
+    const refund = await startRefund(seeded);
+
+    const settlement = await repo.settle({
+      refundId: refund.id,
+      orderId: seeded.orderId,
+      providerRefundRef: 're_none',
+      amountRefundedTotal: 3000,
+      revokeEntitlement: true,
+      cancelMintJob: false,
+      mintNote: null,
+      revokeClaimedEntitlements: false,
+      outboxEventId: null,
+      planRevocation: null,
+      now: NOW,
+    });
+
+    expect(settlement.refundStatus).toBe('refunded');
+    expect(settlement.agencyRefundEventCreated).toBe(false);
+    await expect(
+      prisma.outboxEvent.count({ where: { eventName: 'order.refunded' } }),
+    ).resolves.toBe(0);
   });
 
   it('一部返金では `partially_refunded` になる', async () => {
@@ -283,6 +551,7 @@ suite('返金の反映', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     });
@@ -330,6 +599,7 @@ suite('返金の反映', () => {
       cancelMintJob: true,
       mintNote: '外部へ送信済みの可能性があるため取り消していません。',
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     });
@@ -377,6 +647,7 @@ suite('返金の反映', () => {
       cancelMintJob: true,
       mintNote: null,
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     });
@@ -403,6 +674,7 @@ suite('返金の反映', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: false,
+      outboxEventId: randomUUID(),
       planRevocation: null,
       now: NOW,
     });

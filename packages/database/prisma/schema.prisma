@@ -1218,6 +1218,9 @@ model OutboxEvent {
   status        OutboxStatus @default(pending)
   attemptCount  Int          @default(0) @map("attempt_count")
 
+  /// ⚠️ **`order.refunded` は注文ごとに 1 件だけ。** 部分 UNIQUE 索引
+  /// `outbox_events_order_refunded_once` が止めている。Prisma では
+  /// 条件付き索引を書けないため、**マイグレーションにだけ存在する**。
   @@index([status, occurredAt])
   @@map("outbox_events")
 }
