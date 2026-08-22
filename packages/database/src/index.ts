@@ -122,6 +122,9 @@ export {
 
 // 運営への知らせ（`UD-1102` の一部）。
 export { PrismaOperationsAlertSettingsRepository } from './repositories/operations-alert.repository';
+// チャージバック（決済の争い・2026-08-22）。
+export { PrismaDisputeRepository } from './repositories/dispute.repository';
+
 // 返金の申請と審査（方針整理 2026-08-22）。
 export {
   PrismaRefundRequestRepository,

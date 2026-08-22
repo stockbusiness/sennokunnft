@@ -198,7 +198,10 @@ describe('返金の窓が閉じるまで確定しない', () => {
   });
 
   it('窓が開いていれば確定できない', () => {
-    const result = canConfirmPayout(draft({ candidates: [candidate({ refundableUntil: null })] }));
+    const result = canConfirmPayout({
+      ...draft({ candidates: [candidate({ refundableUntil: null })] }),
+      openDisputes: 0,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe('PAYOUT_WINDOW_OPEN');
@@ -206,12 +209,14 @@ describe('返金の窓が閉じるまで確定しない', () => {
   });
 
   it('すべて閉じていれば確定できる', () => {
-    expect(canConfirmPayout(draft({ candidates: [candidate()] })).ok).toBe(true);
+    expect(canConfirmPayout({ ...draft({ candidates: [candidate()] }), openDisputes: 0 }).ok).toBe(
+      true,
+    );
   });
 
   it('0 円の精算も確定できる（繰越だけの月）', () => {
     // ⚠️ 「払う額が無い」ことと「まだ締められない」ことは別。
-    expect(canConfirmPayout(draft()).ok).toBe(true);
+    expect(canConfirmPayout({ ...draft(), openDisputes: 0 }).ok).toBe(true);
   });
 });
 

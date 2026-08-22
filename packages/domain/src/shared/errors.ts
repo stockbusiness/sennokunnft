@@ -398,6 +398,23 @@ export const DOMAIN_ERROR_CODES = [
    * いない、という状態が起こる（手数料率で避けた形と同じ）。
    */
   'SETTLEMENT_SETTINGS_MISSING',
+
+  // --- チャージバック（決済の争い）---
+  /**
+   * その争いは、いまその状態から動かせない。
+   *
+   * ⚠️ **決着からは戻さない。** 事業者の知らせは前後して届く。素直に
+   * 上書きすると、決着した争いが開き直り、精算が理由なく止まり続ける。
+   */
+  'DISPUTE_NOT_ACTIONABLE',
+  /**
+   * 決着していないチャージバックがあるため、精算を確定できない。
+   *
+   * ⚠️ **`PAYOUT_WINDOW_OPEN` と分けている。** あちらは期限が来れば
+   * 開くが、こちらは**待っても開かない**——カード会社が決着させるまで
+   * 閉じない。同じ符号にすると、運営が「待てばよい」と読む。
+   */
+  'PAYOUT_DISPUTE_OPEN',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

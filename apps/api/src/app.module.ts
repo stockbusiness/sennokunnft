@@ -32,6 +32,7 @@ import type {
   CollectibleRepository,
   EntitlementIssuanceRepository,
   RefundRepository,
+  DisputePort,
   RefundRequestPort,
   CreatorInquiryPort,
   CreatorReceivablePort,
@@ -418,6 +419,14 @@ export interface AppDependencies {
    * 返金は運営が注文の画面から直接押す形だけになる——審査の記録が
    * どこにも残らない。
    */
+  /**
+   * チャージバック（決済の争い・2026-08-22）。
+   *
+   * ⚠️ **`null` は「争いを受けない」を意味する。** 受けない配備では、
+   * 受けたことを `webhook_events` に残すだけで先へ進まない。あとから
+   * 配線したときに、取りこぼした知らせを追える形にしてある。
+   */
+  readonly disputes?: DisputePort | null | undefined;
   readonly refundRequests: {
     readonly requests: RefundRequestPort;
     readonly inquiries: CreatorInquiryPort;
@@ -1399,6 +1408,13 @@ export class AppModule implements NestModule {
                     autoDelivery ?? null,
                     // 決済の結果を買った方へ知らせる（P0-4）。
                     notifier,
+                    /*
+                      チャージバックを受ける。
+                      ⚠️ **Nest が見つからない依存に渡すのは `undefined`。**
+                         `?? null` でそろえないと、「受けない」の判定が
+                         `null` 比較のままだと素通りする。
+                    */
+                    deps.disputes ?? null,
                   ),
               },
             ]),

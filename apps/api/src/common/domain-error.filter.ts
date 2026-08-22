@@ -142,6 +142,7 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   // ⚠️ 409。時が経てば通る。入力の誤りではない。
   PAYOUT_PERIOD_NOT_CLOSED: HttpStatus.CONFLICT,
   PAYOUT_WINDOW_OPEN: HttpStatus.CONFLICT,
+  PAYOUT_DISPUTE_OPEN: HttpStatus.CONFLICT,
   PAYOUT_NOT_EDITABLE: HttpStatus.CONFLICT,
   PAYOUT_NOT_FOUND: HttpStatus.NOT_FOUND,
   // --- 作家さまの表示名（決定 2026-08-20）---
@@ -210,6 +211,11 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
   REFUND_REQUEST_ALREADY_OPEN: HttpStatus.CONFLICT,
   // ⚠️ 入力が悪いのではなく、**この配備がまだ決めていない**。
   SETTLEMENT_SETTINGS_MISSING: HttpStatus.SERVICE_UNAVAILABLE,
+  /*
+    ⚠️ **403 ではなく 409。** 権限の話ではない。決着した争いを開き直そうと
+       している、という状態の食い違いである。
+  */
+  DISPUTE_NOT_ACTIONABLE: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -349,6 +355,12 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   */
   PAYOUT_WINDOW_OPEN:
     '返金をお受けする期間が終わっていないご注文が残っています。期間が過ぎてから確定してください。',
+  /*
+    ⚠️ **「期間が過ぎれば」と書かない。** 争いは待っても開かない。
+       カード会社が決着させるまで閉じない、と伝える。
+  */
+  PAYOUT_DISPUTE_OPEN:
+    'カード会社との間で決着していないお取引が残っています。結果が出てから確定してください。',
   PAYOUT_NOT_EDITABLE: 'この精算はすでに確定しているため、変更できません。',
   PAYOUT_NOT_FOUND: 'その精算は見つかりませんでした。',
   DISPLAY_NAME_INVALID: 'お名前は 1〜40 文字でご入力ください。目に見えない文字は使えません。',
@@ -439,6 +451,8 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'このご注文には、まだ決着していない返金のお申し出があります。そちらをご確認ください。',
   SETTLEMENT_SETTINGS_MISSING:
     '返金と精算の設定がまだ登録されていません。管理画面の設定をご確認ください。',
+  DISPUTE_NOT_ACTIONABLE:
+    'このチャージバックは、いまその操作ができない状態です。画面を読み込み直して、最新の状態をご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

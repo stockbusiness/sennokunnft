@@ -5,6 +5,7 @@ import {
   verifyPaymentFact,
   type AuditLogPort,
   type ClockPort,
+  type DisputePort,
   type IdGeneratorPort,
   type OrderRepository,
   type PaymentGatewayPort,
@@ -83,6 +84,14 @@ export class PaymentWebhookService {
      * 例外を投げると事業者へ 5xx を返し、同じ知らせが送り直され続ける。
      */
     private readonly notifier: BuyerNotifier = NULL_NOTIFIER,
+    /**
+     * チャージバックの記録。
+     *
+     * ⚠️ **`null` は「争いを受けない」を意味する。** 受けない配備では
+     * 記録だけ残して先へ進まない。**受けたことは `webhook_events` に
+     * 残る**ので、あとから配線したときに取りこぼしを追える。
+     */
+    private readonly disputes: DisputePort | null = null,
   ) {}
 
   /**
@@ -183,6 +192,11 @@ export class PaymentWebhookService {
       return true;
     }
 
+    if (fact.kind === 'disputed') {
+      await this.dispute(fact, order, now);
+      return true;
+    }
+
     if (fact.kind === 'failed') {
       await this.payments.recordFailure({
         orderId: order.id,
@@ -235,6 +249,107 @@ export class PaymentWebhookService {
     });
     await this.recordAndFinish(fact, 'processed', order.id, null, now);
     return true;
+  }
+
+  /**
+   * チャージバック（決済の争い）を受ける。
+   *
+   * ⚠️ **争いが起きたことと、返金されたことは別である。** 申し立てを
+   * 受けた時点では、まだ何も返っていない。ここで受取権を取り消すと、
+   * **こちらが勝ったときに、取り上げたものを返せない**——外部の
+   * ウォレットへ渡したものは、こちらからは戻せない。
+   *
+   * ⚠️ **敗訴ではじめて返金として扱う。** そのときにはもう引かれている。
+   * こちらの都合で「対象外」にしても、事実は変わらない。
+   *
+   * ⚠️ **記録に失敗しても 200 を返す。** 4xx/5xx を返すと事業者が再送し
+   * 続け、いずれ宛先ごと無効化される。失敗は記録に残して人が拾う。
+   */
+  private async dispute(
+    fact: ProviderPaymentFact,
+    order: NonNullable<Awaited<ReturnType<OrderRepository['findById']>>>,
+    now: Date,
+  ): Promise<void> {
+    if (this.disputes === null) {
+      // 争いを受けない配備。⚠️ 受けたことは記録に残す。
+      await this.recordAndFinish(fact, 'ignored', order.id, 'disputes_disabled', now);
+      return;
+    }
+    if (fact.disputeRef === null || fact.disputeStatus === null || fact.disputeAmount === null) {
+      // ⚠️ 推測で埋めない。識別子が無ければ 1 行に束ねられない。
+      await this.recordAndFinish(fact, 'ignored', order.id, 'dispute_incomplete', now);
+      return;
+    }
+
+    try {
+      const outcome = await this.disputes.record({
+        id: this.ids.generate(),
+        orderId: order.id,
+        paymentId: null,
+        provider: this.config.provider,
+        disputeRef: fact.disputeRef,
+        status: fact.disputeStatus,
+        reason: fact.disputeReason ?? 'unknown',
+        amount: fact.disputeAmount,
+        currency: fact.currency ?? order.currency,
+        occurredAt: fact.occurredAt,
+        now,
+      });
+
+      await this.audit.record({
+        actorAccountId: null,
+        action: outcome.advanced ? 'payment.disputed' : 'payment.dispute_ignored',
+        targetType: 'order',
+        targetId: order.id,
+        summary: {
+          orderNumber: order.orderNumber,
+          status: fact.disputeStatus,
+          reason: fact.disputeReason ?? 'unknown',
+          amount: fact.disputeAmount,
+          // ⚠️ 前後して届いた知らせを捨てたことが、後から分かるように残す。
+          advanced: outcome.advanced,
+        },
+      });
+
+      /*
+        敗訴なら、返金として記録する。
+
+        ⚠️ **`charge.refunded` は届かない。** 敗訴で引かれても、事業者は
+           返金（Refund）を作らない。ここで記録しなければ、どこにも残らない。
+
+        ⚠️ **進めなかった知らせでは記録しない。** 前後して届いた `lost` を
+           そのまま扱うと、決着済みの争いで返金をもう一度積むことになる。
+      */
+      if (outcome.advanced && fact.disputeStatus === 'lost') {
+        const refunded = await this.refunds.recordDisputeLoss({
+          orderId: order.id,
+          disputeRef: fact.disputeRef,
+          amount: fact.disputeAmount,
+          now,
+        });
+        if (refunded !== null) {
+          /*
+            ⚠️ **返金の行と争いの行を結ぶ。** 結ばないと、あとから
+               「この返金はチャージバックだったのか」を読めない。
+          */
+          await this.disputes.attachRefund({
+            disputeId: outcome.record.id,
+            refundId: refunded.refund.id,
+            now,
+          });
+        }
+      }
+
+      await this.recordAndFinish(fact, 'processed', order.id, null, now);
+    } catch {
+      /*
+        ⚠️ **例外の中身をログへ出さない。** 争いの処理には金額が載る。
+           運営が知りたいのは「受けられなかった注文がある」までで、
+           詳しくは注文の画面で見るほうが正確。
+      */
+      this.logger.error({ orderId: order.id }, 'チャージバックを記録できませんでした');
+      await this.recordAndFinish(fact, 'failed', order.id, 'dispute_record_failed', now);
+    }
   }
 
   /**

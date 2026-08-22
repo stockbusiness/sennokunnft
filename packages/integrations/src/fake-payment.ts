@@ -3,9 +3,12 @@ import {
   domainError,
   err,
   ok,
+  DISPUTE_STATUSES,
+  toSafeDisputeReason,
   toSafeFailureCode,
   type CheckoutSessionCreated,
   type CreateCheckoutSessionInput,
+  type DisputeStatus,
   type DomainError,
   type PaymentGatewayPort,
   type PaymentFactKind,
@@ -152,6 +155,10 @@ interface FakeEnvelope {
     readonly refund_ref?: unknown;
     /** ⚠️ 累計。今回ぶんではない（本物と同じ形にそろえてある）。 */
     readonly refunded_total?: unknown;
+    readonly dispute_ref?: unknown;
+    readonly dispute_status?: unknown;
+    readonly dispute_amount?: unknown;
+    readonly dispute_reason?: unknown;
   };
 }
 
@@ -178,6 +185,11 @@ function toFact(payload: unknown, timestampSec: number): ProviderPaymentFact | n
       typeof data.failure_code === 'string' ? toSafeFailureCode(data.failure_code) : null,
     refundRef: typeof data.refund_ref === 'string' ? data.refund_ref : null,
     refundedTotal: typeof data.refunded_total === 'number' ? data.refunded_total : null,
+    disputeRef: typeof data.dispute_ref === 'string' ? data.dispute_ref : null,
+    disputeStatus: toDisputeStatus(data.dispute_status),
+    disputeAmount: typeof data.dispute_amount === 'number' ? data.dispute_amount : null,
+    disputeReason:
+      typeof data.dispute_reason === 'string' ? toSafeDisputeReason(data.dispute_reason) : null,
     occurredAt: new Date(timestampSec * 1000),
     // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
     credentialId: null,
@@ -190,8 +202,21 @@ function toKind(eventType: string): PaymentFactKind {
   if (eventType === 'payment.failed') return 'failed';
   if (eventType === 'checkout.expired') return 'checkout_expired';
   if (eventType === 'payment.refunded') return 'refunded';
+  if (eventType === 'payment.disputed') return 'disputed';
   // ⚠️ 知らないものは無視する。拒否すると、相手が再送し続ける。
   return 'ignored';
+}
+
+/**
+ * 擬似の争いの状態を畳む。
+ *
+ * ⚠️ **知らない値は `null`。** 本物と同じにする。ここを素通しにすると、
+ * 「知らない状態を無視する」経路が試験から消える。
+ */
+function toDisputeStatus(raw: unknown): DisputeStatus | null {
+  return typeof raw === 'string' && (DISPUTE_STATUSES as readonly string[]).includes(raw)
+    ? (raw as DisputeStatus)
+    : null;
 }
 
 /** `t=<unix秒>,v1=<hex>` 形式のヘッダを解釈する。 */
