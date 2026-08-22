@@ -13,6 +13,7 @@ import {
   PrismaCommonUserLinkRepository,
   PrismaIntegrationRepository,
   PrismaWalletDeliveryOutboxRepository,
+  PrismaOperationsRepository,
   PrismaOrderRepository,
   type PrismaClient,
 } from '@sengoku/database';
@@ -28,6 +29,7 @@ import { createLogger } from '@sengoku/observability';
 import { createCommonUserLinkJob } from './common-user-job';
 import { createWalletDeliveryJob } from './wallet-delivery-job';
 import { createReservationReleaseJob } from './reservation-release-job';
+import { withJobHeartbeat, WORKER_JOB_KEYS } from './job-heartbeat';
 import { createInternalJobCaller, SCHEDULED_INTERNAL_JOBS } from './internal-job-caller';
 import { createWalletDeliveryResolver } from './wallet-delivery-config';
 import { WorkerRunner, type JobHandler } from './runner';
@@ -134,53 +136,71 @@ async function bootstrap(): Promise<void> {
             );
           })();
     handlers.push(
-      createWalletDeliveryJob({
-        logger,
-        batchSize: env.WALLET_DELIVERY_BATCH_SIZE,
-        outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
-        clock,
-        /*
-          送ってよい種別（M3a）。
-          ⚠️ **付与は常に送る。** ここに到達している時点で
-             `WALLET_DELIVERY_ENABLED` は有効であり、それは付与の配送を
-             意味する。取消の配送だけを別のフラグで足す。
-          ⚠️ 取消を止めても付与は止めない。段階導入の途中で付与まで
-             止まると、受け取った方の画面が「お届け中」のまま進まない。
-        */
-        eventTypes: env.WALLET_REVOCATION_EVENT_DELIVERY_ENABLED
-          ? ['entitlement.granted', 'entitlement.revoked']
-          : ['entitlement.granted'],
-        /*
-          ⚠️ **接続先と鍵は 1 巡ごとに解決する（要決定 03）。**
-             起動時に 1 個作って使い回すと、管理画面で鍵を交換しても
-             再起動するまで古い鍵で送り続ける。手順で埋める前提は、
-             忘れられたときに誰も気づけない。
+      /*
+        ⚠️ **心拍つきで登録する。** お取り置きの解放と同じ理由。掃くのが
+           worker でも、控えを書かなければ運営の画面は「まだ一度も成功
+           していません」のままになる。
 
-          ⚠️ **暗号鍵が無い環境では DB を見ない。** 見に行っても復号できず、
-             毎巡「半端な設定」で止まる。落ち先（環境変数）だけで動かす。
-        */
-        resolve: createWalletDeliveryResolver({
-          integrations: walletIntegrations,
-          appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
-          fallback:
-            env.WALLET_DELIVERY_ENDPOINT === undefined
-              ? null
-              : {
-                  // 上のガードで存在を確認済み。
-                  endpoint: env.WALLET_DELIVERY_ENDPOINT,
-                  keyId: env.WALLET_DELIVERY_KEY_ID ?? '',
-                  secret: env.WALLET_DELIVERY_SECRET ?? '',
-                  timeoutMs: env.WALLET_DELIVERY_TIMEOUT_MS,
-                },
-        }),
-        createSender: (config) =>
-          new HttpWalletDeliverySender({
-            endpoint: config.endpoint,
-            keyId: config.keyId,
-            secret: config.secret,
-            clock,
-            timeoutMs: config.timeoutMs,
+        ⚠️ **フラグが下りているときの色はここでは変えない。** この包みが
+           効くのは `WALLET_DELIVERY_ENABLED` が立っているときだけで、
+           下りている配備では今までどおり控えが増えない（＝黄色のまま）。
+           「止めている処理をどう見せるか」は別の決めごとで、ここで
+           勝手に緑にしない。
+      */
+      withJobHeartbeat({
+        handler: createWalletDeliveryJob({
+          logger,
+          batchSize: env.WALLET_DELIVERY_BATCH_SIZE,
+          outbox: new PrismaWalletDeliveryOutboxRepository(prisma),
+          clock,
+          /*
+            送ってよい種別（M3a）。
+            ⚠️ **付与は常に送る。** ここに到達している時点で
+               `WALLET_DELIVERY_ENABLED` は有効であり、それは付与の配送を
+               意味する。取消の配送だけを別のフラグで足す。
+            ⚠️ 取消を止めても付与は止めない。段階導入の途中で付与まで
+               止まると、受け取った方の画面が「お届け中」のまま進まない。
+          */
+          eventTypes: env.WALLET_REVOCATION_EVENT_DELIVERY_ENABLED
+            ? ['entitlement.granted', 'entitlement.revoked']
+            : ['entitlement.granted'],
+          /*
+            ⚠️ **接続先と鍵は 1 巡ごとに解決する（要決定 03）。**
+               起動時に 1 個作って使い回すと、管理画面で鍵を交換しても
+               再起動するまで古い鍵で送り続ける。手順で埋める前提は、
+               忘れられたときに誰も気づけない。
+
+            ⚠️ **暗号鍵が無い環境では DB を見ない。** 見に行っても復号できず、
+               毎巡「半端な設定」で止まる。落ち先（環境変数）だけで動かす。
+          */
+          resolve: createWalletDeliveryResolver({
+            integrations: walletIntegrations,
+            appEnvironment: env.APP_ENV === 'production' ? 'production' : 'staging',
+            fallback:
+              env.WALLET_DELIVERY_ENDPOINT === undefined
+                ? null
+                : {
+                    // 上のガードで存在を確認済み。
+                    endpoint: env.WALLET_DELIVERY_ENDPOINT,
+                    keyId: env.WALLET_DELIVERY_KEY_ID ?? '',
+                    secret: env.WALLET_DELIVERY_SECRET ?? '',
+                    timeoutMs: env.WALLET_DELIVERY_TIMEOUT_MS,
+                  },
           }),
+          createSender: (config) =>
+            new HttpWalletDeliverySender({
+              endpoint: config.endpoint,
+              keyId: config.keyId,
+              secret: config.secret,
+              clock,
+              timeoutMs: config.timeoutMs,
+            }),
+        }),
+        // ⚠️ 画面が見張っている種別名。worker 内部のハンドラ名ではない。
+        jobKey: WORKER_JOB_KEYS.walletDelivery,
+        recorder: new PrismaOperationsRepository(prisma),
+        now: () => clock.now(),
+        logger,
       }),
     );
     logger.info({ batchSize: env.WALLET_DELIVERY_BATCH_SIZE }, 'Wallet 配送を有効化しました');
@@ -202,11 +222,24 @@ async function bootstrap(): Promise<void> {
     const prisma = (await createPrismaClient({ databaseUrl: env.DATABASE_URL })) as PrismaClient;
     const releaseClock = new SystemClock();
     handlers.push(
-      createReservationReleaseJob({
-        orders: new PrismaOrderRepository(prisma),
-        logger,
+      /*
+        ⚠️ **心拍つきで登録する。** 掃いているのに控えを書かないと、
+           運営の画面は「まだ一度も成功していません」のまま**永久に
+           黄色**になる。消えない色は読み飛ばされ、本当に止まった日に
+           気づけなくなる。
+      */
+      withJobHeartbeat({
+        handler: createReservationReleaseJob({
+          orders: new PrismaOrderRepository(prisma),
+          logger,
+          now: () => releaseClock.now(),
+          batchSize: RELEASE_BATCH_SIZE,
+        }),
+        // ⚠️ 画面が見張っている種別名。worker 内部のハンドラ名ではない。
+        jobKey: WORKER_JOB_KEYS.reservationRelease,
+        recorder: new PrismaOperationsRepository(prisma),
         now: () => releaseClock.now(),
-        batchSize: RELEASE_BATCH_SIZE,
+        logger,
       }),
     );
   }

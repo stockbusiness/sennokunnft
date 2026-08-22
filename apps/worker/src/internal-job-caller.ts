@@ -13,7 +13,9 @@ import type { JobHandler, RunnerLogger } from './runner';
  * ここは**呼ぶだけ**にする。
  *
  * ⚠️ **`job_runs` への記録は API 側が行う。** ここで二重に記録しない。
- * 記録が 2 か所にあると、どちらが正か読めなくなる。
+ * 記録が 2 か所にあると、どちらが正か読めなくなる。**この叩き手は
+ * `withJobHeartbeat` で包まない**——包むと、API 側の控え（本当に仕事を
+ * したかどうか）を、worker 側の控え（叩けたかどうか）が上書きする。
  */
 export interface InternalJobCallerOptions {
   /** `https://api.example/api/v1/internal/jobs` まで。⚠️ 末尾のスラッシュは不要。 */
@@ -113,6 +115,11 @@ export function createInternalJobCaller(options: InternalJobCallerOptions): JobH
  * いない。** worker が同じ待ち行列を直接掃いており、ここからも叩くと
  * 同じ仕事を 2 経路から呼ぶことになる（条件付き更新が守るので壊れは
  * しないが、無駄に往復する）。
+ *
+ * ⚠️ **心拍が欲しいという理由でここへ足さない（2026-08-22）。** その 2 つは
+ * `withJobHeartbeat` で包んであり、worker が掃いた分を worker 自身が
+ * `job_runs` へ書く。ここへ足すと、控えを取るためだけに HTTP を 1 往復
+ * 増やすことになる。
  */
 export const SCHEDULED_INTERNAL_JOBS: readonly {
   readonly path: string;
