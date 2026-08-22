@@ -61,6 +61,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      # ⚠️ **アプリごとに別の合言葉を使う（2026-08-22）。**
+      #    1 本で両方を賄うと、その 1 本が漏れたとき Fly 上の全アプリに
+      #    届く。漏れたときに届く範囲を、そのアプリ 1 つに閉じる。
       - run: flyctl deploy --config fly.api.toml --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -77,6 +80,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # ⚠️ **合言葉が入っていないまま走らせない（2026-08-22）。**
+      #    入っていないと flyctl は `unauthorized` としか言わない。
+      #    「合言葉が無い」のか「権限が足りない」のか「アプリが無い」の
+      #    かが区別できず、当てずっぽうで Fly の設定を触ることになる。
+      #    先にここで、何をすればよいかまで書いて止める。
+      - name: worker 用の合言葉があるか確かめる
+        env:
+          FLY_API_TOKEN_WORKER: ${{ secrets.FLY_API_TOKEN_WORKER }}
+        run: |
+          if [ -z "${FLY_API_TOKEN_WORKER}" ]; then
+            echo "::error::FLY_API_TOKEN_WORKER が未設定です。" \
+              "fly tokens create deploy --app sennokunnft-worker で作り、" \
+              "GitHub の Settings → Secrets and variables → Actions へ" \
+              "FLY_API_TOKEN_WORKER として登録してください。" \
+              "⚠️ 値は画面・ログ・チャットへ貼らないでください。"
+            exit 1
+          fi
+
+      # ⚠️ **api の合言葉を使い回さない。** api 用に発行した合言葉は
+      #    worker アプリには通らず、`unauthorized` で落ちる。
+      #    api だけが成功して worker だけが落ちるので、
+      #    「worker のコードが悪い」と読み違えやすい。
       - run: flyctl deploy --config fly.worker.toml --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_WORKER }}
