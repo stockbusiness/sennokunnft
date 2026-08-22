@@ -161,6 +161,17 @@ export class PayoutService {
    * ⚠️ **記録に口座の値を入れない。** 入れた瞬間、包んで保管した意味が
    * 監査ログの側から失われる。残すのは「誰が・いつ・どの精算のために」まで。
    */
+  /**
+   * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+   *
+   * ⚠️ **取り立てる仕組みではない。** 見えるようにするだけである。請求書を
+   * 作る口も、金額を書き換える口も無い。大きい額が出たときに、運営が個別に
+   * 判断できればよい。
+   */
+  listNegativeCarries(limit = 50) {
+    return this.config.repository.listNegativeCarries(limit);
+  }
+
   async revealPayoutAccount(input: {
     readonly payoutId: string;
     readonly actorAccountId: string;

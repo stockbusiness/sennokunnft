@@ -528,9 +528,38 @@ suite('返金の窓と繰越', () => {
 });
 
 suite('差し戻しの洗い出し', () => {
-  it('確定済みの精算に載っていた注文が返金されたら拾う', async () => {
-    const seeded = await seedCreator();
-    const orderId = await seedPaidOrder(seeded);
+  /**
+   * 返金の行を 1 つ置く。
+   *
+   * ⚠️ **`refund_status` を書き換えるだけでは足りない**（決定 2026-08-22）。
+   * 誰が被るかも、いくら返したかも、返金の行にしか無い。以前はここを見て
+   * いなかったので、**こちらの不具合で返金した分まで作家さまから引いていた**。
+   */
+  async function seedRefund(
+    orderId: string,
+    input: { amount: number; bearer: 'platform' | 'creator'; status?: string },
+  ): Promise<void> {
+    await prisma.refund.create({
+      data: {
+        id: randomUUID(),
+        orderId,
+        amount: input.amount,
+        currency: 'JPY',
+        reason: input.bearer === 'creator' ? 'buyer_request' : 'our_fault',
+        initiatedBy: 'admin',
+        clawbackBearer: input.bearer,
+        status: input.status ?? 'succeeded',
+        settledAt: (input.status ?? 'succeeded') === 'succeeded' ? NOW : null,
+      },
+    });
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { refundStatus: input.amount >= 12000 ? 'refunded' : 'partially_refunded' },
+    });
+  }
+
+  /** 確定済みの精算を 1 件作る。 */
+  async function confirmedPayout(seeded: Seeded, orderId: string) {
     const payout = await repo.saveDraft(draftCommand(seeded, [orderId]));
     await repo.advance({
       payoutId: payout.id,
@@ -539,7 +568,14 @@ suite('差し戻しの洗い出し', () => {
       actorAccountId: seeded.creatorAccountId,
       now: NOW,
     });
-    await prisma.order.update({ where: { id: orderId }, data: { refundStatus: 'refunded' } });
+    return payout;
+  }
+
+  it('確定済みの精算に載っていた注文が返金されたら拾う', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 12000, bearer: 'creator' });
 
     const clawbacks = await repo.listClawbacks(seeded.creatorAccountId);
     expect(clawbacks).toHaveLength(1);
@@ -547,28 +583,62 @@ suite('差し戻しの洗い出し', () => {
     expect(clawbacks[0]?.netAmount).toBe(9600);
   });
 
+  /*
+    ⚠️ **この試験が、この変更のいちばんの主題。** 以前は事由を見ずに拾って
+       いたので、**こちらの不具合で返金した分まで作家さまの次回の売上から
+       引いていた**。作家さまはお渡ししている。
+  */
+  it('運営が被る返金は拾わない（こちらの落ち度・チャージバック）', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 12000, bearer: 'platform' });
+
+    await expect(repo.listClawbacks(seeded.creatorAccountId)).resolves.toHaveLength(0);
+  });
+
+  it('成立していない返金は拾わない', async () => {
+    // ⚠️ 事業者へ投げただけで、まだ返っていない。取り立てる根拠が無い。
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 12000, bearer: 'creator', status: 'requested' });
+
+    await expect(repo.listClawbacks(seeded.creatorAccountId)).resolves.toHaveLength(0);
+  });
+
   it('下書きのままの精算は拾わない（まだ払っていない）', async () => {
     const seeded = await seedCreator();
     const orderId = await seedPaidOrder(seeded);
     await repo.saveDraft(draftCommand(seeded, [orderId]));
-    await prisma.order.update({ where: { id: orderId }, data: { refundStatus: 'refunded' } });
+    await seedRefund(orderId, { amount: 12000, bearer: 'creator' });
 
     await expect(repo.listClawbacks(seeded.creatorAccountId)).resolves.toHaveLength(0);
+  });
+
+  /*
+    ⚠️ **二つ目の主題。** 以前は注文の作家さま配分を丸ごと引いていた。
+       一部返金ができるようになった以上、それでは**返していない分まで
+       取り立てる**ことになる。
+  */
+  it('一部返金は、返した額の作家さま配分だけを引く', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    // 12000 円のうち 3000 円を返金。手数料 20% なので作家さま配分は 2400 円。
+    await seedRefund(orderId, { amount: 3000, bearer: 'creator' });
+
+    const clawbacks = await repo.listClawbacks(seeded.creatorAccountId);
+    expect(clawbacks).toHaveLength(1);
+    expect(clawbacks[0]?.netAmount).toBe(2400);
   });
 
   it('一度差し引いた注文を二度拾わない', async () => {
     // ⚠️ 二度引くと、作家さまから取りすぎる。
     const seeded = await seedCreator();
     const orderId = await seedPaidOrder(seeded);
-    const payout = await repo.saveDraft(draftCommand(seeded, [orderId]));
-    await repo.advance({
-      payoutId: payout.id,
-      from: 'draft',
-      to: 'confirmed',
-      actorAccountId: seeded.creatorAccountId,
-      now: NOW,
-    });
-    await prisma.order.update({ where: { id: orderId }, data: { refundStatus: 'refunded' } });
+    const payout = await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 12000, bearer: 'creator' });
     await prisma.payoutLine.create({
       data: {
         id: randomUUID(),
@@ -585,5 +655,69 @@ suite('差し戻しの洗い出し', () => {
     });
 
     await expect(repo.listClawbacks(seeded.creatorAccountId)).resolves.toHaveLength(0);
+  });
+
+  it('月をまたいだ 2 度目の一部返金は、差分だけを拾う', async () => {
+    /*
+      ⚠️ **「差し戻しの行があれば対象外」では、2 度目が拾えない。** 同じ
+         注文が月をまたいで 2 度返金されることがある。引くべき合計と、
+         引いた合計の差を見る。
+    */
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    const payout = await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 3000, bearer: 'creator' });
+    await prisma.payoutLine.create({
+      data: {
+        id: randomUUID(),
+        payoutId: payout.id,
+        orderId,
+        orderNumber: 'SNK-0001',
+        artworkTitleSnapshot: '精算の試験の作品',
+        grossAmount: 0,
+        feeRateBps: 0,
+        feeAmount: 0,
+        netAmount: -2400,
+        isClawback: true,
+      },
+    });
+    // さらに 3000 円を返金。合計 6000 円 → 作家さま配分 4800 円。
+    await seedRefund(orderId, { amount: 3000, bearer: 'creator' });
+
+    const clawbacks = await repo.listClawbacks(seeded.creatorAccountId);
+    expect(clawbacks).toHaveLength(1);
+    // ⚠️ 4800 − すでに引いた 2400 ＝ 2400。
+    expect(clawbacks[0]?.netAmount).toBe(2400);
+  });
+
+  it('もとの作家さま配分を超えて引かない', async () => {
+    /*
+      ⚠️ **端数の丸めが積み上がると、払った額より多く取り立てうる。**
+         3 回に分けた一部返金の作家さま配分の合計は、一度に返した場合の
+         配分をわずかに上回ることがある（切り捨てが 3 回に分かれるため）。
+    */
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    for (const amount of [4001, 4001, 3998]) {
+      await seedRefund(orderId, { amount, bearer: 'creator' });
+    }
+
+    const clawbacks = await repo.listClawbacks(seeded.creatorAccountId);
+    expect(clawbacks).toHaveLength(1);
+    expect(clawbacks[0]?.netAmount).toBe(9600);
+  });
+
+  it('運営負担と作家さま負担が混ざったら、作家さま負担だけを引く', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await confirmedPayout(seeded, orderId);
+    await seedRefund(orderId, { amount: 3000, bearer: 'creator' });
+    await seedRefund(orderId, { amount: 5000, bearer: 'platform' });
+
+    const clawbacks = await repo.listClawbacks(seeded.creatorAccountId);
+    expect(clawbacks).toHaveLength(1);
+    // ⚠️ 3000 円分だけ。運営が被った 5000 円は作家さまへ回さない。
+    expect(clawbacks[0]?.netAmount).toBe(2400);
   });
 });

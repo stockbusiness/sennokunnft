@@ -32,6 +32,10 @@ import type {
   CollectibleRepository,
   EntitlementIssuanceRepository,
   RefundRepository,
+  RefundRequestPort,
+  CreatorInquiryPort,
+  CreatorReceivablePort,
+  RefundPolicyPort,
   PayoutRepository,
   CreatorDirectoryPort,
   SalesReportPort,
@@ -145,6 +149,16 @@ import {
   type IssuanceConfig,
 } from './order/issuance.service';
 import { RefundService } from './order/refund.service';
+import {
+  AdminRefundRequestController,
+  BuyerRefundRequestController,
+  CreatorRefundInquiryController,
+} from './refund/refund-request.controller';
+import {
+  REFUND_REQUEST_CONFIG,
+  RefundRequestService,
+  type RefundRequestConfig,
+} from './refund/refund-request.service';
 import { WalletRevokePlanner } from './claim/revoke.planner';
 import { RevocationReconcileService } from './claim/revocation-reconcile.service';
 import { OperationsReviewController } from './operations/operations-review.controller';
@@ -393,6 +407,24 @@ export interface AppDependencies {
    * 追随できず、返金済みの注文が「お支払い済み」のまま精算に乗る。
    */
   readonly refunds: RefundRepository;
+  /**
+   * 返金の申請と審査（方針整理 2026-08-22）。
+   *
+   * ⚠️ **`refunds` と別に持つ。** あちらは**決済事業者へ投げた返金**の
+   * 記録で、こちらは**その手前の手続き**である。1 つにまとめると、
+   * 投げていない申し出と投げた返金が同じ表に混ざる。
+   *
+   * ⚠️ **省略できない。** 無いと、購入者からの申し出を受ける口が無く、
+   * 返金は運営が注文の画面から直接押す形だけになる——審査の記録が
+   * どこにも残らない。
+   */
+  readonly refundRequests: {
+    readonly requests: RefundRequestPort;
+    readonly inquiries: CreatorInquiryPort;
+    readonly receivables: CreatorReceivablePort;
+    /** ⚠️ 行が無ければ `null` を返す実装であること（既定値で埋めない）。 */
+    readonly policy: RefundPolicyPort;
+  };
   /**
    * 受取権の発行（P0-1）。
    *
@@ -696,6 +728,10 @@ export class AppModule implements NestModule {
         // 返金と精算の設定（`UD-104` / `UD-119`）。⚠️ 変更はオーナー限定。
         AdminSettlementController,
         AdminPayoutController,
+        // 返金の申請と審査（方針整理 2026-08-22）。
+        AdminRefundRequestController,
+        BuyerRefundRequestController,
+        CreatorRefundInquiryController,
         // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
         AdminSalesReportController,
         AdminCreatorDirectoryController,
@@ -809,6 +845,31 @@ export class AppModule implements NestModule {
           }),
         },
         PayoutService,
+        {
+          /*
+            返金の申請と審査（方針整理 2026-08-22）。
+
+            ⚠️ **`RefundService` を包む形にする。** 決済事業者へ投げる処理を
+               2 つ持つと、片方だけ直したときに在庫の戻しや受取権の
+               取り消しが食い違う。
+          */
+          provide: REFUND_REQUEST_CONFIG,
+          useFactory: (): RefundRequestConfig => ({
+            requests: deps.refundRequests.requests,
+            inquiries: deps.refundRequests.inquiries,
+            receivables: deps.refundRequests.receivables,
+            policy: deps.refundRequests.policy,
+            orders: deps.orders.repository,
+            refunds: deps.refunds,
+            // ⚠️ 環境はプロセスに固定する。要求から受け取らない。
+            appEnvironment: deps.integrations?.appEnvironment ?? 'staging',
+            clock: deps.clock,
+            ids: deps.ids,
+            audit: deps.audit,
+            logger: payments?.logger ?? SILENT_LOGGER,
+          }),
+        },
+        RefundRequestService,
         {
           // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
           provide: REPORTING_CONFIG,

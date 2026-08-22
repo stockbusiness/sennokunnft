@@ -1,5 +1,7 @@
 import type {
   IntegrationEnvironment,
+  RefundPolicy,
+  RefundPolicyPort,
   SettlementSettings,
   SettlementSettingsRepository,
   TransferFeeBearer,
@@ -56,4 +58,31 @@ function toSettings(row: {
     // ⚠️ DB の CHECK で 2 値に縛ってある。ここで既定へ倒さない。
     transferFeeBearer: row.transferFeeBearer as TransferFeeBearer,
   };
+}
+
+/**
+ * 返金の審査にかかる設定（方針整理 2026-08-22）。
+ *
+ * ⚠️ **同じ行を読んでいるが、口を分けている。** `SettlementSettings` は
+ * **注文へ焼き付ける材料**で、判定のたびに読んではいけない。こちらは
+ * **いま審査する人の手続き**で、変えたら次の審査から効いてよい。
+ * 1 つの型にまとめると、その違いが呼ぶ側から見えなくなる。
+ */
+export class PrismaRefundPolicyRepository implements RefundPolicyPort {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async find(environment: IntegrationEnvironment): Promise<RefundPolicy | null> {
+    const row = await this.prisma.settlementSettings.findUnique({
+      where: { environment },
+      select: { creatorInquiryBusinessDays: true, dualApprovalThresholdAmount: true },
+    });
+    // ⚠️ **行が無ければ `null`。既定値で埋めない**（呼ぶ側が断る）。
+    if (row === null) {
+      return null;
+    }
+    return {
+      creatorInquiryBusinessDays: row.creatorInquiryBusinessDays,
+      dualApprovalThresholdAmount: row.dualApprovalThresholdAmount,
+    };
+  }
 }

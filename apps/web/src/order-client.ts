@@ -8,6 +8,7 @@ import {
   type CollectibleListResponse,
   type OrderView,
 } from '@sengoku/contracts';
+import { z } from '@sengoku/validation';
 import { getWebEnv } from './env';
 import { currentAccessToken } from './auth/current';
 
@@ -256,6 +257,50 @@ export async function createCheckoutSession(
   }
 
   const parsed = checkoutSessionResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * 返金のご相談（方針整理 2026-08-22）。
+ *
+ * ⚠️ **金額を送らない。** どれだけお返しするかは審査が決める。ここに
+ * 金額の欄を作ると、打った額が約束に見える。
+ *
+ * ⚠️ **ご自分の注文かどうかは API が確かめる。** 他人の注文は「無い」と
+ * 返ってくる（あることを教えない）。
+ */
+export async function submitRefundRequest(
+  orderId: string,
+  body: { readonly reason: string; readonly statement: string },
+): Promise<OrderResult<{ readonly id: string }>> {
+  const response = await call(`/api/v1/orders/${encodeURIComponent(orderId)}/refund-requests`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (response === null) {
+    return { ok: false, reason: 'unauthenticated' };
+  }
+  if (response === 'unreachable') {
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, reason: 'unauthenticated' };
+    }
+    if (response.status === 404) {
+      return { ok: false, reason: 'not_found' };
+    }
+    if (response.status >= 400 && response.status < 500) {
+      return { ok: false, reason: 'rejected', code: await errorCode(response) };
+    }
+    return { ok: false, reason: 'unavailable' };
+  }
+
+  const parsed = z.object({ id: z.string() }).safeParse(await response.json());
   if (!parsed.success) {
     return { ok: false, reason: 'unavailable' };
   }

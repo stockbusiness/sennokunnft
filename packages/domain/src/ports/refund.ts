@@ -1,3 +1,4 @@
+import type { ClawbackBearer } from '../refund/request';
 import type { RefundReason } from '../order/refund';
 import type { RefundStatus } from '../order/order-status';
 import type { RevocationReviewReason } from '../entitlement/revocation';
@@ -76,6 +77,14 @@ export interface StartRefundCommand {
   /** 事業者発なら、そのときすでに識別子が分かっている。 */
   readonly providerRefundRef: string | null;
   readonly note: string | null;
+  /**
+   * この返金を誰が被るか（決定 2026-08-22）。
+   *
+   * ⚠️ **省略なら事由から決める。** 申請を通らない返金（運営が注文の画面
+   * から直接返したもの）には 15 事由が無く、3 値の `reason` しか残らない。
+   * ⚠️ **`creator` のときだけ、次回以降の精算で差し引かれる。**
+   */
+  readonly clawbackBearer?: ClawbackBearer | undefined;
   readonly now: Date;
 }
 

@@ -36,10 +36,22 @@ import {
   adminOrderNotesResponseSchema,
   refundListResponseSchema,
   refundResultSchema,
+  refundRequestListResponseSchema,
+  refundRequestSchema,
+  adminRefundRequestDetailSchema,
+  executeRefundRequestResponseSchema,
+  type AdminRefundRequestDetail,
+  type ApproveRefundRequest,
+  type ExecuteRefundRequestResponse,
+  type OpenRefundRequest,
+  type RefundRequestListResponse,
+  type RefundRequestViewDto,
   type CreateRefundRequest,
   type RefundListResponse,
   type RefundResult,
   payoutListResponseSchema,
+  negativeCarryListResponseSchema,
+  type NegativeCarryListResponse,
   payoutDetailResponseSchema,
   adminPayoutAccountResponseSchema,
   operationsAlertSettingsResponseSchema,
@@ -751,6 +763,16 @@ export function fetchPayouts(
   return callAdmin(`/api/v1/admin/payouts?${params.toString()}`, payoutListResponseSchema);
 }
 
+/**
+ * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+ *
+ * ⚠️ **取り立てるための一覧ではない。** 見えるようにするだけである。
+ * 請求書を作る口も、金額を書き換える口もここには無い。
+ */
+export function fetchNegativeCarries(): Promise<AdminResult<NegativeCarryListResponse>> {
+  return callAdmin('/api/v1/admin/payouts/negative-carries', negativeCarryListResponseSchema);
+}
+
 export function fetchPayout(id: string): Promise<AdminResult<PayoutDetailResponse>> {
   return callAdmin(`/api/v1/admin/payouts/${encodeURIComponent(id)}`, payoutDetailResponseSchema);
 }
@@ -1237,5 +1259,110 @@ export function saveOperationsAlertSettings(
     '/api/v1/admin/operations-alerts',
     operationsAlertSettingsResponseSchema,
     json(body, 'PUT'),
+  );
+}
+
+// --- 返金の申請と審査（方針整理 2026-08-22）---------------------------------
+//
+// ⚠️ **金額を送るのは承認のときだけ。** 申し出にも実行にも金額の欄は無い。
+//    「どこからでも打てる」形にすると、二重承認と再入力の歯止めが
+//    素通りできる道になる。
+
+export function fetchRefundRequests(
+  query: { readonly status?: string; readonly orderId?: string } = {},
+): Promise<AdminResult<RefundRequestListResponse>> {
+  const params = new URLSearchParams();
+  params.set('limit', '100');
+  if (query.status !== undefined && query.status !== '') {
+    params.set('status', query.status);
+  }
+  if (query.orderId !== undefined && query.orderId !== '') {
+    params.set('orderId', query.orderId);
+  }
+  return callAdmin(
+    `/api/v1/admin/refund-requests?${params.toString()}`,
+    refundRequestListResponseSchema,
+  );
+}
+
+export function fetchRefundRequest(id: string): Promise<AdminResult<AdminRefundRequestDetail>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}`,
+    adminRefundRequestDetailSchema,
+  );
+}
+
+/** 運営が代わりにお受けする。⚠️ 押した人が「申し出た人」として記録される。 */
+export function openRefundRequest(
+  body: OpenRefundRequest,
+): Promise<AdminResult<RefundRequestViewDto>> {
+  return callAdmin('/api/v1/admin/refund-requests', refundRequestSchema, json(body, 'POST'));
+}
+
+/** 作家さまへ事実確認を依頼する。⚠️ 期限は送らない（設定から決まる）。 */
+export function askRefundCreator(
+  id: string,
+  note: string | undefined,
+): Promise<AdminResult<RefundRequestViewDto>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}/ask-creator`,
+    refundRequestSchema,
+    json(note === undefined || note === '' ? {} : { note }, 'POST'),
+  );
+}
+
+/** 調べ終える。⚠️ 承認ではない。 */
+export function investigateRefundRequest(
+  id: string,
+  note: string,
+): Promise<AdminResult<RefundRequestViewDto>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}/investigate`,
+    refundRequestSchema,
+    json({ note }, 'POST'),
+  );
+}
+
+/**
+ * 承認する。
+ *
+ * ⚠️ **金額は画面で打ち直された値。** 一覧に出ている額をそのまま送らない
+ * ——それでは再入力を課した意味が無い。
+ */
+export function approveRefundRequest(
+  id: string,
+  body: ApproveRefundRequest,
+): Promise<AdminResult<RefundRequestViewDto>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}/approve`,
+    refundRequestSchema,
+    json(body, 'POST'),
+  );
+}
+
+export function rejectRefundRequest(
+  id: string,
+  rejectionNote: string,
+): Promise<AdminResult<RefundRequestViewDto>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}/reject`,
+    refundRequestSchema,
+    json({ rejectionNote }, 'POST'),
+  );
+}
+
+/**
+ * 決済会社へ送る。
+ *
+ * ⚠️ **押し直しで二重に投げない。** 取れなかった要求は 409 で返るので、
+ * 画面はそれを「もう送っています」と伝える。
+ */
+export function executeRefundRequest(
+  id: string,
+): Promise<AdminResult<ExecuteRefundRequestResponse>> {
+  return callAdmin(
+    `/api/v1/admin/refund-requests/${encodeURIComponent(id)}/execute`,
+    executeRefundRequestResponseSchema,
+    { method: 'POST' },
   );
 }

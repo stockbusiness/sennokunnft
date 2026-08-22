@@ -1,4 +1,5 @@
 import {
+  clawbackBearerForRefundReason,
   TARGET_SITE_KEY,
   decideRevocation,
   refundStatusAfter,
@@ -133,6 +134,12 @@ export class PrismaRefundRepository implements RefundRepository {
         actorAccountId: command.actorAccountId,
         providerRefundRef: command.providerRefundRef,
         note: command.note,
+        /*
+          誰が被るか（決定 2026-08-22）。
+          ⚠️ **省略なら事由から決める。** 事業者発の返金（チャージバック）は
+             `provider_initiated` で来るので、運営が被る側へ倒れる。
+        */
+        clawbackBearer: command.clawbackBearer ?? clawbackBearerForRefundReason(command.reason),
         status: 'requested',
         createdAt: command.now,
         updatedAt: command.now,

@@ -3,8 +3,10 @@
 import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Notice } from '@sengoku/ui';
-import { startPaymentAction, type PayActionState } from './actions';
+import { BUYER_REFUND_REASON_VALUES } from '@sengoku/contracts';
+import { startPaymentAction, submitRefundRequestAction, type PayActionState } from './actions';
 import { ORDER_COPY } from '../../../../src/order-copy';
+import { buyerRefundReasonLabel, REFUND_REQUEST_COPY } from '../../../../src/refund-request-copy';
 
 const INITIAL: PayActionState = {};
 
@@ -82,5 +84,72 @@ export function PaymentResultPoller() {
     />
   ) : (
     <Notice tone="info" title={ORDER_COPY.confirmingTitle} hint={ORDER_COPY.confirmingHint} />
+  );
+}
+
+/**
+ * 返金のご相談（方針整理 2026-08-22）。
+ *
+ * ⚠️ **金額をご入力いただく欄を置かない。** どれだけお返しするかは審査が
+ * 決める。打てるようにすると、その額が約束に見える。
+ *
+ * ⚠️ **たたんでおく。** お支払いが済んだ画面にいつも開いた状態で置くと、
+ * 「返せる」ことのほうが先に目に入る。
+ *
+ * ⚠️ **お受けしたことと、お返しすることを分けて書く。** ここを曖昧にすると、
+ * 断ったときに「話が違う」となる——そしてそれは、こちらの書き方が悪い。
+ */
+export function RefundRequestForm({ orderId }: { readonly orderId: string }) {
+  const [state, action, pending] = useActionState(submitRefundRequestAction, {});
+
+  if (state.done === true) {
+    return <Notice tone="info" title={REFUND_REQUEST_COPY.buyerSent} />;
+  }
+
+  return (
+    <details className="sengoku-panel">
+      <summary>{REFUND_REQUEST_COPY.buyerHeading}</summary>
+
+      <form className="sengoku-form" action={action}>
+        {state.error === undefined ? null : <Notice tone="alert" title={state.error} />}
+
+        <p className="sengoku-form__hint">{REFUND_REQUEST_COPY.buyerHint}</p>
+        <p className="sengoku-form__hint">{REFUND_REQUEST_COPY.buyerCaution}</p>
+
+        <input type="hidden" name="orderId" value={orderId} />
+
+        <div className="sengoku-form__field">
+          <label className="sengoku-form__label" htmlFor="refund-reason">
+            {REFUND_REQUEST_COPY.buyerReasonLabel}
+          </label>
+          <select className="sengoku-form__input" id="refund-reason" name="reason" required>
+            {BUYER_REFUND_REASON_VALUES.map((reason) => (
+              <option key={reason} value={reason}>
+                {buyerRefundReasonLabel(reason)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="sengoku-form__field">
+          <label className="sengoku-form__label" htmlFor="refund-statement">
+            {REFUND_REQUEST_COPY.buyerStatementLabel}
+          </label>
+          <textarea
+            className="sengoku-form__input"
+            id="refund-statement"
+            name="statement"
+            rows={4}
+            minLength={10}
+            required
+          />
+          <p className="sengoku-form__hint">{REFUND_REQUEST_COPY.buyerStatementHint}</p>
+        </div>
+
+        <button className="sengoku-button" type="submit" disabled={pending}>
+          {pending ? REFUND_REQUEST_COPY.buyerSending : REFUND_REQUEST_COPY.buyerSubmit}
+        </button>
+      </form>
+    </details>
   );
 }

@@ -52,6 +52,52 @@ export const ACTIONS = [
    */
   'order.refund',
   /**
+   * 返金の申請を見る（方針整理 2026-08-22）。
+   *
+   * ⚠️ **`auditor` にも渡す。** 誰が申し出て、誰が承認したかは監査の対象
+   * そのものである。見る力と、動かす力を分けて配る。
+   */
+  'refund_request.view',
+  /**
+   * 返金の申請を調べ、審査を進める（運営担当者）。
+   *
+   * ⚠️ **承認ではない。** 調べて「返してよいと思う」ところまで。
+   * 実際に返すかは `refund_request.approve` が決める。
+   *
+   * ⚠️ **`auditor` には渡さない。** 調べる過程で作家さまへ確認を依頼する
+   * ——外へ働きかける操作である。
+   */
+  'refund_request.investigate',
+  /**
+   * 返金の最終承認（運営管理者）。
+   *
+   * ⚠️ **オーナー限定**（下の `OWNER_ONLY_ACTIONS`）。ここが**お金を返すと
+   * 決める場所**である。`payout.mark_paid` と同じ重さで扱う。
+   *
+   * ⚠️ **二重承認が要る額では、申請した本人は承認できない**（ドメインの
+   * `canApprove` と DB の CHECK の両方が止める）。承認の欄が 1 つ増えた
+   * だけでは、歯止めにならない。
+   */
+  'refund_request.approve',
+  /**
+   * 止まった連携をやり直す（システム管理者）。
+   *
+   * ⚠️ **返金そのものはやり直さない。** やり直すのは、返金のあとに続く
+   * 外部への伝達（ウォレット・代理店）である。**返金を再実行する口は
+   * 作らない**——押し直しで二重返金になる。
+   */
+  'refund_request.retry_integration',
+  /**
+   * 作家さまが、事実確認に答える。
+   *
+   * ⚠️ **`_own` である。** その方に来た依頼にだけ答えられる。
+   * ⚠️ **会員なら誰でも持つ。** この場では会員なら誰でも出品できる
+   * （`UD-806`）ので、「買う人」と「売る人」は同じロールである。
+   * ⚠️ **返金を実行する力を含まない。** 作家さまが決済事業者へ投げられる
+   * 口は、この仕組みに存在しない。
+   */
+  'refund_inquiry.answer_own',
+  /**
    * 顧客の詳細を見る（P1-1）。
    *
    * ⚠️ **`order.view_any` と分けてある。** 注文を一覧で見ることと、
@@ -357,6 +403,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'profile.manage_own',
     // ⚠️ 自分の分だけ。売っていなければ空が返る。
     'creator.earnings.view_own',
+    // ⚠️ 自分に来た事実確認にだけ答えられる（返金の実行は含まない）。
+    'refund_inquiry.answer_own',
   ],
   operator: [
     'artwork.view_public',
@@ -374,6 +422,14 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'order.note',
     // ⚠️ お金が動く。`auditor` には渡さない（記録は見られる）。
     'order.refund',
+    // 返金の申請（方針整理 2026-08-22）。
+    'refund_request.view',
+    'refund_request.investigate',
+    // ⚠️ ここに載っていても、オーナーの印が無ければ下で拒否される。
+    'refund_request.approve',
+    'refund_request.retry_integration',
+    // 運営も自分名義で出品できるため、依頼が来ることがある。
+    'refund_inquiry.answer_own',
     // 問い合わせ対応（P1-1）。⚠️ 本人確認は `auditor` には渡さない。
     'customer.view',
     'customer.note',
@@ -476,6 +532,8 @@ const ROLE_ACTIONS: Readonly<Record<Role, readonly Action[]>> = {
     'legal.view',
     'legal.consent',
     'payment_credential.view',
+    // ⚠️ 誰が申し出て、誰が承認したかは監査の対象そのもの。
+    'refund_request.view',
     // ⚠️ 監査は返金の条件を確かめられる必要がある。変えることはできない。
     'settlement.view',
     // ⚠️ いくら売れて、いくら返したか。監査の対象そのもの（`UD-123`）。
@@ -543,6 +601,11 @@ const OWNER_ONLY_ACTIONS: readonly Action[] = [
        無い」を作れる。締める（`payout.manage`）人と分ける。
   */
   'payout.mark_paid',
+  /*
+    ⚠️ **お金を返すと決める場所**（方針整理 2026-08-22）。調べる
+       （`refund_request.investigate`）人と、返すと決める人を分ける。
+  */
+  'refund_request.approve',
   /*
     ⚠️ **本番販売を始めてよいと署名する操作**（P0-7）。押した記録が
        10 条件のうち 2 つを埋める。運営の 1 人が乗っ取られただけで

@@ -1,5 +1,6 @@
 import type {
   PayoutCandidate,
+  NegativeCarryView,
   PayoutClawback,
   PayoutLineView,
   PayoutRepository,
@@ -138,37 +139,132 @@ export class PrismaPayoutRepository implements PayoutRepository {
 
   async listClawbacks(creatorAccountId: string): Promise<readonly PayoutClawback[]> {
     /*
-      確定済みの精算に載っていたのに、あとから返金された注文。
-      ⚠️ **一度差し引いた注文を二度引かない。** 差し戻しの行がすでに
-         あるものを除く。二度引くと、作家さまから取りすぎる。
+      確定済み・お支払い済みの精算に載っていたのに、あとから返金された注文。
+
+      ⚠️ **作家さま負担の返金だけを拾う**（決定 2026-08-22）。以前はここに
+         事由の条件が無く、**こちらの不具合で返金した分まで作家さまの次回の
+         売上から引いていた**。誰が被るかは `refunds.clawback_bearer` にある。
+
+      ⚠️ **返した額に応じて差し引く。** 以前は注文の作家さま配分を丸ごと
+         引いていた。一部返金ができるようになった以上、それでは**返して
+         いない分まで取り立てる**ことになる。
+
+      ⚠️ **すでに引いた分を差し引く。** 同じ注文が月をまたいで 2 度返金
+         されることがある。「差し戻しの行があれば対象外」にすると、
+         2 度目が拾えない。**引くべき合計と、引いた合計の差**を返す。
+
+      ⚠️ **もとの配分を超えて引かない。** 端数の丸めが積み上がると、
+         払った額より多く取り立てることが起こりうる。上限で止める。
     */
-    const rows = await this.prisma.payoutLine.findMany({
-      where: {
-        isClawback: false,
-        payout: {
-          creatorAccountId,
-          // ⚠️ 下書きのままの精算は対象外。まだ払っていない。
-          status: { in: ['confirmed', 'paid'] },
-        },
-        order: { refundStatus: { in: ['refunded', 'partially_refunded'] } },
-        // すでに差し戻しの行があるものを除く。
-        NOT: { order: { payoutLines: { some: { isClawback: true } } } },
-      },
-      select: {
-        orderId: true,
-        orderNumber: true,
-        artworkTitleSnapshot: true,
-        netAmount: true,
-      },
-    });
+    const rows = await this.prisma.$queryRaw<
+      {
+        order_id: string;
+        order_number: string;
+        artwork_title_snapshot: string;
+        outstanding: bigint;
+      }[]
+    >`
+      WITH paid_lines AS (
+        SELECT
+          l."order_id",
+          l."order_number",
+          l."artwork_title_snapshot",
+          l."fee_rate_bps",
+          l."net_amount"
+        FROM "payout_lines" l
+        JOIN "payouts" p ON p."id" = l."payout_id"
+        WHERE l."is_clawback" = false
+          AND p."creator_account_id" = ${creatorAccountId}::uuid
+          -- ⚠️ 下書きのままの精算は対象外。まだ払っていない。
+          AND p."status" IN ('confirmed', 'paid')
+      ),
+      -- 作家さまが被る返金だけを、注文ごとに合計する。
+      creator_refunds AS (
+        SELECT r."order_id", SUM(r."amount")::bigint AS refunded
+        FROM "refunds" r
+        WHERE r."clawback_bearer" = 'creator'
+          AND r."status" = 'succeeded'
+        GROUP BY r."order_id"
+      ),
+      -- すでに差し引いた分。⚠️ 明細ではマイナスなので符号を戻す。
+      already AS (
+        SELECT l."order_id", SUM(-l."net_amount")::bigint AS clawed
+        FROM "payout_lines" l
+        JOIN "payouts" p ON p."id" = l."payout_id"
+        WHERE l."is_clawback" = true
+          AND p."creator_account_id" = ${creatorAccountId}::uuid
+        GROUP BY l."order_id"
+      )
+      SELECT
+        pl."order_id",
+        pl."order_number",
+        pl."artwork_title_snapshot",
+        (
+          LEAST(
+            /*
+              返した額の作家さま配分。⚠️ **注文時に焼き付けた率で割る。**
+                 いまの手数料率で割ると、率を変えた月に過去の注文が動く。
+            */
+            cr.refunded - FLOOR(cr.refunded * pl."fee_rate_bps" / 10000),
+            -- ⚠️ もとの配分を超えない。
+            pl."net_amount"
+          ) - COALESCE(a.clawed, 0)
+        )::bigint AS outstanding
+      FROM paid_lines pl
+      JOIN creator_refunds cr ON cr."order_id" = pl."order_id"
+      LEFT JOIN already a ON a."order_id" = pl."order_id"
+      WHERE (
+        LEAST(
+          cr.refunded - FLOOR(cr.refunded * pl."fee_rate_bps" / 10000),
+          pl."net_amount"
+        ) - COALESCE(a.clawed, 0)
+      ) > 0
+    `;
 
     return rows.map((row) => ({
-      orderId: row.orderId,
-      orderNumber: row.orderNumber,
-      artworkTitleSnapshot: row.artworkTitleSnapshot,
+      orderId: row.order_id,
+      orderNumber: row.order_number,
+      artworkTitleSnapshot: row.artwork_title_snapshot,
       // ⚠️ 正の数で返す。符号はドメイン側が付ける。
-      netAmount: row.netAmount,
+      netAmount: Number(row.outstanding),
     }));
+  }
+
+  async listNegativeCarries(limit: number): Promise<readonly NegativeCarryView[]> {
+    /*
+      繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+
+      ⚠️ **その作家さまの「いちばん新しい精算」だけを見る。** 途中の月が
+         マイナスでも、あとで売れて解消していれば残っていない。
+      ⚠️ **下書きは見ない。** 確定していない数字で人を呼び出さない。
+    */
+    const rows = await this.prisma.$queryRaw<
+      { creator_account_id: string; period_key: string; carried_out_amount: number; since: Date }[]
+    >`
+      SELECT DISTINCT ON (p."creator_account_id")
+        p."creator_account_id",
+        p."period_key",
+        p."carried_out_amount",
+        COALESCE(p."confirmed_at", p."updated_at") AS since
+      FROM "payouts" p
+      WHERE p."status" IN ('confirmed', 'paid')
+      ORDER BY p."creator_account_id", p."period_key" DESC
+    `;
+
+    return (
+      rows
+        .filter((row) => row.carried_out_amount < 0)
+        // ⚠️ 大きいものから。放置してよい額かどうかを、まず額で判断する。
+        .sort((left, right) => left.carried_out_amount - right.carried_out_amount)
+        .slice(0, limit)
+        .map((row) => ({
+          creatorAccountId: row.creator_account_id,
+          periodKey: row.period_key,
+          // ⚠️ 正の数で返す。符号は画面が付ける。
+          outstandingAmount: Math.abs(row.carried_out_amount),
+          since: row.since,
+        }))
+    );
   }
 
   async countOpenRefundWindows(payoutId: string, now: Date): Promise<number> {

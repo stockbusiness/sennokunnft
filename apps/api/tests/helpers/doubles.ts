@@ -199,6 +199,7 @@ import type {
   PayoutCandidate,
   PayoutClawback,
   PayoutLineView,
+  NegativeCarryView,
   PayoutRepository,
   PayoutStatus,
   PayoutView,
@@ -206,6 +207,21 @@ import type {
   RefundContext,
   RefundRecordView,
   RefundRepository,
+  RefundRequestPort,
+  RefundRequestQuery,
+  RefundRequestRecord,
+  RefundRequestReason,
+  RefundRequestStatus,
+  RefundRequestEventRecord,
+  RefundCategory,
+  EntitlementDisposition,
+  CreatorInquiryPort,
+  CreatorInquiryRecord,
+  CreatorReceivablePort,
+  ReceivableRecord,
+  ReceivableStatus,
+  RefundPolicy,
+  RefundPolicyPort,
   RefundSettlement,
   SettleRefundCommand,
   StartRefundCommand,
@@ -2154,6 +2170,39 @@ export class InMemoryPayouts implements PayoutRepository {
     return Promise.resolve(open.length);
   }
 
+  /**
+   * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+   *
+   * ⚠️ **その作家さまのいちばん新しい確定済みの精算だけを見る。** 途中の
+   * 月がマイナスでも、あとで売れて解消していれば残っていない。
+   */
+  listNegativeCarries(limit: number): Promise<readonly NegativeCarryView[]> {
+    const latest = new Map<string, PayoutView>();
+    for (const row of this.payouts.values()) {
+      if (row.status === 'draft') {
+        continue;
+      }
+      const seen = latest.get(row.creatorAccountId);
+      if (seen === undefined || row.periodKey > seen.periodKey) {
+        latest.set(row.creatorAccountId, row);
+      }
+    }
+    return Promise.resolve(
+      [...latest.values()]
+        .filter((row) => row.carriedOutAmount < 0)
+        // ⚠️ 大きいものから。放置してよい額かを、まず額で判断する。
+        .sort((left, right) => left.carriedOutAmount - right.carriedOutAmount)
+        .slice(0, limit)
+        .map((row) => ({
+          creatorAccountId: row.creatorAccountId,
+          periodKey: row.periodKey,
+          // ⚠️ 正の数で返す。符号は画面が付ける。
+          outstandingAmount: Math.abs(row.carriedOutAmount),
+          since: row.confirmedAt ?? row.createdAt,
+        })),
+    );
+  }
+
   carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number> {
     const previous = [...this.payouts.values()].find(
       (row) => row.creatorAccountId === creatorAccountId && row.periodKey === previousPeriodKey,
@@ -2803,6 +2852,17 @@ export interface TestHarness extends AppDependencies {
   readonly legalRepository: InMemoryLegalDocuments;
   readonly legalConsents: InMemoryLegalConsents;
   readonly paymentCredentialRepository: InMemoryPaymentCredentials;
+  /*
+    返金の申請と審査（方針整理 2026-08-22）。
+    ⚠️ **実体の型で持つ。** 積んだ証跡を覗き（`events`）、審査の設定を
+       差し替える（`set()` / `clear()`）ために要る。
+  */
+  readonly refundRequests: {
+    readonly requests: InMemoryRefundRequests;
+    readonly inquiries: InMemoryCreatorInquiries;
+    readonly receivables: InMemoryCreatorReceivables;
+    readonly policy: InMemoryRefundPolicy;
+  };
   /** ⚠️ 未設定の配備を作るために、実体の型で持つ（`clear()`）。 */
   readonly settlement: InMemorySettlementSettings;
   /** ⚠️ 受取権・発行ジョブの姿を差し替えるため、実体の型で持つ。 */
@@ -3022,6 +3082,10 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const orderNotes = new InMemoryOrderNotes();
   const settlementSettings = new InMemorySettlementSettings();
   const refunds = new InMemoryRefunds(orderRepository);
+  const refundRequests = new InMemoryRefundRequests();
+  const creatorInquiries = new InMemoryCreatorInquiries();
+  const creatorReceivables = new InMemoryCreatorReceivables();
+  const refundPolicy = new InMemoryRefundPolicy();
   const payouts = new InMemoryPayouts();
   const profiles = new InMemoryCreatorProfiles();
   const commonUserLinks = new InMemoryCommonUserLinks();
@@ -3073,6 +3137,16 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     settlement: settlementSettings,
     // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
     refunds,
+    /*
+      返金の申請と審査（方針整理 2026-08-22）。
+      ⚠️ **実体の型で持つ。** 積んだ証跡と設定を試験から覗いて差し替える。
+    */
+    refundRequests: {
+      requests: refundRequests,
+      inquiries: creatorInquiries,
+      receivables: creatorReceivables,
+      policy: refundPolicy,
+    },
     // 運用確認キュー（M3a）。⚠️ 積めたかどうかを試験から覗く。
     operationsReviews,
     // 運営ダッシュボード（P0-6）。⚠️ 置いた数から色が決まるかを見る。
@@ -4544,5 +4618,309 @@ export class FakeAlertMailer {
     }
     this.sent.push({ to: input.to, subject: input.subject, body: input.body });
     return Promise.resolve({ kind: 'accepted' as const, providerMessageId: null });
+  }
+}
+
+/* --- 返金の申請と審査（方針整理 2026-08-22） ----------------------------- */
+
+/**
+ * 申請の入れ物。
+ *
+ * ⚠️ **`transition` は条件付き更新のまま写す。** 「読んでから書く」に
+ * 崩すと、二重承認・二重実行を止めている試験が**通ってしまう**。
+ * DB 側の歯止めを持たない代わりに、ここで同じ形を保つ。
+ */
+export class InMemoryRefundRequests implements RefundRequestPort {
+  readonly rows = new Map<string, RefundRequestRecord>();
+  readonly events: {
+    readonly requestId: string;
+    readonly action: string;
+    readonly actorAccountId: string | null;
+    readonly summary: Record<string, unknown>;
+    readonly createdAt: Date;
+    readonly id: string;
+  }[] = [];
+
+  find(id: string): Promise<RefundRequestRecord | null> {
+    return Promise.resolve(this.rows.get(id) ?? null);
+  }
+
+  list(query: RefundRequestQuery): Promise<readonly RefundRequestRecord[]> {
+    const items = [...this.rows.values()]
+      .filter((row) => (query.status === undefined ? true : row.status === query.status))
+      .filter((row) => (query.orderId === undefined ? true : row.orderId === query.orderId))
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+      .slice(0, query.limit);
+    return Promise.resolve(items);
+  }
+
+  findOpenByOrder(orderId: string): Promise<RefundRequestRecord | null> {
+    const open = [...this.rows.values()].find(
+      (row) => row.orderId === orderId && row.status !== 'rejected' && row.status !== 'executed',
+    );
+    return Promise.resolve(open ?? null);
+  }
+
+  create(input: {
+    readonly id: string;
+    readonly orderId: string;
+    readonly reason: RefundRequestReason;
+    readonly category: RefundCategory;
+    readonly amount: number;
+    readonly isFullRefund: boolean;
+    readonly entitlementDisposition: EntitlementDisposition;
+    readonly requestedByAccountId: string | null;
+    readonly buyerStatement: string | null;
+    readonly status: RefundRequestStatus;
+    readonly now: Date;
+  }): Promise<RefundRequestRecord> {
+    const row: RefundRequestRecord = {
+      id: input.id,
+      orderId: input.orderId,
+      status: input.status,
+      reason: input.reason,
+      category: input.category,
+      note: null,
+      buyerStatement: input.buyerStatement,
+      amount: input.amount,
+      isFullRefund: input.isFullRefund,
+      entitlementDisposition: input.entitlementDisposition,
+      requestedByAccountId: input.requestedByAccountId,
+      reviewedByAccountId: null,
+      approvedByAccountId: null,
+      dualApprovalRequired: false,
+      approvedAsException: false,
+      rejectionNote: null,
+      refundId: null,
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+    this.rows.set(row.id, row);
+    return Promise.resolve(row);
+  }
+
+  transition(input: {
+    readonly id: string;
+    readonly from: readonly RefundRequestStatus[];
+    readonly to: RefundRequestStatus;
+    readonly patch?:
+      | {
+          readonly reviewedByAccountId?: string | undefined;
+          readonly approvedByAccountId?: string | undefined;
+          readonly dualApprovalRequired?: boolean | undefined;
+          readonly approvedAsException?: boolean | undefined;
+          readonly entitlementDisposition?: EntitlementDisposition | undefined;
+          readonly amount?: number | undefined;
+          readonly isFullRefund?: boolean | undefined;
+          readonly note?: string | undefined;
+          readonly rejectionNote?: string | undefined;
+          readonly refundId?: string | undefined;
+        }
+      | undefined;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const row = this.rows.get(input.id);
+    // ⚠️ **いまの状態が `from` に無ければ進めない。** ここが二重実行の歯止め。
+    if (row === undefined || !input.from.includes(row.status)) {
+      return Promise.resolve(false);
+    }
+    const patch = input.patch ?? {};
+    this.rows.set(input.id, {
+      ...row,
+      status: input.to,
+      reviewedByAccountId: patch.reviewedByAccountId ?? row.reviewedByAccountId,
+      approvedByAccountId: patch.approvedByAccountId ?? row.approvedByAccountId,
+      dualApprovalRequired: patch.dualApprovalRequired ?? row.dualApprovalRequired,
+      approvedAsException: patch.approvedAsException ?? row.approvedAsException,
+      entitlementDisposition: patch.entitlementDisposition ?? row.entitlementDisposition,
+      amount: patch.amount ?? row.amount,
+      isFullRefund: patch.isFullRefund ?? row.isFullRefund,
+      note: patch.note ?? row.note,
+      rejectionNote: patch.rejectionNote ?? row.rejectionNote,
+      refundId: patch.refundId ?? row.refundId,
+      updatedAt: input.now,
+    });
+    return Promise.resolve(true);
+  }
+
+  listEvents(requestId: string, limit: number): Promise<readonly RefundRequestEventRecord[]> {
+    return Promise.resolve(
+      this.events
+        .filter((event) => event.requestId === requestId)
+        .slice(0, limit)
+        .map((event) => ({
+          id: event.id,
+          action: event.action,
+          actorAccountId: event.actorAccountId,
+          summary: event.summary,
+          createdAt: event.createdAt,
+        })),
+    );
+  }
+
+  appendEvent(input: {
+    readonly id: string;
+    readonly requestId: string;
+    readonly action: string;
+    readonly actorAccountId: string | null;
+    readonly summary: Record<string, unknown>;
+    readonly now: Date;
+  }): Promise<void> {
+    this.events.push({
+      id: input.id,
+      requestId: input.requestId,
+      action: input.action,
+      actorAccountId: input.actorAccountId,
+      summary: input.summary,
+      createdAt: input.now,
+    });
+    return Promise.resolve();
+  }
+}
+
+/** 作家さまへの事実確認。⚠️ 「答えるのは 1 度だけ」を条件付きで写す。 */
+export class InMemoryCreatorInquiries implements CreatorInquiryPort {
+  readonly rows = new Map<string, CreatorInquiryRecord>();
+
+  findByRequest(requestId: string): Promise<CreatorInquiryRecord | null> {
+    return Promise.resolve(this.rows.get(requestId) ?? null);
+  }
+
+  listForCreator(
+    creatorAccountId: string,
+    limit: number,
+  ): Promise<readonly CreatorInquiryRecord[]> {
+    return Promise.resolve(
+      [...this.rows.values()]
+        .filter((row) => row.creatorAccountId === creatorAccountId)
+        .slice(0, limit),
+    );
+  }
+
+  ask(input: {
+    readonly id: string;
+    readonly requestId: string;
+    readonly creatorAccountId: string;
+    readonly dueAt: Date;
+    readonly now: Date;
+  }): Promise<CreatorInquiryRecord> {
+    const row: CreatorInquiryRecord = {
+      id: input.id,
+      requestId: input.requestId,
+      creatorAccountId: input.creatorAccountId,
+      askedAt: input.now,
+      dueAt: input.dueAt,
+      answeredAt: null,
+      answer: null,
+      attachmentKeys: [],
+    };
+    this.rows.set(input.requestId, row);
+    return Promise.resolve(row);
+  }
+
+  answer(input: {
+    readonly requestId: string;
+    readonly creatorAccountId: string;
+    readonly answer: string;
+    readonly attachmentKeys: readonly string[];
+    readonly now: Date;
+  }): Promise<boolean> {
+    const row = this.rows.get(input.requestId);
+    /*
+      ⚠️ **その方宛てで、まだ答えていないときだけ。** 2 つの条件を
+         1 度に見る（読んでから書く形に崩すと、試験が通ってしまう）。
+      ⚠️ **期限は見ない。** 遅れて届いた事実にも値打ちがある。
+    */
+    if (
+      row === undefined ||
+      row.creatorAccountId !== input.creatorAccountId ||
+      row.answeredAt !== null
+    ) {
+      return Promise.resolve(false);
+    }
+    this.rows.set(input.requestId, {
+      ...row,
+      answeredAt: input.now,
+      answer: input.answer,
+      attachmentKeys: [...input.attachmentKeys],
+    });
+    return Promise.resolve(true);
+  }
+}
+
+/** 売上からの戻し。⚠️ 同じ注文で 2 度作らない（最初の額が残る）。 */
+export class InMemoryCreatorReceivables implements CreatorReceivablePort {
+  readonly rows: ReceivableRecord[] = [];
+
+  listOutstanding(creatorAccountId: string): Promise<readonly ReceivableRecord[]> {
+    return Promise.resolve(
+      this.rows.filter(
+        (row) => row.creatorAccountId === creatorAccountId && row.status === 'outstanding',
+      ),
+    );
+  }
+
+  record(input: {
+    readonly id: string;
+    readonly creatorAccountId: string;
+    readonly orderId: string;
+    readonly amount: number;
+    readonly now: Date;
+  }): Promise<void> {
+    if (this.rows.some((row) => row.orderId === input.orderId)) {
+      return Promise.resolve();
+    }
+    this.rows.push({
+      id: input.id,
+      creatorAccountId: input.creatorAccountId,
+      orderId: input.orderId,
+      amount: input.amount,
+      status: 'outstanding',
+      createdAt: input.now,
+      settledAt: null,
+    });
+    return Promise.resolve();
+  }
+
+  settle(input: {
+    readonly id: string;
+    readonly status: Exclude<ReceivableStatus, 'outstanding'>;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const index = this.rows.findIndex((row) => row.id === input.id && row.status === 'outstanding');
+    const row = this.rows[index];
+    if (row === undefined) {
+      return Promise.resolve(false);
+    }
+    // ⚠️ **金額は書き換えない。** 記録であって帳簿ではない。
+    this.rows[index] = { ...row, status: input.status, settledAt: input.now };
+    return Promise.resolve(true);
+  }
+}
+
+/**
+ * 返金の審査にかかる設定。
+ *
+ * ⚠️ **`clear()` を持たせる。** 「設定が無ければ断る」を確かめる試験が
+ * 要る（既定値でそっと動かさない、という決定の裏返し）。
+ */
+export class InMemoryRefundPolicy implements RefundPolicyPort {
+  private current: RefundPolicy | null = {
+    creatorInquiryBusinessDays: 3,
+    // ⚠️ 既定では二重承認を使わない（`null` がその意味）。
+    dualApprovalThresholdAmount: null,
+  };
+
+  find(): Promise<RefundPolicy | null> {
+    return Promise.resolve(this.current);
+  }
+
+  set(policy: RefundPolicy): void {
+    this.current = policy;
+  }
+
+  clear(): void {
+    this.current = null;
   }
 }

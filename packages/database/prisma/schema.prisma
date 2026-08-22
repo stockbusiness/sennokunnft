@@ -130,6 +130,14 @@ model Account {
   emailChangeRequests          EmailChangeRequest[]         @relation("EmailChangeSubject")
   /// お振込先（P1-3）。⚠️ 1 人につき 1 件。
   payoutAccount                CreatorPayoutAccount?        @relation("CreatorPayoutAccount")
+  // 返金の申請と審査（方針整理 2026-08-22）。
+  requestedRefundRequests      RefundRequest[]              @relation("RefundRequestRequester")
+  reviewedRefundRequests       RefundRequest[]              @relation("RefundRequestReviewer")
+  approvedRefundRequests       RefundRequest[]              @relation("RefundRequestApprover")
+  refundRequestEvents          RefundRequestEvent[]         @relation("RefundRequestEventActor")
+  refundInquiries              CreatorRefundInquiry[]       @relation("CreatorRefundInquiry")
+  receivables                  CreatorReceivable[]          @relation("CreatorReceivable")
+  settledReceivables           CreatorReceivable[]          @relation("CreatorReceivableSettler")
   openedEmailChanges           EmailChangeRequest[]         @relation("EmailChangeOpener")
   verifiedEmailChanges         EmailChangeRequest[]         @relation("EmailChangeVerifier")
   settledEmailChanges          EmailChangeRequest[]         @relation("EmailChangeSettler")
@@ -644,17 +652,20 @@ model Order {
   createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  account       Account                @relation(fields: [accountId], references: [id])
-  creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
-  termsDocument LegalDocumentVersion?  @relation("OrderTermsVersion", fields: [termsVersionId], references: [id], onDelete: Restrict)
-  lines         OrderLine[]
-  payments      Payment[]
-  entitlements  Entitlement[]
-  reservations  InventoryReservation[]
-  webhookEvents WebhookEvent[]
-  notes         OrderNote[]
-  refunds       Refund[]
-  payoutLines   PayoutLine[]
+  account        Account                @relation(fields: [accountId], references: [id])
+  creator        Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  termsDocument  LegalDocumentVersion?  @relation("OrderTermsVersion", fields: [termsVersionId], references: [id], onDelete: Restrict)
+  lines          OrderLine[]
+  payments       Payment[]
+  entitlements   Entitlement[]
+  reservations   InventoryReservation[]
+  webhookEvents  WebhookEvent[]
+  notes          OrderNote[]
+  refunds        Refund[]
+  payoutLines    PayoutLine[]
+  // 返金の申請と審査（方針整理 2026-08-22）。
+  refundRequests RefundRequest[]
+  receivable     CreatorReceivable?
 
   /// ⚠️ 冪等キーの一意性はここが守る（指示書 §4.5）。
   /// アプリの重複チェックではなく、DB の制約で担保する。
@@ -853,9 +864,19 @@ model Refund {
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   settledAt         DateTime? @map("settled_at") @db.Timestamptz(6)
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  actor   Account? @relation("RefundActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+  /// この返金を誰が被るか（決定 2026-08-22）。`platform` / `creator`。
+  /// ⚠️ **作家さま負担の分だけが、次回以降の精算で差し引かれる。**
+  ///    こちらの落ち度・チャージバック・運営が例外として通したものは
+  ///    `platform`（作家さまへ回さない）。
+  clawbackBearer String  @default("creator") @map("clawback_bearer")
+  /// どの申請から実行されたか（方針整理 2026-08-22）。
+  /// ⚠️ **NULL 可のまま。** これまでの返金は申請を持たない。
+  requestId      String? @map("request_id") @db.Uuid
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment?       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  actor   Account?       @relation("RefundActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+  request RefundRequest? @relation("RefundFromRequest", fields: [requestId], references: [id], onDelete: Restrict)
 
   @@index([orderId, createdAt(sort: Desc)], map: "refunds_order_created_idx")
   /// 事業者へ届かないまま残った行を洗い出すため。
@@ -1360,17 +1381,23 @@ model HmacNonce {
 /// コードに `?? 14` を書くと、設定行が消えたことに誰も気づかないまま動く。
 model SettlementSettings {
   /// `staging` / `production`。⚠️ CHECK で縛っている。
-  environment         String   @id
+  environment                 String   @id
   /// 返金を受け付ける日数。⚠️ 0 は「受け付けない」であって未設定ではない。
-  refundWindowDays    Int      @map("refund_window_days")
+  refundWindowDays            Int      @map("refund_window_days")
   /// 締めから支払いまでの月数。1 = 月末締め・翌月末払い。
-  payoutOffsetMonths  Int      @map("payout_offset_months")
+  payoutOffsetMonths          Int      @map("payout_offset_months")
   /// 最低支払額（円）。未満は翌月へ繰り越す。
-  minimumPayoutAmount Int      @map("minimum_payout_amount")
+  minimumPayoutAmount         Int      @map("minimum_payout_amount")
   /// `creator` / `platform`。⚠️ CHECK で縛っている。
-  transferFeeBearer   String   @map("transfer_fee_bearer")
-  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedByAccountId  String?  @map("updated_by_account_id") @db.Uuid
+  transferFeeBearer           String   @map("transfer_fee_bearer")
+  /// 作家さまの回答期限（営業日・方針整理 2026-08-22）。
+  /// ⚠️ **祝日は見ていない**（表を持たないため）。連休のある月は実際より短くなる。
+  creatorInquiryBusinessDays  Int      @default(3) @map("creator_inquiry_business_days")
+  /// 二重承認が要る金額。⚠️ **`null` は「二重承認を使わない」。**
+  /// 0 を「常に要る」の意味に使わない（設定漏れと区別できなくなる）。
+  dualApprovalThresholdAmount Int?     @map("dual_approval_threshold_amount")
+  updatedAt                   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedByAccountId          String?  @map("updated_by_account_id") @db.Uuid
 
   updatedBy Account? @relation("SettlementSettingsEditor", fields: [updatedByAccountId], references: [id], onDelete: SetNull)
 
@@ -1696,4 +1723,136 @@ model OperationsAlertSettings {
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("operations_alert_settings")
+}
+
+/// 返金の申請と審査（方針整理 2026-08-22）。
+///
+/// ⚠️ **既存の `Refund` を置き換えない。** あちらは決済事業者への返金
+/// そのものの記録で、こちらはその手前の手続きである。
+///
+/// ⚠️ **同じ注文に、決着していない申請を 2 つ作れない**（部分 UNIQUE
+/// 索引 `refund_requests_open_per_order`）。作れると、2 人が別々に承認して
+/// **二重返金**になる。Prisma では条件付き索引を書けないため、
+/// **手書きのマイグレーション側にだけ存在する**。
+///
+/// ⚠️ CHECK 制約（状態・区分・扱い・金額・二重承認の別人・却下の理由・
+/// 実行済みの返金行）は `20260822010000_refund_requests` にある。
+model RefundRequest {
+  id                     String   @id @default(uuid()) @db.Uuid
+  orderId                String   @map("order_id") @db.Uuid
+  status                 String   @default("submitted")
+  reason                 String
+  /// ⚠️ 理由から決まる。人が選び直せない。
+  category               String
+  /// 運営の書き込み。⚠️ 購入者には見せない。
+  note                   String?
+  /// 購入者が書いた申し出。⚠️ 文字として扱う（HTML にしない）。
+  buyerStatement         String?  @map("buyer_statement")
+  amount                 Int
+  isFullRefund           Boolean  @map("is_full_refund")
+  /// `revoke` / `keep`。⚠️ 一部返金では運営が承認のときに指定する。
+  entitlementDisposition String   @default("keep") @map("entitlement_disposition")
+  requestedByAccountId   String?  @map("requested_by_account_id") @db.Uuid
+  reviewedByAccountId    String?  @map("reviewed_by_account_id") @db.Uuid
+  approvedByAccountId    String?  @map("approved_by_account_id") @db.Uuid
+  dualApprovalRequired   Boolean  @default(false) @map("dual_approval_required")
+  /// 原則対象外を、運営が例外として通したか。
+  approvedAsException    Boolean  @default(false) @map("approved_as_exception")
+  rejectionNote          String?  @map("rejection_note")
+  /// 実行してできた返金の行。⚠️ 実行するまで NULL。
+  refundId               String?  @map("refund_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestedBy Account?              @relation("RefundRequestRequester", fields: [requestedByAccountId], references: [id], onDelete: SetNull)
+  reviewedBy  Account?              @relation("RefundRequestReviewer", fields: [reviewedByAccountId], references: [id], onDelete: SetNull)
+  approvedBy  Account?              @relation("RefundRequestApprover", fields: [approvedByAccountId], references: [id], onDelete: SetNull)
+  events      RefundRequestEvent[]
+  inquiry     CreatorRefundInquiry?
+  refunds     Refund[]              @relation("RefundFromRequest")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([orderId])
+  @@map("refund_requests")
+}
+
+/// 返金申請の証跡（追記のみ）。
+///
+/// ⚠️ **監査ログと別に持つ。** あちらは運営の操作全般で、こちらは
+/// **この申請に何が起きたか**を時系列で読むためのもの。
+///
+/// ⚠️ **DB のトリガーが UPDATE / DELETE を拒む。** アプリに口を作らない
+/// だけでは足りない——アプリを通さない書き込みも止める。
+model RefundRequestEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  requestId      String   @map("request_id") @db.Uuid
+  action         String
+  actorAccountId String?  @map("actor_account_id") @db.Uuid
+  /// ⚠️ **金額と符号まで。** 購入者の申し出の本文をここへ写さない。
+  summary        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  request RefundRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor   Account?      @relation("RefundRequestEventActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+  @@map("refund_request_events")
+}
+
+/// 作家さまへの事実確認（方針整理 2026-08-22）。
+///
+/// ⚠️ **回答は任意である。** 期限が来れば運営だけで進める。「答えないと
+/// 返金できない」にすると、答えない作家さまがいるだけで購入者が待たされる。
+///
+/// ⚠️ **申請 1 件につき 1 回。** 何度も聞き直す形にしない（期限が意味を失う）。
+model CreatorRefundInquiry {
+  id               String    @id @default(uuid()) @db.Uuid
+  requestId        String    @unique @map("request_id") @db.Uuid
+  creatorAccountId String    @map("creator_account_id") @db.Uuid
+  askedAt          DateTime  @map("asked_at") @db.Timestamptz(6)
+  dueAt            DateTime  @map("due_at") @db.Timestamptz(6)
+  answeredAt       DateTime? @map("answered_at") @db.Timestamptz(6)
+  /// 作家さまの回答。⚠️ 文字として扱う。
+  answer           String?
+  /// 添付の保管庫の鍵。⚠️ URL ではなく鍵で持つ。
+  attachmentKeys   String[]  @default([]) @map("attachment_keys")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request RefundRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  creator Account       @relation("CreatorRefundInquiry", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+
+  @@index([creatorAccountId, dueAt])
+  @@map("creator_refund_inquiries")
+}
+
+/// 作家さまからの回収待ち（方針整理 2026-08-22）。
+///
+/// ⚠️ **これは請求書ではない。** 記録であって、取り立ての仕組みではない。
+///
+/// ⚠️ **既存の繰越（`carriedOutAmount`）を置き換えない。** あちらは
+/// 「精算 1 件のなかで引ききれなかった額」で、こちらは
+/// **「精算をまたいで残っている額」**である。
+///
+/// ⚠️ **同じ注文で 2 行作れない**（UNIQUE）。作れると、1 回の返金で
+/// 二重に取り立てることになる。
+model CreatorReceivable {
+  id                 String    @id @default(uuid()) @db.Uuid
+  creatorAccountId   String    @map("creator_account_id") @db.Uuid
+  orderId            String    @unique @map("order_id") @db.Uuid
+  /// ⚠️ **正の数**で持つ。符号は使う側が付ける。
+  amount             Int
+  status             String    @default("outstanding")
+  settledByAccountId String?   @map("settled_by_account_id") @db.Uuid
+  settledAt          DateTime? @map("settled_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator   Account  @relation("CreatorReceivable", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  settledBy Account? @relation("CreatorReceivableSettler", fields: [settledByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([creatorAccountId, status])
+  @@map("creator_receivables")
 }

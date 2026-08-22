@@ -22,7 +22,10 @@ export {
 export { PrismaArtworkRepository } from './repositories/artwork.repository';
 export { PrismaListingRepository } from './repositories/listing.repository';
 export { PrismaIdempotencyStore } from './repositories/idempotency.repository';
-export { PrismaSettlementSettingsRepository } from './repositories/settlement.repository';
+export {
+  PrismaSettlementSettingsRepository,
+  PrismaRefundPolicyRepository,
+} from './repositories/settlement.repository';
 export { PrismaRefundRepository } from './repositories/refund.repository';
 export { PrismaEntitlementIssuanceRepository } from './repositories/issuance.repository';
 export { PrismaCollectibleRepository } from './repositories/collectible.repository';
@@ -119,3 +122,9 @@ export {
 
 // 運営への知らせ（`UD-1102` の一部）。
 export { PrismaOperationsAlertSettingsRepository } from './repositories/operations-alert.repository';
+// 返金の申請と審査（方針整理 2026-08-22）。
+export {
+  PrismaRefundRequestRepository,
+  PrismaCreatorInquiryRepository,
+  PrismaCreatorReceivableRepository,
+} from './repositories/refund-request.repository';

@@ -161,3 +161,29 @@ export const payoutListQuerySchema = z.object({
   status: z.enum(PAYOUT_STATUS_VALUES).optional(),
 });
 export type PayoutListQuery = z.infer<typeof payoutListQuerySchema>;
+
+/**
+ * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+ *
+ * ⚠️ **取り立てるための一覧ではない。** 見えるようにするだけである。
+ * 差し引ききれなかった分は翌月へ繰り越されるが、その作家さまが二度と
+ * 売らなければ**永久に残る**。毎月の下書きには出るが、他の下書きに
+ * 埋もれて誰も拾わない——それが本当の欠陥だった。
+ *
+ * ⚠️ **金額を書き換える口はここにも無い**（`SETTLEMENT_AND_REFUND.md` §4）。
+ */
+export const negativeCarrySchema = z.object({
+  /** ⚠️ 氏名やメールではなくアカウントID。画面では短縮して出す。 */
+  creatorAccountId: z.string(),
+  periodKey: z.string(),
+  /** 残っている額。⚠️ **正の数**（符号は画面が付ける）。 */
+  outstandingAmount: z.number().int(),
+  /** いつからそうなっているか。⚠️ 放置の長さが読める。 */
+  since: z.string(),
+});
+export type NegativeCarryDto = z.infer<typeof negativeCarrySchema>;
+
+export const negativeCarryListResponseSchema = z.object({
+  items: z.array(negativeCarrySchema),
+});
+export type NegativeCarryListResponse = z.infer<typeof negativeCarryListResponseSchema>;
