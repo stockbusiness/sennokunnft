@@ -122,6 +122,12 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   const rows = SEEDED_SETTLEMENT_SETTINGS.map(
     (seeded) => byEnvironment.get(seeded.environment) ?? seeded,
   );
+  /*
+    ⚠️ **残っていたら上書きしない。** TRUNCATE が途中で終わると行が
+       残りうる。そこで一意制約違反を投げると、**本当に落ちた理由
+       （掃除が終わらなかったこと）が、次のテストの別の失敗に化ける**。
+       残った行の中身は退避した値そのものなので、飛ばして構わない。
+  */
   await prisma.settlementSettings.createMany({
     data: rows.map((row) => ({
       environment: row.environment,
@@ -130,6 +136,7 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
       minimumPayoutAmount: row.minimumPayoutAmount,
       transferFeeBearer: row.transferFeeBearer,
     })),
+    skipDuplicates: true,
   });
 }
 

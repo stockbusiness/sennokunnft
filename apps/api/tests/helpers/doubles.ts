@@ -1679,6 +1679,13 @@ export class InMemoryRefunds implements RefundRepository {
   private readonly rows: RefundRecordView[] = [];
   /** 決済ごとの返金累計。⚠️ 事業者と同じく累計で持つ。 */
   private readonly refundedByOrder = new Map<string, number>();
+  /**
+   * 代理店へ積んだ「返金された」（注文ID → イベントID）。
+   *
+   * ⚠️ **試験から覗ける公開にしてある。** 「積んだ」「積んでいない」を
+   * 確かめる試験が要る——積まれないことが穴なので。
+   */
+  readonly agencyRefundEvents = new Map<string, string>();
 
   constructor(
     private readonly orders: InMemoryOrderRepository,
@@ -1814,6 +1821,7 @@ export class InMemoryRefunds implements RefundRepository {
         supersededGrantedEvents: 0,
         revocationsNeedingReview: [],
         revocationPayloadConflicts: [],
+        agencyRefundEventCreated: false,
       };
     }
 
@@ -1920,6 +1928,23 @@ export class InMemoryRefunds implements RefundRepository {
     */
     const annotatedMintJobs = command.mintNote !== null && this.mintStatus === 'processing' ? 1 : 0;
 
+    /*
+      代理店へ渡す「返金された」（`UD-1003` の手前）。
+
+      ⚠️ **本物と同じ 2 つの条件で決める。** 全額返ったときだけ、注文
+         ごとに 1 件。素通しにすると、一部返金で積む穴も、同じ注文で
+         2 件積む穴も、試験から消える。
+    */
+    let agencyRefundEventCreated = false;
+    if (
+      command.outboxEventId !== null &&
+      refundStatus === 'refunded' &&
+      !this.agencyRefundEvents.has(command.orderId)
+    ) {
+      this.agencyRefundEvents.set(command.orderId, command.outboxEventId);
+      agencyRefundEventCreated = true;
+    }
+
     return {
       alreadySettled: false,
       refundStatus,
@@ -1933,6 +1958,7 @@ export class InMemoryRefunds implements RefundRepository {
       supersededGrantedEvents,
       revocationsNeedingReview,
       revocationPayloadConflicts,
+      agencyRefundEventCreated,
     };
   }
 

@@ -280,6 +280,7 @@ async function startAndSettle(
     cancelMintJob: false,
     mintNote: null,
     revokeClaimedEntitlements: options.revokeClaimed ?? true,
+    outboxEventId: randomUUID(),
     planRevocation: (options.generate ?? true) ? planRevocation : null,
     now: SETTLED_AT,
   });
@@ -579,6 +580,7 @@ suite('重複と並行', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: true,
+      outboxEventId: randomUUID(),
       planRevocation,
       now: SETTLED_AT,
     };
@@ -805,6 +807,7 @@ suite('精算への影響（回帰）', () => {
       cancelMintJob: false,
       mintNote: null,
       revokeClaimedEntitlements: true,
+      outboxEventId: randomUUID(),
       planRevocation,
       now: SETTLED_AT,
     };

@@ -496,6 +496,14 @@ export class RefundService {
           : null,
       revokeClaimedEntitlements: this.revokeClaimedEntitlements,
       planRevocation: this.planRevocation,
+      /*
+        代理店へ渡す「返金された」（`UD-1003` の手前）。
+
+        ⚠️ **全額かどうかはリポジトリが決める。** ここで判定して渡すと、
+           返金の累計と注文額を 2 か所で突き合わせることになる。
+           **同じトランザクションの中で確定した額**で決めさせる。
+      */
+      outboxEventId: this.ids.generate(),
       now: input.now,
     });
   }

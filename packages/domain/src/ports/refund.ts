@@ -134,6 +134,15 @@ export interface SettleRefundCommand {
    * 返金の `settled_at` にそろえるには、その値が確定する場所で作るしかない。
    */
   readonly planRevocation: RevocationPlanner | null;
+  /**
+   * 代理店へ渡す `order.refunded` のID（`UD-1003` の手前）。
+   *
+   * ⚠️ **全額返ったときだけ積む。** 一部返金は「返金された注文」ではない。
+   * 積むと、受け取る側が売上を丸ごと取り消す判断をしうる。
+   *
+   * ⚠️ **`null` なら積まない。** 積まない配備を作れるようにしてある。
+   */
+  readonly outboxEventId: string | null;
   readonly now: Date;
 }
 
@@ -204,6 +213,14 @@ export interface RefundSettlement {
    * ⚠️ **無言で成功にしない。** 呼び出し元が監視へ出す。
    */
   readonly revocationPayloadConflicts: readonly RevocationPayloadConflict[];
+  /**
+   * 代理店向けの `order.refunded` を新しく積んだか。
+   *
+   * ⚠️ **積んだことと、届いたことは別。** いま送る先は無い。行が溜まる
+   * だけである（`UD-1003` が決まるまで）。ここが真でも、相手はまだ
+   * 何も知らない。
+   */
+  readonly agencyRefundEventCreated: boolean;
 }
 
 export interface RevocationReviewItem {
