@@ -46,6 +46,21 @@ export interface OperationsCounts {
   readonly notificationFailedCount: number;
   /** 外部サービスの接続確認の失敗（直近）。 */
   readonly integrationFailureCount: number;
+  /**
+   * 決着していないチャージバック（2026-08-22）。
+   *
+   * ⚠️ **警告（`warning`）は数えない。** カード会社が調べ始めただけで、
+   * 申し立てにならずに消えることもある。
+   */
+  readonly openDisputeCount: number;
+  /**
+   * 証拠の提出期限が近い争いの数。
+   *
+   * ⚠️ **過ぎると自動的に負ける。** こちらの言い分に関わらず、証拠を
+   * 出さなかったという理由で敗訴になる。**「1 件ある」だけでは足りない**
+   * ——急ぐのかどうかが分からない。
+   */
+  readonly disputeDueSoonCount: number;
   /** 決済事業者からの知らせを最後に受け取った時刻。 */
   readonly lastWebhookReceivedAt: Date | null;
 }
@@ -69,6 +84,13 @@ export interface OperationsThresholds {
   readonly jobStaleAfterMinutes: number;
   /** これを超えて決済事業者から音沙汰が無ければ気に留める。 */
   readonly webhookQuietAfterMinutes: number;
+  /**
+   * 証拠の提出期限が「近い」とみなす残り日数（2026-08-22）。
+   *
+   * ⚠️ **短くしない。** 証拠を集めるのに数日かかる。前日に赤くしても、
+   * 気づいたときには間に合わない。
+   */
+  readonly disputeDueSoonDays: number;
 }
 
 export const DEFAULT_OPERATIONS_THRESHOLDS: OperationsThresholds = {
@@ -79,6 +101,11 @@ export const DEFAULT_OPERATIONS_THRESHOLDS: OperationsThresholds = {
   */
   jobStaleAfterMinutes: 150,
   webhookQuietAfterMinutes: 24 * 60,
+  /*
+    ⚠️ **3 日。** Stripe の申し立ての期限は 7〜21 日ほど。証拠を集めて
+       出すのに数日かかるので、前日に赤くしても間に合わない。
+  */
+  disputeDueSoonDays: 3,
 };
 
 /** 画面に出す 1 項目。 */
@@ -204,6 +231,34 @@ export function buildIndicators(input: {
         counts.operationsReviewOpenCount > 0
           ? '確認事項の一覧を開き、対応のうえ印を付けてください。'
           : null,
+    },
+    {
+      key: 'dispute_open',
+      label: 'カード会社との争い',
+      count: counts.openDisputeCount,
+      /*
+        ⚠️ **期限が近ければ赤、そうでなければ黄。**
+
+        ⚠️ **過ぎると自動的に負ける。** こちらの言い分に関わらず、証拠を
+           出さなかったという理由で敗訴になる。そのうえ返金は運営が被る
+           ——**気づかないことが、そのまま損になる**。
+
+        ⚠️ **「1 件ある」だけでは足りない。** 急ぐのかどうかが分からないと、
+           運営は結局 Stripe の画面を見に行くことになり、気づく仕組みを
+           作った意味が半分になる。
+      */
+      severity:
+        counts.disputeDueSoonCount > 0
+          ? 'critical'
+          : counts.openDisputeCount > 0
+            ? 'warning'
+            : 'normal',
+      action:
+        counts.disputeDueSoonCount > 0
+          ? `提出期限が迫っているものが ${String(counts.disputeDueSoonCount)} 件あります。決済事業者の画面で証拠を出してください。期限を過ぎると自動的に負けます。`
+          : counts.openDisputeCount > 0
+            ? '決済事業者の画面で内容を確かめ、証拠を出す準備をしてください。'
+            : null,
     },
     {
       key: 'notification_pending',

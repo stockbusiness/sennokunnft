@@ -3980,6 +3980,8 @@ export class InMemoryOperations implements OperationsMetricsPort {
     notificationPendingCount: 0,
     notificationFailedCount: 0,
     integrationFailureCount: 0,
+    openDisputeCount: 0,
+    disputeDueSoonCount: 0,
     lastWebhookReceivedAt: TEST_NOW,
   };
 
@@ -5025,6 +5027,7 @@ export class InMemoryDisputes implements DisputePort {
     readonly reason: DisputeReason;
     readonly amount: number;
     readonly currency: string;
+    readonly evidenceDueAt: Date | null;
     readonly occurredAt: Date;
     readonly now: Date;
   }): Promise<{ readonly record: DisputeRecord; readonly advanced: boolean }> {
@@ -5044,6 +5047,7 @@ export class InMemoryDisputes implements DisputePort {
         amount: input.amount,
         currency: input.currency,
         openedAt: input.occurredAt,
+        evidenceDueAt: input.evidenceDueAt,
         closedAt,
         refundId: null,
       };
@@ -5065,6 +5069,8 @@ export class InMemoryDisputes implements DisputePort {
       status: input.status,
       reason: input.reason,
       amount: input.amount,
+      // ⚠️ 期限は届いた値で上書きする。ただし消さない（本物と同じ判断）。
+      evidenceDueAt: input.evidenceDueAt ?? existing.evidenceDueAt,
       closedAt,
     };
     this.rows.set(key, updated);

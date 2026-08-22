@@ -213,6 +213,7 @@ describe('決済事業者の知らせと注文の突き合わせ', () => {
       disputeStatus: null,
       disputeAmount: null,
       disputeReason: null,
+      disputeEvidenceDueAt: null,
       occurredAt: NOW,
       credentialId: 'cred-1',
       ...overrides,
@@ -300,6 +301,7 @@ describe('本番と試験の取り違え', () => {
       disputeStatus: null,
       disputeAmount: null,
       disputeReason: null,
+      disputeEvidenceDueAt: null,
       occurredAt: NOW,
       credentialId: null,
     };

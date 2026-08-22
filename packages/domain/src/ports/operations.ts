@@ -9,7 +9,14 @@ import type { ConsistencyCounts } from '../operations/consistency';
  * SQL を触ることになる。
  */
 export interface OperationsMetricsPort {
-  counts(now: Date): Promise<OperationsCounts>;
+  /**
+   * いまの数。
+   *
+   * ⚠️ **`disputeDueSoonBefore` を呼び出し側から渡す。** 「期限が近い」の
+   * しきい値は設定であって、リポジトリが決めることではない。ここで
+   * 定数にすると、変えるたびにデプロイが要る。
+   */
+  counts(now: Date, disputeDueSoonBefore: Date): Promise<OperationsCounts>;
   /**
    * 時計仕掛けの生死。
    *

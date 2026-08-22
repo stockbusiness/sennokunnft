@@ -21,7 +21,7 @@ export class PrismaOperationsRepository {
    * ⚠️ **「本日」は JST の 1 日。** 保存は UTC なので、境界をここで作る。
    * UTC の 0 時で切ると、日本の朝 9 時前の注文が前日に混ざる。
    */
-  async counts(now: Date): Promise<OperationsCounts> {
+  async counts(now: Date, disputeDueSoonBefore: Date): Promise<OperationsCounts> {
     const { start, end } = jstDayRange(now);
 
     const [
@@ -36,6 +36,8 @@ export class PrismaOperationsRepository {
       notificationPendingCount,
       notificationFailedCount,
       integrationFailureCount,
+      openDisputeCount,
+      disputeDueSoonCount,
       lastWebhook,
     ] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: start, lt: end } } }),
@@ -86,6 +88,25 @@ export class PrismaOperationsRepository {
       this.prisma.integrationConnectionCheck.count({
         where: { succeeded: false, executedAt: { gte: new Date(now.getTime() - 86_400_000) } },
       }),
+      /*
+        決着していないチャージバック（2026-08-22）。
+        ⚠️ **警告（`warning`）は数えない。** カード会社が調べ始めただけで、
+           申し立てにならずに消えることもある。
+      */
+      this.prisma.paymentDispute.count({
+        where: { status: { in: ['needs_response', 'under_review'] } },
+      }),
+      /*
+        証拠の提出期限が近いもの。
+        ⚠️ **期限を持たない行は数えない。** 分からないものを「急ぎ」に
+           しない——毎日赤いままになり、本当に急ぐものが埋もれる。
+      */
+      this.prisma.paymentDispute.count({
+        where: {
+          status: { in: ['needs_response', 'under_review'] },
+          evidenceDueAt: { not: null, lt: disputeDueSoonBefore },
+        },
+      }),
       this.prisma.webhookEvent.findFirst({
         orderBy: [{ receivedAt: 'desc' }],
         select: { receivedAt: true },
@@ -105,6 +126,8 @@ export class PrismaOperationsRepository {
       notificationPendingCount,
       notificationFailedCount,
       integrationFailureCount,
+      openDisputeCount,
+      disputeDueSoonCount,
       lastWebhookReceivedAt: lastWebhook?.receivedAt ?? null,
     };
   }

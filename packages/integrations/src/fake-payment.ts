@@ -159,6 +159,7 @@ interface FakeEnvelope {
     readonly dispute_status?: unknown;
     readonly dispute_amount?: unknown;
     readonly dispute_reason?: unknown;
+    readonly dispute_evidence_due_at?: unknown;
   };
 }
 
@@ -190,6 +191,10 @@ function toFact(payload: unknown, timestampSec: number): ProviderPaymentFact | n
     disputeAmount: typeof data.dispute_amount === 'number' ? data.dispute_amount : null,
     disputeReason:
       typeof data.dispute_reason === 'string' ? toSafeDisputeReason(data.dispute_reason) : null,
+    disputeEvidenceDueAt:
+      typeof data.dispute_evidence_due_at === 'string'
+        ? new Date(data.dispute_evidence_due_at)
+        : null,
     occurredAt: new Date(timestampSec * 1000),
     // ⚠️ 世代はアダプタが知らない。包む側（`ResolvingPaymentGateway`）が押す。
     credentialId: null,

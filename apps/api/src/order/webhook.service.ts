@@ -292,6 +292,8 @@ export class PaymentWebhookService {
         reason: fact.disputeReason ?? 'unknown',
         amount: fact.disputeAmount,
         currency: fact.currency ?? order.currency,
+        // ⚠️ **過ぎると自動的に負ける。** 運営が急ぐかどうかを決める材料。
+        evidenceDueAt: fact.disputeEvidenceDueAt,
         occurredAt: fact.occurredAt,
         now,
       });
