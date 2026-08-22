@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DISPUTE_REASONS, DISPUTE_STATUSES, DISPUTE_URGENCIES } from '@sengoku/contracts';
 import {
   formatJst,
   indicatorValue,
@@ -10,6 +11,10 @@ import {
   severityTone,
   entitlementStatusLabel,
   walletDeliveryLabel,
+  disputeReasonLabel,
+  disputeStatusLabel,
+  disputeUrgencyLabel,
+  disputeUrgencyTone,
 } from './operations-copy';
 
 /** 運営画面の言葉（実運営 指示書 P0-6）。 */
@@ -100,5 +105,67 @@ describe('日時', () => {
   it('無いもの・読めないものは「—」（1970年と表示しない）', () => {
     expect(formatJst(null)).toBe('—');
     expect(formatJst('これは日時ではない')).toBe('—');
+  });
+});
+
+/**
+ * 争いの見出しが全件そろっているか（2026-08-22）。
+ *
+ * ⚠️ **一度やっている。** 時計仕掛けの見出し（`JOB_LABELS`）で 2 件だけ
+ * 抜けていて、管理画面に英語の符号がそのまま出た。契約の語彙を回して
+ * 確かめれば、語彙が増えたときにここで落ちる。
+ */
+const HAS_JAPANESE = /[ぁ-んァ-ヶ一-龠]/u;
+
+describe('争いの見出し', () => {
+  it('すべての状態に日本語の見出しがある', () => {
+    for (const status of DISPUTE_STATUSES) {
+      const label = disputeStatusLabel(status);
+      expect(label, status).toMatch(HAS_JAPANESE);
+      /*
+        ⚠️ **「不明」で埋まっていないことも見る。** 既定へ落ちているだけの
+           ものを「見出しがある」と数えると、この試験は何も守らない。
+           （状態には `unknown` が無いので、全件で見てよい。）
+      */
+      expect(label, status).not.toBe('不明');
+    }
+  });
+
+  it('すべての事由に日本語の見出しがある', () => {
+    for (const reason of DISPUTE_REASONS) {
+      const label = disputeReasonLabel(reason);
+      expect(label, reason).toMatch(HAS_JAPANESE);
+      if (reason !== 'unknown') {
+        expect(label, reason).not.toBe('不明');
+      }
+    }
+  });
+
+  it('すべての急ぎ具合に日本語の見出しと色がある', () => {
+    for (const urgency of DISPUTE_URGENCIES) {
+      expect(disputeUrgencyLabel(urgency), urgency).toMatch(HAS_JAPANESE);
+      expect(disputeUrgencyLabel(urgency), urgency).not.toBe('不明');
+      expect(disputeUrgencyTone(urgency), urgency).not.toBe('');
+    }
+  });
+
+  it('知らない値は英語のまま出さない', () => {
+    /*
+      ⚠️ **事業者が語彙を増やすことがある。** そのまま出すと、管理画面に
+         英語の符号が並ぶ。既定へ倒して「不明」と書く。
+    */
+    expect(disputeStatusLabel('brand_new_status_from_provider')).toBe('不明');
+    expect(disputeReasonLabel('brand_new_reason_from_provider')).toBe('不明');
+  });
+
+  it('期限が近いものと過ぎたものだけを赤にする', () => {
+    /*
+      ⚠️ **すべてを赤にすると、急ぐべきものが埋もれる。** 対応中は黄、
+         決着したものは色を付けない。
+    */
+    expect(disputeUrgencyTone('overdue')).toBe('danger');
+    expect(disputeUrgencyTone('due_soon')).toBe('danger');
+    expect(disputeUrgencyTone('open')).toBe('warning');
+    expect(disputeUrgencyTone('closed')).toBe('neutral');
   });
 });

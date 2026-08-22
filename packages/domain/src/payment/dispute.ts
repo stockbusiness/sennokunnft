@@ -134,3 +134,46 @@ export function toSafeDisputeReason(raw: string | null | undefined): DisputeReas
   }
   return (DISPUTE_REASONS as readonly string[]).includes(raw) ? (raw as DisputeReason) : 'unknown';
 }
+
+/**
+ * 一覧で見たときの急ぎ具合（2026-08-22）。
+ *
+ * ⚠️ **色を決めるためだけの区分である。** 業務の状態（`DisputeStatus`）と
+ * 混ぜない。混ぜると、色を変えたいだけのときに状態遷移の規則を触ることになる。
+ */
+export const DISPUTE_URGENCIES = ['overdue', 'due_soon', 'open', 'closed'] as const;
+export type DisputeUrgency = (typeof DISPUTE_URGENCIES)[number];
+
+/**
+ * その争いが、いまどれだけ急ぐか。
+ *
+ * ⚠️ **期限を過ぎたものを「決着」に混ぜない。** 過ぎると自動的に負けるが、
+ * 事業者からの知らせが届くまで状態は `needs_response` のままである。
+ * 「もう手遅れかもしれない」ことは、決着とは別に見えている必要がある。
+ *
+ * ⚠️ **期限を持たない争いは「急ぎ」に数えない。** 決着した争いや警告には
+ * 期限が無いことがある。分からないものを急ぎにすると**毎日赤いままになり**、
+ * 本当に急ぐものが埋もれる。
+ *
+ * ⚠️ **警告は `closed` へ寄せない。** まだ何も決まっていない。ただし
+ * 急ぎでもない——`open` に置き、色を付けない側で扱う。
+ */
+export function disputeUrgency(
+  input: {
+    readonly status: DisputeStatus;
+    readonly evidenceDueAt: Date | null;
+  },
+  now: Date,
+  dueSoonBefore: Date,
+): DisputeUrgency {
+  if (isDisputeClosed(input.status)) {
+    return 'closed';
+  }
+  if (input.evidenceDueAt === null) {
+    return 'open';
+  }
+  if (input.evidenceDueAt.getTime() <= now.getTime()) {
+    return 'overdue';
+  }
+  return input.evidenceDueAt.getTime() <= dueSoonBefore.getTime() ? 'due_soon' : 'open';
+}

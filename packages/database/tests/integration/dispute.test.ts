@@ -446,3 +446,102 @@ suite('返金との紐づけ', () => {
     );
   });
 });
+
+/*
+  運営が見る一覧（2026-08-22）。
+
+  ⚠️ **並びがこの一覧の値そのものである。** 起きた順に出すと、期限が
+     明日のものが下へ沈み、「気づける」ようにした意味が消える。
+*/
+suite('争いの一覧', () => {
+  it('期限の早い順に出る', async () => {
+    const seeded = await seedPaidOrder();
+    await repo.record(
+      command(seeded, {
+        disputeRef: 'dp_late',
+        evidenceDueAt: new Date('2026-09-30T00:00:00.000Z'),
+      }),
+    );
+    await repo.record(
+      command(seeded, {
+        disputeRef: 'dp_soon',
+        evidenceDueAt: new Date('2026-08-24T00:00:00.000Z'),
+      }),
+    );
+
+    const page = await repo.list({ state: 'open', limit: 10 });
+    expect(page.items.map((row) => row.disputeRef)).toEqual(['dp_soon', 'dp_late']);
+  });
+
+  it('期限を持たないものは後ろへ回る', async () => {
+    /*
+      ⚠️ **NULL を先に置く実装もある。** 明示していないと、期限の分かって
+         いるものが期限不明のものに埋もれる。
+    */
+    const seeded = await seedPaidOrder();
+    await repo.record(command(seeded, { disputeRef: 'dp_none', evidenceDueAt: null }));
+    await repo.record(
+      command(seeded, {
+        disputeRef: 'dp_dated',
+        evidenceDueAt: new Date('2026-09-30T00:00:00.000Z'),
+      }),
+    );
+
+    const page = await repo.list({ state: 'open', limit: 10 });
+    expect(page.items.map((row) => row.disputeRef)).toEqual(['dp_dated', 'dp_none']);
+  });
+
+  it('決着したものは open に出ない', async () => {
+    const seeded = await seedPaidOrder();
+    await repo.record(command(seeded, { disputeRef: 'dp_open' }));
+    await repo.record(command(seeded, { disputeRef: 'dp_won', status: 'won', occurredAt: LATER }));
+
+    const open = await repo.list({ state: 'open', limit: 10 });
+    expect(open.items.map((row) => row.disputeRef)).toEqual(['dp_open']);
+
+    const closed = await repo.list({ state: 'closed', limit: 10 });
+    expect(closed.items.map((row) => row.disputeRef)).toEqual(['dp_won']);
+
+    const all = await repo.list({ state: 'all', limit: 10 });
+    expect(all.items).toHaveLength(2);
+  });
+
+  it('警告は open に含める', async () => {
+    /*
+      ⚠️ **精算を止める条件とはわざと違う。** あちらは警告を数えない
+         （消える警告のぶんまでお支払いを遅らせないため）。こちらは人が
+         見る一覧で、**警告こそ早めに知りたい**。
+    */
+    const seeded = await seedPaidOrder();
+    await repo.record(command(seeded, { disputeRef: 'dp_warn', status: 'warning' }));
+
+    const page = await repo.list({ state: 'open', limit: 10 });
+    expect(page.items.map((row) => row.disputeRef)).toEqual(['dp_warn']);
+  });
+
+  it('注文の番号と作品名が付いて返る', async () => {
+    const seeded = await seedPaidOrder();
+    await repo.record(command(seeded));
+
+    const page = await repo.list({ state: 'open', limit: 10 });
+    expect(page.items[0]?.artworkTitleSnapshot).toBe('争いの試験の作品');
+    expect(page.items[0]?.orderNumber).not.toBe('');
+    expect(page.items[0]?.orderTotalAmount).toBe(3000);
+  });
+
+  it('上限で切ったことを隠さない', async () => {
+    /*
+      ⚠️ **黙って切ると、全部見えていると読まれる。** 対応漏れが残る。
+    */
+    const seeded = await seedPaidOrder();
+    await repo.record(command(seeded, { disputeRef: 'dp_1' }));
+    await repo.record(command(seeded, { disputeRef: 'dp_2' }));
+
+    const page = await repo.list({ state: 'open', limit: 1 });
+    expect(page.items).toHaveLength(1);
+    expect(page.hasMore).toBe(true);
+
+    const full = await repo.list({ state: 'open', limit: 2 });
+    expect(full.hasMore).toBe(false);
+  });
+});

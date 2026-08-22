@@ -1,4 +1,10 @@
-import { CONSISTENCY_CHECK_KEYS, OPERATIONS_SEVERITIES } from '@sengoku/domain';
+import {
+  CONSISTENCY_CHECK_KEYS,
+  DISPUTE_REASONS,
+  DISPUTE_STATUSES,
+  DISPUTE_URGENCIES,
+  OPERATIONS_SEVERITIES,
+} from '@sengoku/domain';
 import type { OperationsSeverity } from '@sengoku/domain';
 import { z } from 'zod';
 
@@ -92,6 +98,53 @@ export const entitlementAdminDetailSchema = entitlementAdminSchema.extend({
 });
 export type EntitlementAdminDetailView = z.infer<typeof entitlementAdminDetailSchema>;
 
+/**
+ * カード会社との争い 1 件（2026-08-22）。
+ *
+ * ⚠️ **買った方を特定できる項目を置かない**（`UD-503`）。氏名・メール・
+ * 住所は、この契約に**項目そのものが無い**。無ければ載せようがない。
+ */
+export const disputeAdminSchema = z.object({
+  id: z.string(),
+  orderId: z.string(),
+  orderNumber: z.string(),
+  artworkTitleSnapshot: z.string(),
+  provider: z.string(),
+  /** 事業者が採番した識別子。⚠️ これで事業者の画面を引く。 */
+  disputeRef: z.string(),
+  status: z.enum(DISPUTE_STATUSES),
+  reason: z.enum(DISPUTE_REASONS),
+  /** 色を決めるための区分。⚠️ 状態とは別に持つ。 */
+  urgency: z.enum(DISPUTE_URGENCIES),
+  /** ⚠️ 争われている額。注文の総額と一致するとは限らない。 */
+  amount: z.number().int(),
+  orderTotalAmount: z.number().int(),
+  currency: z.string(),
+  openedAt: z.string(),
+  /** 証拠の提出期限。⚠️ 過ぎると自動的に負ける。無いこともある。 */
+  evidenceDueAt: z.string().nullable(),
+  closedAt: z.string().nullable(),
+  /** 敗訴で作った返金があるか。⚠️ 返金そのものは注文の画面で見る。 */
+  hasRefund: z.boolean(),
+});
+export type DisputeAdminView = z.infer<typeof disputeAdminSchema>;
+
+export const disputeAdminListResponseSchema = z.object({
+  items: z.array(disputeAdminSchema),
+  /** ⚠️ **上限で切ったことを隠さない。** 全部見えていると読ませない。 */
+  hasMore: z.boolean(),
+  /** 「期限が近い」の境目（日）。⚠️ 画面が文言に使う。定数にしない。 */
+  dueSoonDays: z.number().int().positive(),
+});
+export type DisputeAdminListResponse = z.infer<typeof disputeAdminListResponseSchema>;
+
+export const disputeAdminQuerySchema = z.object({
+  /** ⚠️ 既定は「決着していないもの」。決着した争いは探しに行くもの。 */
+  state: z.enum(['open', 'closed', 'all']).default('open'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type DisputeAdminQuery = z.infer<typeof disputeAdminQuerySchema>;
+
 export const entitlementAdminQuerySchema = z.object({
   status: z.string().optional(),
   walletDeliveryStatus: z.string().optional(),
@@ -127,4 +180,13 @@ export type RedeliverResponse = z.infer<typeof redeliverResponseSchema>;
  * 段の数がずれたときに画面だけ古いままになる。
  */
 export { OPERATIONS_SEVERITIES };
+/**
+ * 争いの語彙も素通しする（2026-08-22）。
+ *
+ * ⚠️ **画面がここから読むためにある。** 画面は `@sengoku/domain` へ依存
+ * できない（依存検査で止まる）。ここを通さずに画面側で並べ直すと、語彙が
+ * 増えたときに**画面だけ古いまま**になり、知らない値が英語のまま表に出る。
+ * 見出しが全件そろっているかは画面側の試験で確かめている。
+ */
+export { DISPUTE_STATUSES, DISPUTE_REASONS, DISPUTE_URGENCIES };
 export type { OperationsSeverity };

@@ -3,6 +3,7 @@ import {
   DISPUTE_STATUSES,
   canAdvanceDispute,
   disputeOutcome,
+  disputeUrgency,
   isDisputeClosed,
   isDisputeOpen,
   shouldRecordRefund,
@@ -122,5 +123,70 @@ describe('すべての状態に決着の判定がある', () => {
       const outcome = disputeOutcome(status);
       expect(['warning', 'open', 'won', 'lost']).toContain(outcome);
     }
+  });
+});
+
+/*
+  一覧で見たときの急ぎ具合（2026-08-22）。
+
+  ⚠️ ここで守りたいのは 3 つ。
+    1. **期限を過ぎたものを「決着」に混ぜないこと。** 過ぎると自動的に
+       負けるが、事業者の知らせが届くまで状態は変わらない。「もう手遅れ
+       かもしれない」は、決着とは別に見えている必要がある。
+    2. **期限を持たないものを急ぎに数えないこと。** 毎日赤いままになり、
+       本当に急ぐものが埋もれる。
+    3. **警告を決着に寄せないこと。** まだ何も決まっていない。
+*/
+describe('急ぎ具合', () => {
+  const NOW = new Date('2026-08-22T00:00:00.000Z');
+  /** 3 日後。⚠️ しきい値は呼び出し側が決める。 */
+  const DUE_SOON_BEFORE = new Date('2026-08-25T00:00:00.000Z');
+
+  function urgency(status: DisputeStatus, evidenceDueAt: Date | null): string {
+    return disputeUrgency({ status, evidenceDueAt }, NOW, DUE_SOON_BEFORE);
+  }
+
+  it('期限を過ぎていれば overdue', () => {
+    expect(urgency('needs_response', new Date('2026-08-21T23:59:59.000Z'))).toBe('overdue');
+  });
+
+  it('期限ちょうども overdue', () => {
+    // ⚠️ 「まだ間に合う」側へ倒さない。過ぎたものを見落とすより安全。
+    expect(urgency('needs_response', NOW)).toBe('overdue');
+  });
+
+  it('期限が近ければ due_soon', () => {
+    expect(urgency('needs_response', new Date('2026-08-24T00:00:00.000Z'))).toBe('due_soon');
+  });
+
+  it('期限まで日があれば open のまま', () => {
+    /*
+      ⚠️ **期限が迫ったものと同じ色にしない。** 同じにすると、急ぐべきものが
+         埋もれる。
+    */
+    expect(urgency('needs_response', new Date('2026-09-30T00:00:00.000Z'))).toBe('open');
+  });
+
+  it('期限を持たない争いは急ぎに数えない', () => {
+    expect(urgency('needs_response', null)).toBe('open');
+    expect(urgency('under_review', null)).toBe('open');
+  });
+
+  it('警告は決着に寄せない', () => {
+    // ⚠️ まだ何も決まっていない。ただし急ぎでもない。
+    expect(urgency('warning', null)).toBe('open');
+  });
+
+  it('決着したものは closed', () => {
+    expect(urgency('won', null)).toBe('closed');
+    expect(urgency('lost', null)).toBe('closed');
+  });
+
+  it('決着していれば、期限を過ぎていても closed', () => {
+    /*
+      ⚠️ **決着が先。** 負けたあとに「期限を過ぎています」と出しても、
+         できることは何も無い。運営を焦らせるだけになる。
+    */
+    expect(urgency('lost', new Date('2026-08-01T00:00:00.000Z'))).toBe('closed');
   });
 });

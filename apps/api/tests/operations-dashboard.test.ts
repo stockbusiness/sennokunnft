@@ -494,3 +494,146 @@ describe('時計仕掛けの記録', () => {
     expect(harness.operationsMetrics.jobRuns.get('issue-entitlements')).toBeUndefined();
   });
 });
+
+/*
+  カード会社との争いの一覧（2026-08-22）。
+
+  ⚠️ ここで守りたいのは 3 つ。
+    1. **買った方を特定できる値を返さないこと**（`UD-503`）。一覧は広く
+       開く画面で、返したものはそのまま目に触れる。
+    2. **期限の早い順に出ること。** 起きた順だと、期限が明日のものが沈む。
+    3. **状態を変える口が無いこと。** 正は決済事業者の記録である。
+*/
+describe('争いの一覧', () => {
+  /** ⚠️ 試験の時計は `TEST_NOW`（2026-06-01）。日付はそこを基準に置く。 */
+  const OPENED = new Date('2026-05-20T00:00:00.000Z');
+
+  async function seedDispute(
+    disputeRef: string,
+    evidenceDueAt: Date | null,
+    status: 'needs_response' | 'won' = 'needs_response',
+  ): Promise<void> {
+    const orderId = `order-${disputeRef}`;
+    harness.disputes.orderFacts.set(orderId, {
+      orderNumber: `SNK-${disputeRef}`,
+      artworkTitleSnapshot: '争いの試験の作品',
+      total: 3000,
+    });
+    await harness.disputes.record({
+      id: `dispute-${disputeRef}`,
+      orderId,
+      paymentId: null,
+      provider: 'fake',
+      disputeRef,
+      status,
+      reason: 'fraudulent',
+      amount: 3000,
+      currency: 'JPY',
+      evidenceDueAt,
+      occurredAt: OPENED,
+      now: OPENED,
+    });
+  }
+
+  it('閲覧者にも開く', async () => {
+    /*
+      ⚠️ **額を動かす操作は無い。** 対応漏れが残っていないかは監査の対象
+         そのものなので、閲覧者にも見えている必要がある。
+    */
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('auditor')))
+      .expect(200);
+  });
+
+  it('買った方には見せない', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('buyer')))
+      .expect(403);
+  });
+
+  it('期限の早い順に出る', async () => {
+    await seedDispute('late', new Date('2026-09-30T00:00:00.000Z'));
+    await seedDispute('soon', new Date('2026-06-02T00:00:00.000Z'));
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    expect(response.body.items.map((row: { disputeRef: string }) => row.disputeRef)).toEqual([
+      'soon',
+      'late',
+    ]);
+  });
+
+  it('買った方を特定できる値を返さない', async () => {
+    /*
+      ⚠️ **本文まるごとを見る。** 項目名を 1 つずつ確かめる形にすると、
+         あとから足された項目を見落とす。
+    */
+    await seedDispute('privacy', new Date('2026-06-02T00:00:00.000Z'));
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    const body = JSON.stringify(response.body);
+    for (const forbidden of ['email', 'Email', 'buyerName', 'phone', 'address', 'accountId']) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('決着したものは既定で出ない', async () => {
+    await seedDispute('open-one', null);
+    await seedDispute('won-one', null, 'won');
+
+    const open = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(open.body.items.map((row: { disputeRef: string }) => row.disputeRef)).toEqual([
+      'open-one',
+    ]);
+
+    const closed = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes?state=closed')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+    expect(closed.body.items.map((row: { disputeRef: string }) => row.disputeRef)).toEqual([
+      'won-one',
+    ]);
+  });
+
+  it('急ぎ具合と、期限が近いの境目を返す', async () => {
+    /*
+      ⚠️ **境目を画面へ渡す。** 画面に定数で持たせると、しきい値を変える
+         たびにデプロイが要る。
+    */
+    // ⚠️ 時計より前＝すでに過ぎている。
+    await seedDispute('urgent', new Date('2026-05-25T00:00:00.000Z'));
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/disputes')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    expect(response.body.dueSoonDays).toBeGreaterThan(0);
+    // ⚠️ すでに過ぎている。決着と混ぜない。
+    expect(response.body.items[0].urgency).toBe('overdue');
+  });
+
+  it('状態を変える口は無い', async () => {
+    /*
+      ⚠️ **正は決済事業者の記録。** こちらに口を作ると、あちらとこちらで
+         食い違う。作っていないことを試験で押さえておく。
+    */
+    await seedDispute('readonly', null);
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/operations/disputes/dispute-readonly/close')
+      .set(auth(actorToken('operator')))
+      .expect(404);
+  });
+});
