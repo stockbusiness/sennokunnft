@@ -463,3 +463,15 @@ export {
   type SalesReportResponse,
   type SalesReportRowDto,
 } from './reporting';
+
+export {
+  ALERT_MIN_SEVERITY_VALUES,
+  operationsAlertSettingsSchema,
+  operationsAlertSettingsResponseSchema,
+  saveOperationsAlertSettingsRequestSchema,
+  notifyOperationsAlertsResponseSchema,
+  type OperationsAlertSettingsResponse,
+  type OperationsAlertSettingsView,
+  type NotifyOperationsAlertsResponse,
+  type SaveOperationsAlertSettingsRequest,
+} from './operations-alert';

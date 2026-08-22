@@ -1662,3 +1662,38 @@ model CreatorPayoutAccount {
 
   @@map("creator_payout_accounts")
 }
+
+/// 運営への知らせの設定（`UD-1102` の一部・2026-08-22）。
+///
+/// ⚠️ **環境ごとに 1 件。** staging と production で宛先が違う。1 件に
+/// まとめると、試したつもりの知らせが本番の担当者へ飛ぶ。
+///
+/// ⚠️ **外部の受け口の URL は包んで持つ。** URL 自体が合言葉である
+/// （Slack の受け口などがそう）。**平文の列は無い。**
+///
+/// ⚠️ CHECK 制約（環境・色・間隔の範囲・包みの揃い・宛先の数）は
+/// 手書きのマイグレーション `20260822000000_operations_alerts` にある。
+model OperationsAlertSettings {
+  environment        String    @id
+  enabled            Boolean   @default(false)
+  /// warning / checking ではなく warning / critical。⚠️ CHECK で縛る。
+  minSeverity        String    @default("critical") @map("min_severity")
+  /// 同じ状態が続くときの間隔（分）。⚠️ 15〜1440 を CHECK で縛る。
+  repeatAfterMinutes Int       @default(240) @map("repeat_after_minutes")
+  /// 運営の業務用アドレス。⚠️ **お客さまのアドレスを入れる場所ではない。**
+  emailRecipients    String[]  @default([]) @map("email_recipients")
+  webhookCiphertext  String?   @map("webhook_ciphertext")
+  webhookNonce       String?   @map("webhook_nonce")
+  webhookAuthTag     String?   @map("webhook_auth_tag")
+  webhookKeyVersion  String?   @map("webhook_key_version")
+  /// 画面用。⚠️ ホスト名まで（経路は合言葉なので出さない）。
+  webhookHost        String?   @map("webhook_host")
+  /// 抑制の判断材料。⚠️ 設定の保存では触らない。
+  lastNotifiedAt     DateTime? @map("last_notified_at") @db.Timestamptz(6)
+  lastSeverity       String?   @map("last_severity")
+  lastFingerprint    String?   @map("last_fingerprint")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("operations_alert_settings")
+}

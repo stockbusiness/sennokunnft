@@ -92,7 +92,13 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
       -- ⚠️ TRUNCATE は行トリガーを撃たない。証跡は追記のみで DELETE は
       --    トリガーが拒むが、TRUNCATE は素通りする。試験を片づけられるのは
       --    そのおかげ。**本番でこれを実行しない。**
-      production_attestations
+      production_attestations,
+      /*
+        ⚠️ **知らせの設定も消す。** 残すと、次の試験が「まだ設定して
+           いない」を作れなくなる——**宛先が無いのに鳴らないこと**を
+           確かめる試験が、そこで空振りする。
+      */
+      operations_alert_settings
     RESTART IDENTITY CASCADE
   `);
 

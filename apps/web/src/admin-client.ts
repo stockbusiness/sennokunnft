@@ -42,12 +42,15 @@ import {
   payoutListResponseSchema,
   payoutDetailResponseSchema,
   adminPayoutAccountResponseSchema,
+  operationsAlertSettingsResponseSchema,
   salesReportResponseSchema,
   creatorDirectoryResponseSchema,
   creatorDirectoryDetailResponseSchema,
   payoutSchema,
   closePayoutPeriodResponseSchema,
   type AdminPayoutAccountResponse,
+  type OperationsAlertSettingsResponse,
+  type SaveOperationsAlertSettingsRequest,
   type CreatorDirectoryDetailResponse,
   type CreatorDirectoryResponse,
   type SalesReportResponse,
@@ -1212,4 +1215,27 @@ export async function fetchSalesReportCsv(
   }
 
   return { ok: false, reason: lastReason };
+}
+
+/** 運営への知らせの設定（`UD-1102` の一部）。⚠️ 受け口の URL は返らない。 */
+export function fetchOperationsAlertSettings(): Promise<
+  AdminResult<OperationsAlertSettingsResponse>
+> {
+  return callAdmin('/api/v1/admin/operations-alerts', operationsAlertSettingsResponseSchema);
+}
+
+/**
+ * 宛先と条件を保存する。
+ *
+ * ⚠️ **`webhookUrl` を省略すると「変えない」。** 空文字を渡すと「外す」。
+ * 分けずに扱うと、宛先だけを直したつもりが受け口ごと消える。
+ */
+export function saveOperationsAlertSettings(
+  body: SaveOperationsAlertSettingsRequest,
+): Promise<AdminResult<OperationsAlertSettingsResponse>> {
+  return callAdmin(
+    '/api/v1/admin/operations-alerts',
+    operationsAlertSettingsResponseSchema,
+    json(body, 'PUT'),
+  );
 }

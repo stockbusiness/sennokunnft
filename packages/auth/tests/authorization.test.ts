@@ -163,6 +163,11 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
   // ⚠️ 監査役も「いま何が滞っているか」を見られる。動かすことはできない。
   'operations.view': { anonymous: false, buyer: false, operator: true, auditor: true },
   'operations.retry': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
+    ⚠️ **オーナーの印が要る。** 宛先を差し替えられるということは、異常に
+       気づく相手を選べるということ。印を持たない actor の表では false。
+  */
+  'operations.alert_manage': { anonymous: false, buyer: false, operator: false, auditor: false },
   // --- 本番販売ガード（P0-7）---
   // ⚠️ 監査役も「本番販売を始めてよい状態か」を見られる。承認はできない。
   'production.view': { anonymous: false, buyer: false, operator: true, auditor: true },
@@ -371,6 +376,8 @@ describe('オーナーの印', () => {
     'notification.publish',
     'payout.mark_paid',
     'payment_credential.manage',
+    // ⚠️ 異常に気づく相手を選べる操作（`UD-1102`）。
+    'operations.alert_manage',
     // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
     'settlement.manage',
     // ⚠️ 本番販売を始めてよいと署名する（P0-7）。

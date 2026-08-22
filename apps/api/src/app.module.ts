@@ -55,6 +55,8 @@ import type {
   NotificationTemplateRepository,
   RecipientResolverPort,
   OperationsThresholds,
+  OperationsAlertSettingsPort,
+  AlertWebhookPort,
   OperationsMetricsPort,
   EntitlementAdminPort,
   // 顧客サポート（P1-1）。
@@ -159,6 +161,13 @@ import { CreatorOperationsController } from './catalog/creator-operations.contro
 import { CreatorOperationsService } from './catalog/creator-operations.service';
 import { CustomerSupportService } from './customer/customer.service';
 import { OperationsDashboardService } from './operations/dashboard.service';
+import { AdminOperationsAlertController } from './operations/alert.controller';
+import {
+  ALERT_CONFIG,
+  OperationsAlertService,
+  type AlertConfig,
+  type AlertWebhookCipher,
+} from './operations/alert.service';
 import { ProductionController } from './production/production.controller';
 import { ProductionReadinessService } from './production/readiness.service';
 import { MailCheckService, type MailTestSender } from './production/mail-check.service';
@@ -507,6 +516,21 @@ export interface AppDependencies {
     readonly thresholds: OperationsThresholds;
     /** 見る対象の時計仕掛け。⚠️ 記録が無くても項目は出す。 */
     readonly jobKeys: readonly string[];
+    /**
+     * 運営への知らせ（`UD-1102` の一部）。
+     *
+     * ⚠️ **省略できる。** 繋いでいない配備がある。必須にすると、そこで
+     * 起動しなくなる。画面は「この配備では知らせを送れません」と断る。
+     */
+    readonly alerts?: {
+      readonly settings: OperationsAlertSettingsPort;
+      /** 状況の画面の URL。⚠️ 知らせに載せる唯一のリンク。 */
+      readonly dashboardUrl: string;
+      /** ⚠️ どちらも `null` になりうる（送る口が無い配備）。 */
+      readonly mailer: MailTestSender | null;
+      readonly webhook: AlertWebhookPort | null;
+      readonly cipher: AlertWebhookCipher | null;
+    };
   };
   /**
    * 本番販売ガード（P0-7）。
@@ -697,6 +721,8 @@ export class AppModule implements NestModule {
         NotificationController,
         // 運営ダッシュボード（P0-6）。⚠️ 見るのと動かすので権限が違う。
         OperationsController,
+        // 運営への知らせ（`UD-1102` の一部）。
+        AdminOperationsAlertController,
         // 本番販売ガード（P0-7）。⚠️ 判定そのものは支払い口を作る側が行う。
         ProductionController,
         CustomerController,
@@ -1015,6 +1041,33 @@ export class AppModule implements NestModule {
               deps.customers.recipients ?? null,
             ),
         },
+        /*
+          運営への知らせ（`UD-1102` の一部）。
+          ⚠️ **繋いでいない配備では provider ごと置かない。** 置くと、
+             設定はできるのに永久に届かない状態を作れてしまう。
+        */
+        ...(deps.operations.alerts === undefined
+          ? []
+          : [
+              {
+                provide: ALERT_CONFIG,
+                useValue: {
+                  settings: deps.operations.alerts.settings,
+                  metrics: deps.operations.repository,
+                  thresholds: deps.operations.thresholds,
+                  jobKeys: deps.operations.jobKeys,
+                  clock: deps.clock,
+                  audit: deps.audit,
+                  // ⚠️ 環境はプロセスに固定する。要求から受け取らない。
+                  appEnvironment: deps.integrations?.appEnvironment ?? 'staging',
+                  dashboardUrl: deps.operations.alerts.dashboardUrl,
+                  mailer: deps.operations.alerts.mailer,
+                  webhook: deps.operations.alerts.webhook,
+                  cipher: deps.operations.alerts.cipher,
+                } satisfies AlertConfig,
+              },
+              OperationsAlertService,
+            ]),
         {
           provide: OperationsDashboardService,
           /*
@@ -1162,12 +1215,14 @@ export class AppModule implements NestModule {
                   { token: RevocationReconcileService, optional: true },
                   { token: NotificationSendService, optional: true },
                   { token: LegalRevisionNoticeService, optional: true },
+                  { token: OperationsAlertService, optional: true },
                 ],
                 useFactory: (
                   autoDelivery: WalletAutoDeliveryService | undefined,
                   revocationReconcile: RevocationReconcileService | undefined,
                   notificationSend: NotificationSendService | undefined,
                   legalRevisionNotices: LegalRevisionNoticeService | null | undefined,
+                  operationsAlerts: OperationsAlertService | undefined,
                 ): InternalJobConfig => ({
                   token: internalJobToken,
                   /*
@@ -1177,6 +1232,7 @@ export class AppModule implements NestModule {
                        無い相手のメソッドを呼んで 500 になる。
                   */
                   autoDelivery: autoDelivery ?? null,
+                  operationsAlerts: operationsAlerts ?? null,
                   revocationReconcile: revocationReconcile ?? null,
                   notificationSend: notificationSend ?? null,
                   // ⚠️ 法務文書を繋いでいない配備では provider ごと無い。

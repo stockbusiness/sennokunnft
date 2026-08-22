@@ -191,6 +191,13 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
        422 にすると、作家さまが入力を直そうとして直らない。
   */
   PAYOUT_ACCOUNT_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  // 運営への知らせ（`UD-1102`）。
+  OPERATIONS_ALERT_SETTINGS_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
+  /*
+    ⚠️ **422 ではなく 503。** 入力が悪いのではなく、**この配備が受け取れない**。
+       422 にすると、運営が入力を直そうとして直らない。
+  */
+  OPERATIONS_ALERT_WEBHOOK_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -400,6 +407,14 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'お振込先を保存できませんでした。口座番号は数字で、口座名義はカタカナ（または英字）でご入力ください。',
   PAYOUT_ACCOUNT_UNAVAILABLE:
     'ただいまお振込先をお預かりできません。お手数ですが、時間をおいてからお試しください。',
+  /*
+    ⚠️ **どの項目が悪いかを返さない。** 画面が入力欄ごとに案内する
+       （そちらのほうが直しやすい）。
+  */
+  OPERATIONS_ALERT_SETTINGS_INVALID:
+    '知らせの設定を保存できませんでした。宛先の形（5 件まで）と、受け口の URL（https）をお確かめください。',
+  OPERATIONS_ALERT_WEBHOOK_UNAVAILABLE:
+    'この配備では、知らせの受け口をお預かりできません。暗号鍵の設定が要る旨を運用担当へお伝えください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

@@ -116,3 +116,6 @@ export {
   PrismaSalesReportRepository,
   PrismaCreatorDirectoryRepository,
 } from './repositories/reporting.repository';
+
+// 運営への知らせ（`UD-1102` の一部）。
+export { PrismaOperationsAlertSettingsRepository } from './repositories/operations-alert.repository';

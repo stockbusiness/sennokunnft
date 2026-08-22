@@ -1047,3 +1047,31 @@ export type {
   CreatorDirectorySummary,
   SalesReportPort,
 } from './ports/reporting';
+
+export {
+  ALERT_MIN_SEVERITIES,
+  DEFAULT_ALERT_REPEAT_AFTER_MINUTES,
+  MIN_ALERT_REPEAT_AFTER_MINUTES,
+  MAX_ALERT_REPEAT_AFTER_MINUTES,
+  MAX_ALERT_EMAIL_RECIPIENTS,
+  alertFingerprint,
+  meetsThreshold,
+  decideAlert,
+  buildAlertMessage,
+  validateAlertRecipients,
+  isValidAlertWebhookUrl,
+} from './operations/alert';
+export type {
+  AlertDecision,
+  AlertMessage,
+  AlertMinSeverity,
+  AlertReason,
+  AlertSettings,
+  AlertSkipReason,
+  AlertState,
+} from './operations/alert';
+export type {
+  AlertWebhookPort,
+  OperationsAlertSettingsPort,
+  OperationsAlertSettingsRecord,
+} from './ports/alert';

@@ -44,6 +44,7 @@ import {
   PrismaRefundRepository,
   PrismaPayoutRepository,
   PrismaSalesReportRepository,
+  PrismaOperationsAlertSettingsRepository,
   PrismaCreatorDirectoryRepository,
   PrismaCreatorProfileRepository,
   PrismaPaymentRepository,
@@ -89,6 +90,8 @@ import {
   generateStorageKey,
   AeadSecretBox,
   PayoutAccountSecretBox,
+  HttpAlertWebhook,
+  AlertWebhookSecretBox,
   parseEncryptionKeys,
   ReachabilityProbe,
   probeStripeAccount,
@@ -739,6 +742,24 @@ async function bootstrap(): Promise<void> {
         entitlements: new PrismaEntitlementAdminRepository(prisma),
         thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
         jobKeys: WATCHED_JOB_KEYS,
+        /*
+          運営への知らせ（`UD-1102` の一部）。
+          ⚠️ **購入者向けの知らせの仕組みへ相乗りしない。** あちらが
+             止まったとき、止まったことを知らせられなくなる。
+          ⚠️ **送る口が無くても配線する。** 画面から宛先を決められる
+             ようにしておき、「送れません」は状態として伝える。
+        */
+        alerts: {
+          settings: new PrismaOperationsAlertSettingsRepository(prisma),
+          dashboardUrl: `${env.NOTIFICATION_SITE_URL.replace(/\/+$/, '')}/admin`,
+          mailer: notificationDelivery?.mailer ?? null,
+          webhook: new HttpAlertWebhook(),
+          /*
+            ⚠️ **暗号鍵が無ければ受け口を預からない。** 平文で置く逃げ道を
+               作れば、鍵の設定を忘れた配備で静かに合言葉が溜まる。
+          */
+          cipher: secretCipher === null ? null : new AlertWebhookSecretBox(secretCipher),
+        },
       },
       /*
         本番販売ガード（P0-7）。
