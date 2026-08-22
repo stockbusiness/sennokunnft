@@ -154,6 +154,8 @@ import {
   refundStatusAfter,
   type DisputePort,
   type DisputeReason,
+  type DisputeListItem,
+  type DisputeListQuery,
   type DisputeRecord,
   type DisputeStatus,
   type MissingRevocation,
@@ -5017,6 +5019,49 @@ export class InMemoryDisputes implements DisputePort {
 
   listByOrder(orderId: string): Promise<readonly DisputeRecord[]> {
     return Promise.resolve([...this.rows.values()].filter((row) => row.orderId === orderId));
+  }
+
+  /**
+   * 一覧の注文まわりの写し。⚠️ 試験から詰める（本物は注文を結合して埋める）。
+   */
+  readonly orderFacts = new Map<
+    string,
+    { readonly orderNumber: string; readonly artworkTitleSnapshot: string; readonly total: number }
+  >();
+
+  list(query: DisputeListQuery): Promise<{
+    readonly items: readonly DisputeListItem[];
+    readonly hasMore: boolean;
+  }> {
+    const closed = (row: DisputeRecord): boolean => row.status === 'won' || row.status === 'lost';
+    const filtered = [...this.rows.values()].filter((row) =>
+      query.state === 'all' ? true : query.state === 'closed' ? closed(row) : !closed(row),
+    );
+    /*
+      ⚠️ **本物と同じ並びにする。** 期限の早い順、期限が無いものは後ろ。
+         代役だけ起きた順にすると、「期限が近いものが上に来る」試験が
+         本物を確かめていないことになる。
+    */
+    filtered.sort((a, b) => {
+      const left = a.evidenceDueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      const right = b.evidenceDueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      if (left !== right) return left - right;
+      const opened = a.openedAt.getTime() - b.openedAt.getTime();
+      return opened !== 0 ? opened : a.id.localeCompare(b.id);
+    });
+    const hasMore = filtered.length > query.limit;
+    return Promise.resolve({
+      items: filtered.slice(0, query.limit).map((row) => {
+        const facts = this.orderFacts.get(row.orderId);
+        return {
+          ...row,
+          orderNumber: facts?.orderNumber ?? 'SNK-0000',
+          artworkTitleSnapshot: facts?.artworkTitleSnapshot ?? '',
+          orderTotalAmount: facts?.total ?? row.amount,
+        };
+      }),
+      hasMore,
+    });
   }
 
   record(input: {

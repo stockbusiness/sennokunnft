@@ -124,6 +124,14 @@ export default async function AdminDashboardPage() {
         <li>
           <a href="/admin/entitlements">受取権の一覧（発行し直す・送り直す）</a>
         </li>
+        {/*
+          ⚠️ **指標から辿れるようにする**（2026-08-22）。件数だけ出して
+             どのご注文か追えないと、結局は決済事業者の画面を見に行くことに
+             なり、気づく仕組みを作った意味が半分になる。
+        */}
+        <li>
+          <a href="/admin/disputes">カード会社との争いの一覧（提出期限を確かめる）</a>
+        </li>
         <li>
           <a href="/admin/notifications">知らせの送信履歴</a>
         </li>

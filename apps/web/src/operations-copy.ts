@@ -15,6 +15,9 @@ export const OPERATIONS_COPY = {
   consistencyDescription:
     '記録どうしのつじつまを確かめます。⚠️ ここでは直しません。見つけたものを一覧でお知らせします。',
   entitlementsTitle: '受取権',
+  disputesTitle: 'カード会社との争い',
+  disputesDescription:
+    'お客さまがカード会社へ申し立てをされたご注文の一覧です。⚠️ 証拠の提出や取り下げは、決済事業者の画面から行います。ここでは状態を変えられません。',
   notificationsTitle: '知らせの送信履歴',
   allClear: '手当てが要ることはありません。',
   noFindings: '食い違いは見つかりませんでした。',
@@ -169,4 +172,90 @@ export function formatJst(value: string | null): string {
   const jst = new Date(date.getTime() + 9 * 60 * 60_000);
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${String(jst.getUTCFullYear())}/${pad(jst.getUTCMonth() + 1)}/${pad(jst.getUTCDate())} ${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
+}
+
+/**
+ * カード会社との争いの見出し（2026-08-22）。
+ *
+ * ⚠️ **買った方を悪く言う言葉を使わない。** 「不正」「詐欺」と書くと、
+ * 実際にはカードを盗まれた被害者であることが多いのに、運営が最初から
+ * 決めつけて対応することになる。事実だけを書く。
+ *
+ * ⚠️ **すべての状態・事由に見出しを用意する。** 抜けると画面に英語が出る
+ * （実際に `JOB_LABELS` で一度やった）。試験で全件そろっているか確かめている。
+ */
+export function disputeStatusLabel(status: string): string {
+  switch (status) {
+    case 'warning':
+      return '事前のお知らせ';
+    case 'needs_response':
+      return '申し立てあり・要対応';
+    case 'under_review':
+      return '審理中';
+    case 'won':
+      return '当方の主張が認められました';
+    case 'lost':
+      return '返金となりました';
+    default:
+      // ⚠️ 知らない値を英語のまま出さない。
+      return '不明';
+  }
+}
+
+export function disputeReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'fraudulent':
+      return '身に覚えがない';
+    case 'product_not_received':
+      return '受け取っていない';
+    case 'product_unacceptable':
+      return '内容が違う';
+    case 'duplicate':
+      return '二重のお支払い';
+    case 'subscription_canceled':
+      return '解約済みのはず';
+    case 'unrecognized':
+      return '明細に覚えがない';
+    case 'credit_not_processed':
+      return '返金がされていない';
+    case 'general':
+      return 'その他';
+    case 'unknown':
+      return '不明';
+    default:
+      return '不明';
+  }
+}
+
+/**
+ * 急ぎ具合の色。
+ *
+ * ⚠️ **期限が近いものだけを赤にする。** すべての争いを赤にすると、
+ * 急ぐべきものが埋もれる。
+ */
+export function disputeUrgencyTone(urgency: string): StatusToneName {
+  switch (urgency) {
+    case 'overdue':
+    case 'due_soon':
+      return 'danger';
+    case 'open':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
+export function disputeUrgencyLabel(urgency: string): string {
+  switch (urgency) {
+    case 'overdue':
+      return '期限を過ぎています';
+    case 'due_soon':
+      return '期限が迫っています';
+    case 'open':
+      return '対応中';
+    case 'closed':
+      return '決着';
+    default:
+      return '不明';
+  }
 }

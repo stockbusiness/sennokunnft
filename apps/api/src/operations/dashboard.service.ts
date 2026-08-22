@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   ConsistencyResponse,
+  DisputeAdminListResponse,
+  DisputeAdminQuery,
+  DisputeAdminView,
   EntitlementAdminDetailView,
   EntitlementAdminListResponse,
   EntitlementAdminQuery,
@@ -11,8 +14,11 @@ import type {
 import {
   buildConsistencyFindings,
   buildIndicators,
+  disputeUrgency,
   overallSeverity,
   type ClockPort,
+  type DisputeListItem,
+  type DisputePort,
   type EntitlementAdminDetailRecord,
   type EntitlementAdminPort,
   type EntitlementAdminRecord,
@@ -53,6 +59,13 @@ export class OperationsDashboardService {
      */
     private readonly issuance: EntitlementIssuanceService | null = null,
     private readonly autoDelivery: WalletAutoDeliveryService | null = null,
+    /**
+     * 争いの一覧（2026-08-22）。
+     *
+     * ⚠️ **`null` は「この配備では争いを受けていない」。** 口は生やし、
+     * 空の一覧を返す。口ごと消すと、画面が配備ごとに変わる。
+     */
+    private readonly disputes: DisputePort | null = null,
   ) {}
 
   async dashboard(): Promise<OperationsDashboardResponse> {
@@ -98,6 +111,29 @@ export class OperationsDashboardService {
         action: row.action,
       })),
       generatedAt: now.toISOString(),
+    };
+  }
+
+  /**
+   * カード会社との争いの一覧（2026-08-22）。
+   *
+   * ⚠️ **読むだけ。** 状態を進める口はここに作らない。証拠の提出も取り下げも
+   * 決済事業者の画面で行う。こちらに口を作ると、**事業者の記録とこちらの
+   * 記録が食い違う**——正はあちらにある。
+   */
+  async listDisputes(query: DisputeAdminQuery): Promise<DisputeAdminListResponse> {
+    const now = this.clock.now();
+    const dueSoonDays = this.thresholds.disputeDueSoonDays;
+    if (this.disputes === null) {
+      // ⚠️ 空で返す。「無い」と「繋いでいない」を画面で区別する必要はない。
+      return { items: [], hasMore: false, dueSoonDays };
+    }
+    const page = await this.disputes.list({ state: query.state, limit: query.limit });
+    const dueSoonBefore = new Date(now.getTime() + dueSoonDays * 24 * 60 * 60 * 1000);
+    return {
+      items: page.items.map((row) => toDisputeView(row, now, dueSoonBefore)),
+      hasMore: page.hasMore,
+      dueSoonDays,
     };
   }
 
@@ -228,4 +264,32 @@ function toDetailView(row: EntitlementAdminDetailRecord): EntitlementAdminDetail
  */
 function disputeDueSoonBefore(now: Date, thresholds: OperationsThresholds): Date {
   return new Date(now.getTime() + thresholds.disputeDueSoonDays * 86_400_000);
+}
+
+/**
+ * 争いを画面の形へ写す。
+ *
+ * ⚠️ **買った方の情報は写さない**（`UD-503`）。写す元にも項目が無い。
+ * ⚠️ **返金は「あるか」だけ。** 中身は注文の画面で見る。ここに額を出すと、
+ * 争われている額・注文の総額・返した額が並び、どれが何か分からなくなる。
+ */
+function toDisputeView(row: DisputeListItem, now: Date, dueSoonBefore: Date): DisputeAdminView {
+  return {
+    id: row.id,
+    orderId: row.orderId,
+    orderNumber: row.orderNumber,
+    artworkTitleSnapshot: row.artworkTitleSnapshot,
+    provider: row.provider,
+    disputeRef: row.disputeRef,
+    status: row.status,
+    reason: row.reason,
+    urgency: disputeUrgency(row, now, dueSoonBefore),
+    amount: row.amount,
+    orderTotalAmount: row.orderTotalAmount,
+    currency: row.currency,
+    openedAt: row.openedAt.toISOString(),
+    evidenceDueAt: row.evidenceDueAt?.toISOString() ?? null,
+    closedAt: row.closedAt?.toISOString() ?? null,
+    hasRefund: row.refundId !== null,
+  };
 }

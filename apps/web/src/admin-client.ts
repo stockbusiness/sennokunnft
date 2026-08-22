@@ -92,6 +92,7 @@ import {
   type AdminOrderDetail,
   consistencyResponseSchema,
   entitlementAdminDetailSchema,
+  disputeAdminListResponseSchema,
   entitlementAdminListResponseSchema,
   notificationHistoryListResponseSchema,
   operationsDashboardResponseSchema,
@@ -108,6 +109,7 @@ import {
   type CustomerEmailResponse,
   type CustomerSearchResponse,
   type EntitlementAdminDetailView,
+  type DisputeAdminListResponse,
   type EntitlementAdminListResponse,
   type NotificationHistoryListResponse,
   type OperationsDashboardResponse,
@@ -939,6 +941,25 @@ export interface EntitlementFilter {
   readonly walletDeliveryStatus?: string;
   readonly orderId?: string;
   readonly cursor?: string;
+}
+
+/**
+ * カード会社との争いの一覧（2026-08-22）。
+ *
+ * ⚠️ **読むだけ。** 状態を変える口は API にも無い。
+ */
+export function fetchDisputes(
+  filter: { readonly state?: string } = {},
+): Promise<AdminResult<DisputeAdminListResponse>> {
+  const params = new URLSearchParams();
+  if (typeof filter.state === 'string' && filter.state !== '') {
+    params.set('state', filter.state);
+  }
+  const query = params.toString();
+  return callAdmin(
+    `/api/v1/admin/operations/disputes${query === '' ? '' : `?${query}`}`,
+    disputeAdminListResponseSchema,
+  );
 }
 
 export function fetchEntitlements(

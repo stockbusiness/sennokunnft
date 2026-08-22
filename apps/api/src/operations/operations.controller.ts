@@ -1,13 +1,14 @@
 import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import type {
   ConsistencyResponse,
+  DisputeAdminListResponse,
   EntitlementAdminDetailView,
   EntitlementAdminListResponse,
   OperationsDashboardResponse,
   RedeliverResponse,
   RetryIssuanceResponse,
 } from '@sengoku/contracts';
-import { entitlementAdminQuerySchema } from '@sengoku/contracts';
+import { disputeAdminQuerySchema, entitlementAdminQuerySchema } from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
 import { CurrentActor, RequireAction } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
@@ -43,6 +44,22 @@ export class OperationsController {
   @RequireAction('operations.view')
   consistency(): Promise<ConsistencyResponse> {
     return this.operations.consistency();
+  }
+
+  /**
+   * カード会社との争いの一覧（2026-08-22）。
+   *
+   * ⚠️ **読むだけの口しか作らない。** 証拠の提出も取り下げも決済事業者の
+   * 画面で行う。こちらに動かす口を作ると、事業者の記録とこちらの記録が
+   * 食い違う——正はあちらにある。
+   *
+   * ⚠️ **閲覧者にも開く。** 額を動かす操作は無く、取り立て漏れや対応漏れが
+   * 残っていないかは監査の対象そのものである。
+   */
+  @Get('disputes')
+  @RequireAction('operations.view')
+  listDisputes(@Query() query: unknown): Promise<DisputeAdminListResponse> {
+    return this.operations.listDisputes(parseOrThrow(disputeAdminQuerySchema, query));
   }
 
   @Get('entitlements')

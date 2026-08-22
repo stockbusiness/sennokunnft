@@ -1,6 +1,8 @@
 import type { PrismaClient } from '../../generated/client';
 import {
   canAdvanceDispute,
+  type DisputeListItem,
+  type DisputeListQuery,
   type DisputePort,
   type DisputeReason,
   type DisputeRecord,
@@ -62,6 +64,87 @@ export class PrismaDisputeRepository implements DisputePort {
       orderBy: { openedAt: 'desc' },
     });
     return rows.map(toRecord);
+  }
+
+  async list(query: DisputeListQuery): Promise<{
+    readonly items: readonly DisputeListItem[];
+    readonly hasMore: boolean;
+  }> {
+    /*
+      ⚠️ **`closed_at` ではなく状態で分ける。** 「決着したか」の正は状態で、
+         `closed_at` はその写しである（DB の CHECK が両者を縛っている）。
+         時刻で分けると、片方だけ入った行の扱いが二通りになる。
+      ⚠️ **`open` に警告を含める。** 精算を止める条件（`countOpenDisputes`）
+         とはわざと違う。あちらは「お支払いを遅らせてよいか」の判断で、
+         こちらは「人が見ておくべきか」の一覧である。警告こそ早めに知りたい。
+    */
+    const CLOSED: readonly DisputeStatus[] = ['won', 'lost'];
+    const where =
+      query.state === 'all'
+        ? {}
+        : query.state === 'closed'
+          ? { status: { in: [...CLOSED] } }
+          : { status: { notIn: [...CLOSED] } };
+
+    /*
+      ⚠️ **1 件多く取って、切ったかどうかを見る。** 別に件数を数えると、
+         数えた時点と取った時点のあいだに増えて食い違う。
+    */
+    const rows = await this.prisma.paymentDispute.findMany({
+      where,
+      orderBy: [
+        /*
+          ⚠️ **期限の早い順。起きた順にしない。** 起きた順だと、期限が
+             明日のものが二枚目に沈む。
+          ⚠️ **期限を持たないものは後ろへ。** 既定では NULL が先に来る
+             実装もあるため、明示する。
+        */
+        { evidenceDueAt: { sort: 'asc', nulls: 'last' } },
+        { openedAt: 'asc' },
+        // ⚠️ 同じ時刻で並びが揺れないように、最後に一意な列を置く。
+        { id: 'asc' },
+      ],
+      take: query.limit + 1,
+      select: {
+        id: true,
+        orderId: true,
+        paymentId: true,
+        provider: true,
+        disputeRef: true,
+        status: true,
+        reason: true,
+        amount: true,
+        currency: true,
+        openedAt: true,
+        evidenceDueAt: true,
+        closedAt: true,
+        refundId: true,
+        /*
+          ⚠️ **買った方の情報は引かない。** 注文から取るのは番号と総額まで
+             （`UD-503`）。氏名やご連絡先は、注文の画面が本人確認を経て見せる。
+        */
+        order: {
+          select: {
+            orderNumber: true,
+            totalAmount: true,
+            lines: { select: { artworkTitleSnapshot: true }, take: 1 },
+          },
+        },
+      },
+    });
+
+    const hasMore = rows.length > query.limit;
+    const page = hasMore ? rows.slice(0, query.limit) : rows;
+    return {
+      items: page.map((row) => ({
+        ...toRecord(row),
+        orderNumber: row.order.orderNumber,
+        // ⚠️ 明細が無い注文は作れない設計だが、来たら空にする（推測で埋めない）。
+        artworkTitleSnapshot: row.order.lines[0]?.artworkTitleSnapshot ?? '',
+        orderTotalAmount: row.order.totalAmount,
+      })),
+      hasMore,
+    };
   }
 
   async record(input: {

@@ -1175,6 +1175,8 @@ export class AppModule implements NestModule {
               issuance,
               // ⚠️ `undefined` を `null` へ寄せる（P0-2 で同型の不具合を出した）。
               autoDelivery ?? null,
+              // ⚠️ 争いを受けていない配備では `null`。空の一覧を返す。
+              deps.disputes ?? null,
             ),
         },
         {
