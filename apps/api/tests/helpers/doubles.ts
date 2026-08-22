@@ -193,6 +193,7 @@ import type {
   PayoutCandidate,
   PayoutClawback,
   PayoutLineView,
+  NegativeCarryView,
   PayoutRepository,
   PayoutStatus,
   PayoutView,
@@ -2161,6 +2162,39 @@ export class InMemoryPayouts implements PayoutRepository {
       return until === null || until.getTime() > now.getTime();
     });
     return Promise.resolve(open.length);
+  }
+
+  /**
+   * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+   *
+   * ⚠️ **その作家さまのいちばん新しい確定済みの精算だけを見る。** 途中の
+   * 月がマイナスでも、あとで売れて解消していれば残っていない。
+   */
+  listNegativeCarries(limit: number): Promise<readonly NegativeCarryView[]> {
+    const latest = new Map<string, PayoutView>();
+    for (const row of this.payouts.values()) {
+      if (row.status === 'draft') {
+        continue;
+      }
+      const seen = latest.get(row.creatorAccountId);
+      if (seen === undefined || row.periodKey > seen.periodKey) {
+        latest.set(row.creatorAccountId, row);
+      }
+    }
+    return Promise.resolve(
+      [...latest.values()]
+        .filter((row) => row.carriedOutAmount < 0)
+        // ⚠️ 大きいものから。放置してよい額かを、まず額で判断する。
+        .sort((left, right) => left.carriedOutAmount - right.carriedOutAmount)
+        .slice(0, limit)
+        .map((row) => ({
+          creatorAccountId: row.creatorAccountId,
+          periodKey: row.periodKey,
+          // ⚠️ 正の数で返す。符号は画面が付ける。
+          outstandingAmount: Math.abs(row.carriedOutAmount),
+          since: row.confirmedAt ?? row.createdAt,
+        })),
+    );
   }
 
   carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number> {

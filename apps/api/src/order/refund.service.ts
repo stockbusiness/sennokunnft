@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  clawbackBearerForRefundReason,
   decideRefund,
+  type ClawbackBearer,
   type AuditLogPort,
   type ClockPort,
   type IdGeneratorPort,
@@ -69,6 +71,13 @@ export interface RefundRequest {
    * 返金の中身によって変わる。承認のときに運営が指定する。
    */
   readonly entitlementDisposition?: 'revoke' | 'keep' | undefined;
+  /**
+   * この返金を誰が被るか（決定 2026-08-22）。
+   *
+   * ⚠️ **省略なら 3 値の事由から決める。** 運営が注文の画面から直接返した
+   * 返金には 15 事由が無い。`our_fault` と `provider_initiated` は運営が被る。
+   */
+  readonly clawbackBearer?: ClawbackBearer | undefined;
 }
 
 @Injectable()
@@ -163,6 +172,13 @@ export class RefundService {
       // まだ投げていない。⚠️ 事業者の識別子はここでは分からない。
       providerRefundRef: null,
       note: request.note,
+      /*
+        誰が被るか（決定 2026-08-22）。
+        ⚠️ **申請から来たなら、承認で決めた値をそのまま使う。** 事由から
+           引き直すと、運営が例外として通した判断がここで消える。
+        ⚠️ **直接返金なら 3 値から決める。** 15 事由が残っていない。
+      */
+      clawbackBearer: request.clawbackBearer ?? clawbackBearerForRefundReason(request.reason),
       now,
     });
 

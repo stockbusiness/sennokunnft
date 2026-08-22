@@ -761,3 +761,87 @@ describe('契約とドメインの並び', () => {
     expect([...BUYER_REFUND_REASON_VALUES]).toEqual([...BUYER_SELECTABLE_REFUND_REASONS]);
   });
 });
+
+/**
+ * 誰がこの返金を被るか（決定 2026-08-22）。
+ *
+ * ⚠️ **これまで、事由を見ずに全部作家さまから差し引いていた。** 精算の
+ * 差し戻しに事由の条件が無く、**こちらの不具合で返金した分まで作家さまの
+ * 次回の売上から引いていた**。
+ *
+ * ⚠️ **画面で選ばせない。** 選べるようにすると、一度の操作で作家さまへ
+ * 費用を寄せられてしまう——この決定が止めたかったのは、まさにそれである。
+ */
+describe('返金の負担者', () => {
+  it('こちらの落ち度は運営が被ると、詳細に出る', async () => {
+    const { requestId } = await submitted('system_failure');
+    const detail = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-1')))
+      .expect(200);
+    expect(detail.body.clawbackBearer).toBe('platform');
+  });
+
+  it('作家さま起因は作家さまが負うと、詳細に出る', async () => {
+    const { requestId } = await submitted('not_as_described');
+    const detail = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-2')))
+      .expect(200);
+    expect(detail.body.clawbackBearer).toBe('creator');
+  });
+
+  it('例外として通すと、運営が被る側へ変わる', async () => {
+    /*
+      ⚠️ **運営の親切の代金を、作家さまに払わせない。** 規約では原則
+         お受けしない事由を、運営の判断でお返しした——作家さまは何も
+         間違えていない。
+    */
+    const { requestId } = await reviewed('buyer_change_of_mind');
+    const before = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-3')))
+      .expect(200);
+    expect(before.body.clawbackBearer).toBe('creator');
+
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({
+        amount: ORDER_TOTAL,
+        entitlementDisposition: 'revoke',
+        approveAsException: true,
+      })
+      .expect(201);
+
+    const after = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-4')))
+      .expect(200);
+    expect(after.body.clawbackBearer).toBe('platform');
+  });
+
+  it('負担者を要求本文から指定できない', async () => {
+    /*
+      ⚠️ **口が無い、という状態を保つ。** 送っても無視される（契約に無い）。
+         受け取る欄を作った瞬間、事由の判断を迂回できる道ができる。
+    */
+    const { requestId } = await reviewed('not_as_described');
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({
+        amount: ORDER_TOTAL,
+        entitlementDisposition: 'revoke',
+        clawbackBearer: 'platform',
+      })
+      .expect(201);
+
+    const detail = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-5')))
+      .expect(200);
+    // ⚠️ 送った値は効かない。事由から決まったまま。
+    expect(detail.body.clawbackBearer).toBe('creator');
+  });
+});

@@ -3,6 +3,8 @@ import {
   addBusinessDays,
   BUYER_SELECTABLE_REFUND_REASONS,
   canApprove,
+  clawbackBearerFor,
+  clawbackBearerForRefundReason,
   categoryOf,
   checkRefundAmount,
   creatorInquiryExpired,
@@ -277,5 +279,84 @@ describe('購入者が選べる事由', () => {
   it('原則対象外も選べる（受け付けないと記録に残らない）', () => {
     expect(isExcludedByDefault('buyer_change_of_mind')).toBe(true);
     expect(isBuyerSelectableReason('buyer_change_of_mind')).toBe(true);
+  });
+});
+
+/**
+ * 誰が返金を被るか（決定 2026-08-22）。
+ *
+ * ⚠️ **これまで、事由を見ずに全部作家さまから差し引いていた。** 精算の
+ * 差し戻しに事由の条件が無く、**こちらの不具合で返金した分まで作家さまの
+ * 次回の売上から引いていた**。ここはその手当てである。
+ */
+describe('返金の負担者', () => {
+  it('こちらの落ち度は運営が被る', () => {
+    /*
+      ⚠️ **作家さまはお渡ししている。** こちらの不具合の代金を作家さまへ
+         回すのは筋が通らない。
+    */
+    for (const reason of [
+      'duplicate_payment',
+      'wrong_amount',
+      'system_failure',
+      'issuance_failed',
+      'wrong_grant',
+    ] as const) {
+      expect(clawbackBearerFor({ reason, approvedAsException: false })).toBe('platform');
+    }
+  });
+
+  it('チャージバックと不正利用も運営が被る', () => {
+    // ⚠️ 場を開いている側が備えるもの。手数料が引き受けている。
+    expect(clawbackBearerFor({ reason: 'chargeback', approvedAsException: false })).toBe(
+      'platform',
+    );
+    expect(clawbackBearerFor({ reason: 'fraudulent_use', approvedAsException: false })).toBe(
+      'platform',
+    );
+  });
+
+  it('作家さま起因は作家さまが負う', () => {
+    for (const reason of [
+      'not_as_described',
+      'creator_cannot_deliver',
+      'rights_infringement',
+      'quality_issue',
+    ] as const) {
+      expect(clawbackBearerFor({ reason, approvedAsException: false })).toBe('creator');
+    }
+  });
+
+  it('例外として通したなら運営が被る', () => {
+    /*
+      ⚠️ **運営の親切の代金を、作家さまに払わせない。** 規約では原則
+         お受けしない事由を、運営の判断でお返しした——作家さまは何も
+         間違えていない。
+    */
+    expect(clawbackBearerFor({ reason: 'buyer_change_of_mind', approvedAsException: true })).toBe(
+      'platform',
+    );
+    // ⚠️ 例外にしなければ、購入者都合は作家さまが負う。
+    expect(clawbackBearerFor({ reason: 'buyer_change_of_mind', approvedAsException: false })).toBe(
+      'creator',
+    );
+  });
+
+  it('例外の印は、作家さま起因の事由も運営負担へ倒す', () => {
+    /*
+      ⚠️ **印のほうを強くしてある。** 例外として通したという判断は、
+         事由よりあとに置かれた運営の意思である。
+    */
+    expect(clawbackBearerFor({ reason: 'quality_issue', approvedAsException: true })).toBe(
+      'platform',
+    );
+  });
+
+  it('3 値の事由からも決められる（申請を通らない返金のため）', () => {
+    // ⚠️ 運営が注文の画面から直接返した返金には 15 事由が無い。
+    expect(clawbackBearerForRefundReason('our_fault')).toBe('platform');
+    // ⚠️ 事業者の画面からの返金＝チャージバックがここに来る。
+    expect(clawbackBearerForRefundReason('provider_initiated')).toBe('platform');
+    expect(clawbackBearerForRefundReason('buyer_request')).toBe('creator');
   });
 });

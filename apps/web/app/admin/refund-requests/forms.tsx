@@ -3,7 +3,11 @@
 import { useActionState } from 'react';
 import { Notice } from '@sengoku/ui';
 import { BUYER_REFUND_REASON_VALUES } from '@sengoku/contracts';
-import { REFUND_REQUEST_COPY as COPY, refundReasonLabel } from '../../../src/refund-request-copy';
+import {
+  clawbackBearerLabel,
+  REFUND_REQUEST_COPY as COPY,
+  refundReasonLabel,
+} from '../../../src/refund-request-copy';
 import {
   approveAction,
   askCreatorAction,
@@ -163,10 +167,13 @@ export function ApproveForm({
   requestId,
   remainingAmount,
   isExcluded,
+  bearer,
 }: {
   readonly requestId: string;
   readonly remainingAmount: number;
   readonly isExcluded: boolean;
+  /** ⚠️ 事由から決まる値。画面では読むだけ。 */
+  readonly bearer: 'platform' | 'creator';
 }) {
   const [state, action, pending] = useActionState(approveAction, INITIAL);
 
@@ -179,6 +186,17 @@ export function ApproveForm({
       <p>
         {COPY.fieldRemaining}: <strong>{remainingAmount.toLocaleString('ja-JP')} 円</strong>
       </p>
+
+      {/*
+        ⚠️ **押す前に、誰が被るかを見せる。** 見えないまま押すと、作家さまの
+           売上から引かれることに気づかないまま承認できてしまう。
+        ⚠️ **選ばせない。** 事由から決まる。選べるようにすると、一度の操作で
+           作家さまへ費用を寄せられる。
+      */}
+      <p>
+        {COPY.bearerLabel}: <strong>{clawbackBearerLabel(bearer)}</strong>
+      </p>
+      <p className="sengoku-form__hint">{COPY.bearerHint}</p>
 
       <div className="sengoku-form__field">
         <label className="sengoku-form__label" htmlFor="refund-approve-amount">
