@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBusinessDays,
+  BUYER_SELECTABLE_REFUND_REASONS,
   canApprove,
   categoryOf,
   checkRefundAmount,
   creatorInquiryExpired,
+  isBuyerSelectableReason,
   isExcludedByDefault,
   needsCreatorConfirmation,
   REFUND_REQUEST_REASONS,
@@ -245,5 +247,35 @@ describe('金額', () => {
       ok: true,
       isFullRefund: false,
     });
+  });
+});
+
+/**
+ * 購入者が選べる事由。
+ *
+ * ⚠️ **区分では絞れない。** 「運営だけで判断する」区分にも、購入者が
+ * 気づいて言えること（二重に引き落とされた、金額が違う）が入っている。
+ */
+describe('購入者が選べる事由', () => {
+  it('購入者には分からない 3 つだけを外す', () => {
+    expect(isBuyerSelectableReason('chargeback')).toBe(false);
+    expect(isBuyerSelectableReason('wrong_grant')).toBe(false);
+    expect(isBuyerSelectableReason('fraudulent_use')).toBe(false);
+    expect(BUYER_SELECTABLE_REFUND_REASONS).toHaveLength(REFUND_REQUEST_REASONS.length - 3);
+  });
+
+  it('購入者が気づける「運営だけで判断する」事由は選べる', () => {
+    /*
+      ⚠️ **区分で絞っていない証拠。** 二重の引き落としも金額違いも
+         `operator_only` だが、いちばん先に気づくのは購入者である。
+    */
+    expect(categoryOf('duplicate_payment')).toBe('operator_only');
+    expect(isBuyerSelectableReason('duplicate_payment')).toBe(true);
+    expect(isBuyerSelectableReason('wrong_amount')).toBe(true);
+  });
+
+  it('原則対象外も選べる（受け付けないと記録に残らない）', () => {
+    expect(isExcludedByDefault('buyer_change_of_mind')).toBe(true);
+    expect(isBuyerSelectableReason('buyer_change_of_mind')).toBe(true);
   });
 });

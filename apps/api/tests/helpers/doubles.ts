@@ -2812,6 +2812,17 @@ export interface TestHarness extends AppDependencies {
   readonly legalRepository: InMemoryLegalDocuments;
   readonly legalConsents: InMemoryLegalConsents;
   readonly paymentCredentialRepository: InMemoryPaymentCredentials;
+  /*
+    返金の申請と審査（方針整理 2026-08-22）。
+    ⚠️ **実体の型で持つ。** 積んだ証跡を覗き（`events`）、審査の設定を
+       差し替える（`set()` / `clear()`）ために要る。
+  */
+  readonly refundRequests: {
+    readonly requests: InMemoryRefundRequests;
+    readonly inquiries: InMemoryCreatorInquiries;
+    readonly receivables: InMemoryCreatorReceivables;
+    readonly policy: InMemoryRefundPolicy;
+  };
   /** ⚠️ 未設定の配備を作るために、実体の型で持つ（`clear()`）。 */
   readonly settlement: InMemorySettlementSettings;
   /** ⚠️ 受取権・発行ジョブの姿を差し替えるため、実体の型で持つ。 */

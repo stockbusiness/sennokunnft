@@ -6,6 +6,7 @@ import {
   PrismaCreatorReceivableRepository,
   PrismaRefundRequestRepository,
 } from '../../src/repositories/refund-request.repository';
+import { PrismaRefundPolicyRepository } from '../../src/repositories/settlement.repository';
 import {
   createTestClient,
   integrationTestsAvailable,
@@ -34,6 +35,7 @@ let prisma: PrismaClient;
 let requests: PrismaRefundRequestRepository;
 let inquiries: PrismaCreatorInquiryRepository;
 let receivables: PrismaCreatorReceivableRepository;
+let policy: PrismaRefundPolicyRepository;
 
 let buyerId: string;
 let creatorId: string;
@@ -45,6 +47,7 @@ beforeAll(() => {
   requests = new PrismaRefundRequestRepository(prisma);
   inquiries = new PrismaCreatorInquiryRepository(prisma);
   receivables = new PrismaCreatorReceivableRepository(prisma);
+  policy = new PrismaRefundPolicyRepository(prisma);
 });
 
 afterAll(async () => {
@@ -441,6 +444,97 @@ suite('回収待ち', () => {
       }),
     ).rejects.toSatisfy((error: unknown) =>
       violatesConstraint(error, 'creator_receivables_amount_positive'),
+    );
+  });
+});
+
+suite('起きたことを読む', () => {
+  it('古い順に返し、限りを守る', async () => {
+    const created = await requests.create(newRequest());
+    for (const [index, action] of ['opened', 'reviewed', 'approved'].entries()) {
+      await requests.appendEvent({
+        id: randomUUID(),
+        requestId: created.id,
+        action: `refund_request.${action}`,
+        actorAccountId: buyerId,
+        summary: { step: index },
+        // ⚠️ 時刻をずらす。同じ時刻だと並びが決まらない。
+        now: new Date(NOW.getTime() + index * 1000),
+      });
+    }
+
+    const all = await requests.listEvents(created.id, 10);
+    expect(all.map((event) => event.action)).toEqual([
+      'refund_request.opened',
+      'refund_request.reviewed',
+      'refund_request.approved',
+    ]);
+    // ⚠️ 何度もやり直した申請では行が伸びる。限りが効くこと。
+    expect(await requests.listEvents(created.id, 2)).toHaveLength(2);
+  });
+
+  it('別の申請の証跡は混ざらない', async () => {
+    const created = await requests.create(newRequest());
+    await requests.appendEvent({
+      id: randomUUID(),
+      requestId: created.id,
+      action: 'refund_request.opened',
+      actorAccountId: null,
+      summary: {},
+      now: NOW,
+    });
+    expect(await requests.listEvents(randomUUID(), 10)).toEqual([]);
+  });
+});
+
+/**
+ * 返金の審査にかかる設定。
+ *
+ * ⚠️ **行が無ければ `null`。既定値を作らない。** ここで 3 営業日や
+ * しきい値なしを返すと、決めていないまま審査が回る。
+ */
+suite('審査の設定', () => {
+  /**
+   * ⚠️ **行は `resetDatabase` が戻している。** 取り決めの表が空のまま
+   * 残ると、以降の試験がすべて「未設定の配備」を相手に緑になるため。
+   * だからここでは作らずに**書き換える**。
+   */
+  function setSettings(data: {
+    creatorInquiryBusinessDays?: number;
+    dualApprovalThresholdAmount?: number | null;
+  }): Promise<unknown> {
+    return prisma.settlementSettings.update({ where: { environment: 'staging' }, data });
+  }
+
+  it('設定した値をそのまま返す', async () => {
+    await setSettings({ creatorInquiryBusinessDays: 5, dualApprovalThresholdAmount: 50_000 });
+    expect(await policy.find('staging')).toEqual({
+      creatorInquiryBusinessDays: 5,
+      dualApprovalThresholdAmount: 50_000,
+    });
+  });
+
+  it('しきい値は空にできる（二重承認を使わない、の意味）', async () => {
+    await setSettings({ dualApprovalThresholdAmount: null });
+    const found = await policy.find('staging');
+    // ⚠️ **0 をその意味に使わない。** 消し忘れか全件かが読めなくなる。
+    expect(found?.dualApprovalThresholdAmount).toBeNull();
+  });
+
+  it('行が無ければ null（既定値で埋めない）', async () => {
+    await prisma.settlementSettings.deleteMany({ where: { environment: 'staging' } });
+    expect(await policy.find('staging')).toBeNull();
+  });
+
+  it('0 円のしきい値を拒む', async () => {
+    await expect(setSettings({ dualApprovalThresholdAmount: 0 })).rejects.toSatisfy(
+      (error: unknown) => violatesConstraint(error, 'settlement_settings_dual_threshold_positive'),
+    );
+  });
+
+  it('回答期限の営業日数は 1〜20 の外を拒む', async () => {
+    await expect(setSettings({ creatorInquiryBusinessDays: 21 })).rejects.toSatisfy(
+      (error: unknown) => violatesConstraint(error, 'settlement_settings_inquiry_days_range'),
     );
   });
 });

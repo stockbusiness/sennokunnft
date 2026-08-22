@@ -107,7 +107,16 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
     ⚠️ **変更者（`updated_by_account_id`）は復元しない。** アカウントごと
        消えているので、参照が宙に浮く。取り決めの中身だけを戻す。
   */
-  const rows = settlement.length > 0 ? settlement : SEEDED_SETTLEMENT_SETTINGS;
+  /*
+    ⚠️ **環境ごとに補う。** 「表が空のときだけ戻す」にすると、片方の環境
+       だけを消した試験のあと、その環境が**戻らないまま次の試験へ渡る**
+       ——そして以降はすべて「未設定の配備」を相手に緑になる。空かどうか
+       ではなく、**足りない環境があるか**で見る。
+  */
+  const byEnvironment = new Map(settlement.map((row) => [row.environment, row]));
+  const rows = SEEDED_SETTLEMENT_SETTINGS.map(
+    (seeded) => byEnvironment.get(seeded.environment) ?? seeded,
+  );
   await prisma.settlementSettings.createMany({
     data: rows.map((row) => ({
       environment: row.environment,
