@@ -232,6 +232,7 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
     disputeStatus: null,
     disputeAmount: null,
     disputeReason: null,
+    disputeEvidenceDueAt: null,
   };
 
   switch (event.type) {
@@ -364,6 +365,8 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
         // ⚠️ **争われている額。** 注文の総額と一致するとは限らない。
         disputeAmount: dispute.amount,
         disputeReason: toSafeDisputeReason(dispute.reason),
+        // ⚠️ **過ぎると自動的に負ける。** 運営が急ぐかどうかを決める材料。
+        disputeEvidenceDueAt: toDueAt(dispute.evidence_details?.due_by ?? null),
       };
     }
 
@@ -483,4 +486,9 @@ function toDisputeStatus(raw: string): DisputeStatus | null {
     default:
       return null;
   }
+}
+
+/** 秒の刻みを日時へ。⚠️ 無ければ `null`（推測で埋めない）。 */
+function toDueAt(dueBy: number | null): Date | null {
+  return typeof dueBy === 'number' ? new Date(dueBy * 1000) : null;
 }

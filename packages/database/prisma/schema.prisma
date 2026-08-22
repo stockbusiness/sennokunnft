@@ -899,26 +899,29 @@ model Refund {
 /// ⚠️ 部分索引 `payment_disputes_open_idx`（決着していない争いを引く）は
 /// Prisma で書けないため、**マイグレーションにだけ存在する**。
 model PaymentDispute {
-  id         String    @id @default(uuid()) @db.Uuid
-  orderId    String    @map("order_id") @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
+  orderId       String    @map("order_id") @db.Uuid
   /// ⚠️ 決済行を特定できないこともある。争いの記録そのものは残す。
-  paymentId  String?   @map("payment_id") @db.Uuid
-  provider   String
+  paymentId     String?   @map("payment_id") @db.Uuid
+  provider      String
   /// 事業者が採番した争いの識別子。⚠️ 同じ争いを 1 行に束ねる鍵。
-  disputeRef String    @map("dispute_ref")
+  disputeRef    String    @map("dispute_ref")
   /// `warning` / `needs_response` / `under_review` / `won` / `lost`。
-  status     String
+  status        String
   /// 事業者が言う理由。⚠️ 許可リストを通した符号のみ。
-  reason     String    @default("unknown")
+  reason        String    @default("unknown")
   /// ⚠️ **争われている額。** 注文の総額と一致するとは限らない。
-  amount     Int
-  currency   String    @db.Char(3)
-  openedAt   DateTime  @map("opened_at") @db.Timestamptz(6)
-  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+  amount        Int
+  currency      String    @db.Char(3)
+  openedAt      DateTime  @map("opened_at") @db.Timestamptz(6)
+  /// 証拠の提出期限。⚠️ **過ぎると自動的に負ける。**
+  /// ⚠️ 決着した争いや警告には無いことがある。推測で埋めない。
+  evidenceDueAt DateTime? @map("evidence_due_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
   /// 敗訴で作った返金。⚠️ 負けるまで NULL。
-  refundId   String?   @map("refund_id") @db.Uuid
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refundId      String?   @map("refund_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
   payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)

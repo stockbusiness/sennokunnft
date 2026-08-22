@@ -126,6 +126,7 @@ function command(seeded: Seeded, overrides: Record<string, unknown> = {}) {
     reason: 'fraudulent' as const,
     amount: 3000,
     currency: 'JPY',
+    evidenceDueAt: null,
     occurredAt: NOW,
     now: NOW,
     ...overrides,

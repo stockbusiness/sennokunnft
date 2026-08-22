@@ -13,6 +13,8 @@ export interface DisputeRecord {
   readonly amount: number;
   readonly currency: string;
   readonly openedAt: Date;
+  /** 証拠の提出期限。⚠️ 過ぎると自動的に負ける。 */
+  readonly evidenceDueAt: Date | null;
   readonly closedAt: Date | null;
   /** 敗訴で作った返金。⚠️ 負けるまで `null`。 */
   readonly refundId: string | null;
@@ -50,6 +52,7 @@ export interface DisputePort {
     readonly reason: DisputeReason;
     readonly amount: number;
     readonly currency: string;
+    readonly evidenceDueAt: Date | null;
     readonly occurredAt: Date;
     readonly now: Date;
   }): Promise<{ readonly record: DisputeRecord; readonly advanced: boolean }>;

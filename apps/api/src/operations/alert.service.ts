@@ -190,7 +190,7 @@ export class OperationsAlertService {
     }
 
     const [counts, jobs] = await Promise.all([
-      this.config.metrics.counts(now),
+      this.config.metrics.counts(now, disputeDueSoonBefore(now, this.config.thresholds)),
       this.config.metrics.heartbeats(this.config.jobKeys),
     ]);
     const indicators = buildIndicators({
@@ -297,4 +297,13 @@ export class OperationsAlertService {
     });
     return { decision, emailSent, emailFailed, webhookSent };
   }
+}
+
+/**
+ * 「期限が近い」の境目。
+ *
+ * ⚠️ **設定から引く。** 定数にすると、変えるたびにデプロイが要る。
+ */
+function disputeDueSoonBefore(now: Date, thresholds: OperationsThresholds): Date {
+  return new Date(now.getTime() + thresholds.disputeDueSoonDays * 86_400_000);
 }
