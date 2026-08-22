@@ -722,12 +722,165 @@ button {
  * ⚠️ 業務ロジックは変えない。上のトークンに追従して見た目だけ揃う。
  */
 
+/*
+  管理画面の枠（2026-08-22 に横並びから side へ変更）。
+
+  ⚠️ **以前は 24 件を横並びで折り返していた。** 画面の上 3 行が全部リンクに
+     なり、**探す場所が無い**ので目的の項目を見つけるのに毎回すべて読む
+     ことになっていた。束ねて脇へ寄せる。
+*/
+.sengoku-admin {
+  display: grid;
+  gap: var(--sengoku-space-5);
+}
+
+/*
+  ⚠️ **管理画面だけ版面を広げる。** 本文用の 60rem のままだと、脇に
+     メニューを置いたぶん表が狭くなる。
+  ⚠️ **`:has()` が使えない環境では 60rem のまま。** 何も壊れない
+     （メニューが上に積まれ、表は従来どおり横スクロールする）。
+*/
+main:has(.sengoku-admin) {
+  max-width: 84rem;
+}
+
 .sengoku-admin__nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sengoku-space-4);
   padding-bottom: var(--sengoku-space-4);
   border-bottom: 1px solid var(--sengoku-keisen);
+}
+
+/*
+  狭い画面。
+
+  ⚠️ **格子ではなく段組にする。** 格子だと行の高さが揃うので、件数の違う束の
+     隣に**大きな空きができる**（「運営の状況」1 件の隣が 4 件だと 3 件分空く）。
+     段組なら詰めて流れる。
+
+  ⚠️ **段組は狭い画面だけに閉じ込める。** 広い画面へ持ち越すと、高さの上限と
+     ぶつかって**続きが横の段へ回り、そのまま切れる**（一度これで下半分が
+     消えた）。広い画面は普通の縦並びに戻す。
+*/
+@media (max-width: 59.999rem) {
+  .sengoku-admin__nav {
+    columns: 2;
+    column-gap: var(--sengoku-space-5);
+    /*
+      ⚠️ **高さを抑えて中だけ送る。** 抑えないと、本文へ届くまでに画面 2 枚
+         ぶんの送りが要る。運営が朝いちばんに見るのは本文のほうである。
+      ⚠️ 段組と高さの上限は本来ぶつかるが、`overflow` を付けると段は増えず
+         縦に送られる（下の `overflow-y` が対）。
+    */
+    max-height: 45vh;
+    overflow-y: auto;
+    /* ⚠️ 中を送り切ったときに、後ろのページまで動かさない。 */
+    overscroll-behavior: contain;
+    /*
+      ⚠️ **下端をぼかして「続きがある」と分かるようにする。** 携帯では
+         送り桿が触るまで出ないので、切っただけでは**項目が無いように見える**。
+         見えない項目は無いのと同じで、隠したことにしかならない。
+    */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
+  }
+}
+
+.sengoku-admin__group {
+  /* ⚠️ 束を段の境目で割らない。見出しと中身が別の段に離れる。 */
+  break-inside: avoid;
+  margin-bottom: var(--sengoku-space-4);
+}
+
+.sengoku-admin__group-heading {
+  /*
+    ⚠️ **見出しを小さくしすぎない。** 40 代以上を主な想定利用者にしている。
+       束の名前が読めないと、束ねた意味が無い。
+  */
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--sengoku-sumi-soft);
+  margin: 0 0 var(--sengoku-space-2);
+}
+
+.sengoku-admin__menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sengoku-space-1);
+}
+
+.sengoku-admin__menu a {
+  display: block;
+  /*
+    ⚠️ **指で押せる高さを確保する。** 行間を詰めると隣を押す。
+       上下 0.5rem ＋ 行の高さで 44px を超える。
+  */
+  padding: var(--sengoku-space-2) var(--sengoku-space-2);
+  border-radius: 0.25rem;
+  text-decoration: none;
+  color: var(--sengoku-sumi);
+}
+
+.sengoku-admin__menu a:hover,
+.sengoku-admin__menu a:focus-visible {
+  background: var(--sengoku-shade);
+  text-decoration: underline;
+}
+
+@media (min-width: 60rem) {
+  /* 広い画面では脇へ寄せる。 */
+  .sengoku-admin {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    gap: var(--sengoku-space-6);
+    align-items: start;
+  }
+
+  .sengoku-admin__nav {
+    padding-bottom: 0;
+    padding-right: var(--sengoku-space-4);
+    border-bottom: none;
+    border-right: 1px solid var(--sengoku-keisen);
+    /*
+      ⚠️ **付いてこさせる。** 一覧を下まで見たあと、次の画面へ移るために
+         毎回いちばん上まで戻るのは、件数が増えるほど負担になる。
+    */
+    position: sticky;
+    top: var(--sengoku-space-4);
+    /* ⚠️ メニュー自体が画面より高くなったら、メニューの中だけを送る。 */
+    max-height: calc(100vh - var(--sengoku-space-6));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /*
+    ⚠️ **広い画面では行間を詰める。** 既定のままだと 21 件が画面に収まらず、
+       脇の細い帯の中を送ることになる。指で押す必要が無いぶん、詰めてよい。
+       （狭い画面はこの規則の外なので、押しやすさは保たれる。）
+  */
+  .sengoku-admin__group {
+    margin-bottom: var(--sengoku-space-3);
+  }
+
+  .sengoku-admin__group-heading {
+    margin-bottom: var(--sengoku-space-1);
+  }
+
+  /*
+    ⚠️ **指で押せる大きさ（`--sengoku-touch`）を、広い画面でも縮めない。**
+       縮めれば項目がもう少し収まるが、触れる画面のノートパソコンがある。
+       ここだけ例外を作ると、その端末で押しにくい場所が 1 つできる。
+       収まらないぶんは、メニューの中を送ってもらう。
+  */
+}
+
+/*
+  ⚠️ **本文側も格子の子として幅を持たせる。** `minmax(0, 1fr)` と対で、
+     表が広いときに格子ごと押し広げられるのを防ぐ（`min-width: auto` の既定）。
+*/
+.sengoku-admin__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sengoku-space-5);
 }
 
 /*
