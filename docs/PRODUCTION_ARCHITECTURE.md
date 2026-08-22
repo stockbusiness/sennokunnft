@@ -147,12 +147,16 @@ flyctl deploy（api）→ flyctl deploy（worker）
 Vercel（web）は GitHub 連携で自動
 ```
 
-必要な秘密情報は GitHub の Secrets に 2 つだけ。
+必要な秘密情報は GitHub の Secrets に 3 つだけ。
 
-| 名前                  | 用途                           |
-| --------------------- | ------------------------------ |
-| `FLY_API_TOKEN`       | Fly.io へのデプロイ            |
-| `DIRECT_DATABASE_URL` | マイグレーション適用（Direct） |
+| 名前                   | 用途                           |
+| ---------------------- | ------------------------------ |
+| `FLY_API_TOKEN`        | Fly.io へのデプロイ（api）     |
+| `FLY_API_TOKEN_WORKER` | Fly.io へのデプロイ（worker）  |
+| `DIRECT_DATABASE_URL`  | マイグレーション適用（Direct） |
+
+⚠️ **Fly の合言葉はアプリごとに分ける。** 1 本で両方を賄うと、漏れたとき
+Fly 上の全アプリに届く。届く範囲を、そのアプリ 1 つに閉じておく。
 
 ⚠️ **`main` への push で自動デプロイするのは、本番の公開後は避ける。**
 `main` を触るたびに本番が変わる。タグ（`v*`）か手動実行を起点にする。

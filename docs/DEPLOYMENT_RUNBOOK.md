@@ -194,12 +194,27 @@ fly logs --app sennokunnft-api
 
 ### 2-8. 自動デプロイをつなぐ
 
-GitHub の Settings → Secrets and variables → Actions に 2 つ登録する。
+GitHub の Settings → Secrets and variables → Actions に登録する。
 
-| 名前                  | 値                                                      |
-| --------------------- | ------------------------------------------------------- |
-| `FLY_API_TOKEN`       | `fly tokens create deploy --app sennokunnft-api` の出力 |
-| `DIRECT_DATABASE_URL` | **Direct** の接続文字列（ポート 5432）                  |
+| 名前                   | 値                                                         |
+| ---------------------- | ---------------------------------------------------------- |
+| `FLY_API_TOKEN`        | `fly tokens create deploy --app sennokunnft-api` の出力    |
+| `FLY_API_TOKEN_WORKER` | `fly tokens create deploy --app sennokunnft-worker` の出力 |
+| `DIRECT_DATABASE_URL`  | **Direct** の接続文字列（ポート 5432）                     |
+
+⚠️ **アプリごとに別の合言葉を作る（2026-08-22 に分けました）。** 1 本で
+両方を賄うと、その 1 本が漏れたとき Fly 上の**全アプリ**に届きます。
+
+⚠️ **api の合言葉は worker アプリには通りません。** 使い回すと worker の
+デプロイだけが `unauthorized` で落ちます。**api は成功して worker だけが
+落ちる**ので、「worker のコードが悪い」と読み違えやすい壊れ方です。
+
+⚠️ **値を画面・ログ・チャットへ貼らないでください。** 作った合言葉は
+その場で GitHub の Secrets へ入れ、手元には残さないでください。
+
+worker のデプロイは、リポジトリ変数 `DEPLOY_WORKER` が `true` のときだけ
+走ります（段階3）。合言葉が未設定のままだと、`flyctl` を呼ぶ前に
+「何をすればよいか」を出して止まります。
 
 これで `main` に入った変更が、CI 通過後に自動で反映される。
 
