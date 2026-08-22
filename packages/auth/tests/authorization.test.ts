@@ -58,6 +58,34 @@ const MATRIX: Readonly<Record<Action, Readonly<Record<Role, boolean>>>> = {
     ⚠️ **`auditor` には渡さない。** お金が動く操作である。
   */
   'order.refund': { anonymous: false, buyer: false, operator: true, auditor: false },
+  // 返金の申請（方針整理 2026-08-22）。
+  /*
+    ⚠️ **`auditor` は true。** 誰が申し出て、誰が承認したかは監査の対象
+       そのもの。見る力と動かす力を分けて配る。
+  */
+  'refund_request.view': { anonymous: false, buyer: false, operator: true, auditor: true },
+  /*
+    ⚠️ **`auditor` は false。** 調べる過程で作家さまへ確認を依頼する
+       ——外へ働きかける操作である。
+  */
+  'refund_request.investigate': { anonymous: false, buyer: false, operator: true, auditor: false },
+  /*
+    ⚠️ **オーナーの印が要る。** ここがお金を返すと決める場所である。
+       印を持たない actor の表では operator でも false。
+  */
+  'refund_request.approve': { anonymous: false, buyer: false, operator: false, auditor: false },
+  'refund_request.retry_integration': {
+    anonymous: false,
+    buyer: false,
+    operator: true,
+    auditor: false,
+  },
+  /*
+    ⚠️ **会員なら誰でも持つ。** 会員なら誰でも出品できる（`UD-806`）。
+    ⚠️ **返金を実行する力を含まない。** 作家さまが決済事業者へ投げられる
+       口は、この仕組みに存在しない。
+  */
+  'refund_inquiry.answer_own': { anonymous: false, buyer: true, operator: true, auditor: false },
   // ⚠️ 監査は見られる。締めることはできない。
   'payout.view': { anonymous: false, buyer: false, operator: true, auditor: true },
   'payout.manage': { anonymous: false, buyer: false, operator: true, auditor: false },
@@ -370,6 +398,8 @@ describe('オーナーの印', () => {
     // ⚠️ 公開した文面は、そのまま全購入者へ届く（P0-4）。
     'notification.publish',
     'payout.mark_paid',
+    // ⚠️ お金を返すと決める場所（方針整理 2026-08-22）。
+    'refund_request.approve',
     'payment_credential.manage',
     // ⚠️ 返金と支払いの両方を動かす（`UD-104` / `UD-119`）。
     'settlement.manage',

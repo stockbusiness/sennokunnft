@@ -349,6 +349,46 @@ export const DOMAIN_ERROR_CODES = [
   'PAYOUT_ACCOUNT_INVALID',
   /** この配備ではお振込先を預かれない（暗号鍵が未設定）。 */
   'PAYOUT_ACCOUNT_UNAVAILABLE',
+
+  // --- 返金の申請と審査 ---
+  /**
+   * 返金の金額を受け付けられない。
+   *
+   * 1 円未満、整数でない、または残額を超えている。⚠️ **残額そのものは
+   * 返さない。**画面は注文の明細から残額を出せる（そちらが正）。
+   */
+  'REFUND_AMOUNT_INVALID',
+  /**
+   * 返金の申請内容を受け付けられない。
+   *
+   * ⚠️ **理由を分けていない。** 事由がその立場から出せないもの、経緯の
+   * 記述が短すぎる、対象外の事由——どれも「書き直してください」に落ちる。
+   */
+  'REFUND_REQUEST_INVALID',
+  /**
+   * その申請は、いまその状態から動かせない。
+   *
+   * ⚠️ **403 ではない。権限はある。この申請では押せないだけ。**
+   * すでに決着している、まだ調べ終えていない、といった状態の食い違い。
+   */
+  'REFUND_REQUEST_NOT_ACTIONABLE',
+  /**
+   * 申請した人と承認する人が同じ。
+   *
+   * 二重承認が要る金額では、申請者自身は承認できない。
+   */
+  'REFUND_REQUEST_SAME_PERSON',
+  /** その注文には、決着していない申請がすでにある。 */
+  'REFUND_REQUEST_ALREADY_OPEN',
+  /**
+   * 返金・精算の設定が、この配備に無い。
+   *
+   * ⚠️ **`SETTLEMENT_SETTINGS_INVALID` と分けている。** あちらは
+   * 「入れた値が悪い」で、こちらは**まだ何も決まっていない**。既定値で
+   * そっと動かすと、しきい値を設定したつもりの配備で二重承認が効いて
+   * いない、という状態が起こる（手数料率で避けた形と同じ）。
+   */
+  'SETTLEMENT_SETTINGS_MISSING',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

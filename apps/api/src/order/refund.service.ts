@@ -54,6 +54,21 @@ export interface RefundRequest {
    */
   readonly acknowledgeIssued: boolean;
   readonly note: string | null;
+  /**
+   * 返す額（円）。**省略なら残額すべて**（従来の振る舞い）。
+   *
+   * ⚠️ **画面から自由に打てる欄にしない**（`UD-104` の当初の判断）。
+   * ここへ値が入るのは**返金の申請を承認したとき**だけで、承認の側で
+   * 二重承認と金額の再入力を課している（方針整理 2026-08-22）。
+   */
+  readonly amount?: number | undefined;
+  /**
+   * 受取権をどうするか。**省略なら判定に従う**（従来の振る舞い）。
+   *
+   * ⚠️ **一部返金では機械に決められない。** どのシリアルを取り消すべきかは
+   * 返金の中身によって変わる。承認のときに運営が指定する。
+   */
+  readonly entitlementDisposition?: 'revoke' | 'keep' | undefined;
 }
 
 @Injectable()
@@ -120,10 +135,21 @@ export class RefundService {
     }
 
     // 残額。⚠️ 総額ではない。一部返金済みの注文で二重に返さないため。
-    const amount = context.totalAmount - context.amountRefunded;
-    if (amount <= 0) {
+    const remaining = context.totalAmount - context.amountRefunded;
+    if (remaining <= 0) {
       throw new DomainErrorException('REFUND_ALREADY_DONE');
     }
+    /*
+      ⚠️ **指定が無ければ残額すべて。** 従来の呼び出し（注文の画面からの
+         全額返金）の振る舞いを変えない。
+      ⚠️ **指定があっても、残額は超えられない。** 超えると、受け取った額
+         より多く返すことになる。
+    */
+    const amount = request.amount ?? remaining;
+    if (!Number.isInteger(amount) || amount <= 0 || amount > remaining) {
+      throw new DomainErrorException('REFUND_AMOUNT_INVALID');
+    }
+    const isFullRefund = context.amountRefunded + amount >= context.totalAmount;
 
     const refund = await this.refunds.start({
       refundId: this.ids.generate(),
@@ -192,9 +218,15 @@ export class RefundService {
     const settlement = await this.applySettlement({
       refundId: refund.id,
       context,
-      decision,
+      /*
+        ⚠️ **全額返ったときだけ、渡したものを取り消す。** 一部返金で
+           取り消すかどうかは、承認のときの指定（`entitlementDisposition`）
+           に従う——**機械には決められない**ため。
+      */
+      decision: isFullRefund ? decision : null,
       providerRefundRef: executed.value.refundRef,
       amountRefundedTotal: context.amountRefunded + executed.value.amount,
+      dispositionOverride: request.entitlementDisposition ?? null,
       now,
     });
 
@@ -413,15 +445,30 @@ export class RefundService {
     readonly decision: RefundDecision | null;
     readonly providerRefundRef: string | null;
     readonly amountRefundedTotal: number;
+    /**
+     * 承認のときの指定。**`null` なら判定に従う**（従来の振る舞い）。
+     *
+     * ⚠️ **`keep` は「取り消さない」を上書きできるが、`revoke` は
+     * 判定を越えない。** 発行処理中・発行済みは外部へ送信済みの
+     * 可能性があり、取り消したことにすると記録と実物が食い違う。
+     */
+    readonly dispositionOverride?: 'revoke' | 'keep' | null | undefined;
     readonly now: Date;
   }): Promise<RefundSettlement> {
     const effects = input.decision?.effects ?? null;
+    const override = input.dispositionOverride ?? null;
+    /*
+      ⚠️ **判定が「取り消さない」と言っているものを、指定で取り消さない。**
+         `processing` / `succeeded` は回収できない。運営が「取り消す」と
+         指定しても、実物は戻らない。
+    */
+    const revokeEntitlement = override === 'keep' ? false : (effects?.revokeEntitlement ?? false);
     return this.refunds.settle({
       refundId: input.refundId,
       orderId: input.context.orderId,
       providerRefundRef: input.providerRefundRef,
       amountRefundedTotal: input.amountRefundedTotal,
-      revokeEntitlement: effects?.revokeEntitlement ?? false,
+      revokeEntitlement,
       cancelMintJob: effects?.cancelMintJob ?? false,
       /*
         ⚠️ **`processing` は取り消さず、注記だけ足す**（`INV-M4`）。

@@ -191,6 +191,18 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
        422 にすると、作家さまが入力を直そうとして直らない。
   */
   PAYOUT_ACCOUNT_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  // 返金の申請と審査。
+  REFUND_AMOUNT_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
+  REFUND_REQUEST_INVALID: HttpStatus.UNPROCESSABLE_ENTITY,
+  /*
+    ⚠️ **403 ではなく 409。権限はある。この申請では押せないだけ。**
+       403 にすると、権限を足そうとして直らない。状態の食い違いは 409。
+  */
+  REFUND_REQUEST_NOT_ACTIONABLE: HttpStatus.CONFLICT,
+  REFUND_REQUEST_SAME_PERSON: HttpStatus.CONFLICT,
+  REFUND_REQUEST_ALREADY_OPEN: HttpStatus.CONFLICT,
+  // ⚠️ 入力が悪いのではなく、**この配備がまだ決めていない**。
+  SETTLEMENT_SETTINGS_MISSING: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -400,6 +412,18 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     'お振込先を保存できませんでした。口座番号は数字で、口座名義はカタカナ（または英字）でご入力ください。',
   PAYOUT_ACCOUNT_UNAVAILABLE:
     'ただいまお振込先をお預かりできません。お手数ですが、時間をおいてからお試しください。',
+  REFUND_AMOUNT_INVALID:
+    '返金の金額を受け付けられませんでした。1 円以上、返金できる残りの金額までの範囲でご入力ください。',
+  REFUND_REQUEST_INVALID:
+    '返金のお申し出を受け付けられませんでした。事由の選択と、経緯のご記入をお確かめください。',
+  REFUND_REQUEST_NOT_ACTIONABLE:
+    'この返金のお申し出は、いまその操作ができない状態です。画面を読み込み直して、最新の状態をご確認ください。',
+  REFUND_REQUEST_SAME_PERSON:
+    'この金額のお申し出は、お申し出をされたご本人とは別の方の承認が必要です。',
+  REFUND_REQUEST_ALREADY_OPEN:
+    'このご注文には、まだ決着していない返金のお申し出があります。そちらをご確認ください。',
+  SETTLEMENT_SETTINGS_MISSING:
+    '返金と精算の設定がまだ登録されていません。管理画面の設定をご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */
