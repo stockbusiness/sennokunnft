@@ -42,6 +42,10 @@ import {
   PrismaCollectibleRepository,
   PrismaEntitlementIssuanceRepository,
   PrismaRefundRepository,
+  PrismaRefundRequestRepository,
+  PrismaCreatorInquiryRepository,
+  PrismaCreatorReceivableRepository,
+  PrismaRefundPolicyRepository,
   PrismaPayoutRepository,
   PrismaSalesReportRepository,
   PrismaCreatorDirectoryRepository,
@@ -597,6 +601,19 @@ async function bootstrap(): Promise<void> {
   const refundRepository = new PrismaRefundRepository(prisma);
 
   /*
+    返金の申請と審査（方針整理 2026-08-22）。
+
+    ⚠️ **返金の記録（`refundRepository`）と別の組。** あちらは決済事業者へ
+       投げた返金そのもので、こちらはその手前の手続きである。
+    ⚠️ **設定は専用の口から読む。** 同じ行を読むが、`SettlementSettings` は
+       注文へ焼き付ける材料で、こちらは審査の手続きを決める値である。
+  */
+  const refundRequestRepository = new PrismaRefundRequestRepository(prisma);
+  const creatorInquiryRepository = new PrismaCreatorInquiryRepository(prisma);
+  const creatorReceivableRepository = new PrismaCreatorReceivableRepository(prisma);
+  const refundPolicyRepository = new PrismaRefundPolicyRepository(prisma);
+
+  /*
     受取権の発行（P0-1）。
 
     ⚠️ **受取トークンの発行器を渡す。** 保存するのはハッシュだけで、平文は
@@ -707,6 +724,12 @@ async function bootstrap(): Promise<void> {
       accounts: new PrismaAccountRepository(prisma),
       // 返金の記録（`UD-104` / `UD-120`）。
       refunds: refundRepository,
+      refundRequests: {
+        requests: refundRequestRepository,
+        inquiries: creatorInquiryRepository,
+        receivables: creatorReceivableRepository,
+        policy: refundPolicyRepository,
+      },
       // 受取権の発行（P0-1）。決済が済んだ注文を受取権に変える。
       issuance: issuanceRepository,
       // ご自分が受け取ったもの（P0-3）。⚠️ 絞り込みはリポジトリが必ず行う。

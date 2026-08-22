@@ -93,6 +93,13 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
       --    トリガーが拒むが、TRUNCATE は素通りする。試験を片づけられるのは
       --    そのおかげ。**本番でこれを実行しない。**
       production_attestations
+,
+      /*
+        ⚠️ **返金の申請も消す。** 残すと、次の試験が「決着していない申請が
+           無い」を作れなくなる——二重申請を止められるかを確かめる試験が、
+           そこで空振りする。
+      */
+      refund_request_events, refund_requests, creator_refund_inquiries, creator_receivables
     RESTART IDENTITY CASCADE
   `);
 

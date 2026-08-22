@@ -1047,3 +1047,43 @@ export type {
   CreatorDirectorySummary,
   SalesReportPort,
 } from './ports/reporting';
+
+export {
+  REFUND_REQUEST_STATUSES,
+  REFUND_REQUEST_REASONS,
+  REFUND_CATEGORIES,
+  ENTITLEMENT_DISPOSITIONS,
+  isTerminalRefundRequest,
+  categoryOf,
+  needsCreatorConfirmation,
+  isExcludedByDefault,
+  suggestDisposition,
+  requiresDualApproval,
+  canApprove,
+  addBusinessDays,
+  creatorInquiryExpired,
+  checkRefundAmount,
+  BUYER_SELECTABLE_REFUND_REASONS,
+  isBuyerSelectableReason,
+} from './refund/request';
+export type {
+  ApprovalDecision,
+  EntitlementDisposition,
+  RefundAmountCheck,
+  RefundCategory,
+  RefundRequestReason,
+  RefundRequestStatus,
+} from './refund/request';
+export { RECEIVABLE_STATUSES, planClawback, outstandingTotal } from './refund/receivable';
+export type { ClawbackPlan, ReceivableRecord, ReceivableStatus } from './refund/receivable';
+export type {
+  CreatorInquiryPort,
+  CreatorInquiryRecord,
+  CreatorReceivablePort,
+  RefundRequestPort,
+  RefundPolicy,
+  RefundPolicyPort,
+  RefundRequestEventRecord,
+  RefundRequestQuery,
+  RefundRequestRecord,
+} from './ports/refund-request';
