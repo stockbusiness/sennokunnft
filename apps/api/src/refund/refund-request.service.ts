@@ -34,6 +34,7 @@ import {
 import type { Logger } from '@sengoku/observability';
 import { DomainErrorException } from '../common/domain-error.filter';
 import { RefundService } from '../order/refund.service';
+import { BuyerNotifier, NULL_NOTIFIER } from '../notification/buyer-notifier';
 
 /**
  * 返金の申請と審査（方針整理 2026-08-22）。
@@ -121,6 +122,13 @@ export class RefundRequestService {
      * 片方だけ直したときに在庫の戻しや受取権の取り消しが食い違う。
      */
     private readonly refundService: RefundService,
+    /**
+     * 知らせ（方針整理 2026-08-22）。
+     *
+     * ⚠️ **例外を投げない実装を渡す。** 知らせが積めないことで、審査の
+     * 手続きそのものを巻き戻さない。届かない知らせは運用で拾える。
+     */
+    private readonly notifier: BuyerNotifier = NULL_NOTIFIER,
   ) {}
 
   /* --- 読む ------------------------------------------------------------- */
@@ -310,6 +318,21 @@ export class RefundRequestService {
       hasStatement: input.buyerStatement !== null,
     });
 
+    /*
+      お受けしたことをお知らせする。
+
+      ⚠️ **「ご返金します」と読める文面にしない。** お受けしたことと、
+         お返しすることは別である（文面の語彙に金額を入れていない）。
+      ⚠️ **運営が代理で起こしたときも送る。** お電話で受けた方にも、
+         受け付いた記録が手元に残るほうがよい。
+    */
+    await this.notifier.refundRequestReceived({
+      requestId: request.id,
+      accountId: context.accountId,
+      orderId: input.orderId,
+      orderNumber: context.orderNumber,
+    });
+
     if (input.note !== undefined && input.note !== null && input.note !== '') {
       await this.config.requests.transition({
         id: request.id,
@@ -382,6 +405,20 @@ export class RefundRequestService {
       creatorAccountId: order.creatorAccountId,
       dueAt: dueAt.toISOString(),
       businessDays: policy.creatorInquiryBusinessDays,
+    });
+
+    /*
+      作家さまへお願いする。
+
+      ⚠️ **これが無いと、期限が意味を持たない。** ログインしない限り依頼が
+         来たことに気づけないまま期限が過ぎ、運営が「回答が無いので進めた」と
+         記録する——作家さまから見れば、聞かれてすらいない。
+      ⚠️ **金額と購入者を渡さない。** 事実をお答えいただくのに要らない。
+    */
+    await this.notifier.refundInquiryAsked({
+      requestId: request.id,
+      creatorAccountId: order.creatorAccountId,
+      dueAt,
     });
 
     return this.findOrThrow(request.id);
@@ -582,6 +619,23 @@ export class RefundRequestService {
       reason: request.reason,
       category: request.category,
     });
+
+    /*
+      お断りしたことをお知らせする。
+
+      ⚠️ **黙って終わらせない。** 申し出た方から見ると、返事が来ないのと
+         断られたのは違う。返事が来なければ、何度でも問い合わせが来る。
+      ⚠️ **却下の理由を渡さない。** 運営の記録は運営の言葉で書かれていて、
+         そのままお送りする文ではない。
+    */
+    const rejectContext = await this.config.refunds.loadContext(request.orderId);
+    if (rejectContext !== null) {
+      await this.notifier.refundRequestRejected({
+        requestId: request.id,
+        accountId: rejectContext.accountId,
+        orderNumber: rejectContext.orderNumber,
+      });
+    }
     await this.config.audit.record({
       actorAccountId: input.actorAccountId,
       action: 'refund_request.reject',

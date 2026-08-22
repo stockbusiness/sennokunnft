@@ -213,6 +213,100 @@ export class BuyerNotifier {
     );
   }
 
+  /* --- 返金の申請と審査（方針整理 2026-08-22）--------------------------- */
+
+  /**
+   * 返金のお申し出をお受けした。
+   *
+   * ⚠️ **金額を渡さない。** どれだけお返しするかは審査が決める。渡せる形に
+   * すると、いつか誰かが文面へ入れ、**お受けした時点の額が約束に見える**。
+   */
+  refundRequestReceived(
+    input: {
+      readonly requestId: string;
+      readonly accountId: string;
+      readonly orderId: string;
+      readonly orderNumber: string;
+    },
+    executor?: Parameters<NotificationOutboxPort['enqueue']>[1],
+  ): Promise<unknown> {
+    return this.notifications.enqueue(
+      {
+        eventType: 'refund_request.received',
+        // ⚠️ 対象は申し出。注文にすると、2 度目の申し出が重複で捨てられる。
+        subjectId: input.requestId,
+        accountId: input.accountId,
+        values: {
+          orderNumber: input.orderNumber,
+          orderUrl: this.orderUrl(input.orderId),
+        },
+      },
+      executor,
+    );
+  }
+
+  /**
+   * 返金のお申し出を承れなかった。
+   *
+   * ⚠️ **却下の理由を渡さない。** 運営の記録は運営の言葉で書かれていて、
+   * そのままお送りする文ではない。個別のご説明は運営が別途ご連絡する。
+   */
+  refundRequestRejected(
+    input: {
+      readonly requestId: string;
+      readonly accountId: string;
+      readonly orderNumber: string;
+    },
+    executor?: Parameters<NotificationOutboxPort['enqueue']>[1],
+  ): Promise<unknown> {
+    return this.notifications.enqueue(
+      {
+        eventType: 'refund_request.rejected',
+        subjectId: input.requestId,
+        accountId: input.accountId,
+        values: {
+          orderNumber: input.orderNumber,
+          contactUrl: `${this.config.siteUrl}/legal/tokushoho`,
+        },
+      },
+      executor,
+    );
+  }
+
+  /**
+   * 作家さまへ事実確認をお願いする。
+   *
+   * ⚠️ **これが無いと、期限が意味を持たない。** ご回答の期限は営業日数で
+   * 決まるのに、**ログインしない限り依頼が来たことに気づけない**。
+   * 気づかないまま期限が過ぎ、運営が「回答が無いので進めた」と記録する
+   * ——作家さまから見れば、聞かれてすらいない。
+   *
+   * ⚠️ **金額とご購入者さまを渡さない。** 事実をお答えいただくのに要らず、
+   * 渡せる形にすると「いくら返るのか」を先に知ることになって回答が歪む。
+   */
+  refundInquiryAsked(
+    input: {
+      readonly requestId: string;
+      /** ⚠️ 宛先は**作家さま**。購入者ではない。 */
+      readonly creatorAccountId: string;
+      readonly dueAt: Date;
+    },
+    executor?: Parameters<NotificationOutboxPort['enqueue']>[1],
+  ): Promise<unknown> {
+    return this.notifications.enqueue(
+      {
+        eventType: 'refund_inquiry.asked',
+        subjectId: input.requestId,
+        accountId: input.creatorAccountId,
+        values: {
+          dueAt: formatJst(input.dueAt),
+          inquiryUrl: `${this.config.siteUrl}/creator/refund-inquiries`,
+        },
+      },
+      executor,
+    );
+  }
+
   private enqueueOrderOnly(
     eventType: 'payment.failed' | 'payment.expired',
     input: { readonly orderId: string; readonly accountId: string; readonly orderNumber: string },

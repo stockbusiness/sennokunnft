@@ -59,6 +59,33 @@ export const NOTIFICATION_EVENT_TYPES = [
    * まで。
    */
   'payout_account.changed',
+  /**
+   * 返金のお申し出をお受けした（方針整理 2026-08-22）。
+   *
+   * ⚠️ **「ご返金します」と読めない文面にする。** お受けしたことと、
+   * お返しすることは別である。ここを曖昧に書くと、断ったときに
+   * 「話が違う」になる——そしてそれは、こちらの書き方が悪い。
+   */
+  'refund_request.received',
+  /**
+   * 返金のお申し出を承れなかった。
+   *
+   * ⚠️ **黙って終わらせない。** 申し出た方から見ると、返事が来ないのと
+   * 断られたのは違う。返事が来なければ、何度でも問い合わせが来る。
+   */
+  'refund_request.rejected',
+  /**
+   * 作家さまへ事実確認をお願いする。
+   *
+   * ⚠️ **これが無いと、期限が意味を持たない。** ご回答の期限は営業日数で
+   * 決まるのに、**ログインしない限り依頼が来たことに気づけない**。
+   * 気づかないまま期限が過ぎ、運営が「回答が無いので進めた」と記録する
+   * ——作家さまから見れば、聞かれてすらいない。
+   *
+   * ⚠️ **金額とご購入者さまを載せない。** 事実をお答えいただくのに要らず、
+   * 載せると「いくら返るのか」を先に知ることになって回答が歪む。
+   */
+  'refund_inquiry.asked',
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
@@ -93,6 +120,13 @@ export const NOTIFICATION_SUBJECT_TYPES = [
    * 1 通ずつ届く。**
    */
   'legal_version',
+  /**
+   * 返金のお申し出（方針整理 2026-08-22）。
+   *
+   * ⚠️ **注文ではなく申し出を指す。** 注文を指すと、同じ注文で 2 度目の
+   * お申し出をいただいたときに、重複として捨てられる。
+   */
+  'refund_request',
 ] as const;
 export type NotificationSubjectType = (typeof NOTIFICATION_SUBJECT_TYPES)[number];
 
@@ -109,6 +143,9 @@ const SUBJECT_OF: Readonly<Record<NotificationEventType, NotificationSubjectType
   'refund.completed': 'refund',
   'legal.revised': 'legal_version',
   'payout_account.changed': 'payout_account',
+  'refund_request.received': 'refund_request',
+  'refund_request.rejected': 'refund_request',
+  'refund_inquiry.asked': 'refund_request',
 };
 
 export function subjectTypeOf(eventType: NotificationEventType): NotificationSubjectType {
@@ -149,6 +186,24 @@ export const NOTIFICATION_VARIABLES: Readonly<Record<NotificationEventType, read
        乗っ取った側がこのメールを見れば済む、という形にしない。
   */
   'payout_account.changed': ['changedAt', 'contactUrl'],
+  /*
+    ⚠️ **金額を語彙に入れない**（方針整理 2026-08-22）。入れられるように
+       すると、いつか誰かが本文へ入れ、**お受けした時点の額が約束に見える**。
+       どれだけお返しするかは審査が決める。**語彙に無ければ、書きようがない。**
+  */
+  'refund_request.received': ['orderNumber', 'orderUrl'],
+  /*
+    ⚠️ **却下の理由を語彙に入れない。** 運営の記録は運営の言葉で書かれて
+       いて、そのままお送りする文ではない。個別のご説明は、運営が別途
+       ご連絡する。
+  */
+  'refund_request.rejected': ['orderNumber', 'contactUrl'],
+  /*
+    ⚠️ **金額とご購入者さまを語彙に入れない。** 事実をお答えいただくのに
+       要らず、載せると「いくら返るのか」を先に知ることになって回答が歪む。
+    ⚠️ **`dueAt` を渡す。** 期限の無いお願いは、後回しにされて当然である。
+  */
+  'refund_inquiry.asked': ['dueAt', 'inquiryUrl'],
 };
 
 /** すべての種別で共通して使える語。⚠️ 事業者名は文面ごとに変えない。 */
