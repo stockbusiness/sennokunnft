@@ -29,6 +29,12 @@ const suite = enabled ? describe : describe.skip;
 
 /** JST では 2026/08/21 09:00。 */
 const NOW = new Date('2026-08-21T00:00:00.000Z');
+/*
+  「証拠の提出期限が近い」の境目（2026-08-22）。
+  ⚠️ **試験からも明示する。** 既定値に頼ると、既定を変えたときに
+     何を確かめていたのかが読めなくなる。
+*/
+const DUE_SOON_BEFORE = new Date('2026-08-24T00:00:00.000Z');
 const PRICE = 12_000;
 
 let prisma: PrismaClient;
@@ -124,7 +130,7 @@ suite('本日の数え方（JST）', () => {
     // JST 2026/08/20 23:00（UTC では 14:00）。前日なので入らない。
     await seedPaidOrder({ createdAt: new Date('2026-08-20T14:00:00.000Z') });
 
-    const counts = await repo.counts(NOW);
+    const counts = await repo.counts(NOW, DUE_SOON_BEFORE);
     expect(counts.todayOrderCount).toBe(1);
   });
 
@@ -141,7 +147,7 @@ suite('本日の数え方（JST）', () => {
       },
     });
 
-    const counts = await repo.counts(NOW);
+    const counts = await repo.counts(NOW, DUE_SOON_BEFORE);
     expect(counts.todayPaidAmount).toBe(PRICE);
     expect(counts.todayPaidCount).toBe(1);
   });
@@ -157,12 +163,12 @@ suite('本日の数え方（JST）', () => {
         payloadDigest: `sha256:${'a'.repeat(64)}`,
       },
     });
-    const counts = await repo.counts(NOW);
+    const counts = await repo.counts(NOW, DUE_SOON_BEFORE);
     expect(counts.lastWebhookReceivedAt?.toISOString()).toBe(received.toISOString());
   });
 
   it('何も無ければ 0 と null（0 件を「取得できない」にしない）', async () => {
-    const counts = await repo.counts(NOW);
+    const counts = await repo.counts(NOW, DUE_SOON_BEFORE);
     expect(counts.todayOrderCount).toBe(0);
     expect(counts.todayPaidAmount).toBe(0);
     expect(counts.lastWebhookReceivedAt).toBeNull();

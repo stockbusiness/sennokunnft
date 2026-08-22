@@ -88,6 +88,16 @@ export interface ProviderPaymentFact {
   readonly disputeAmount: number | null;
   /** 事業者が言う理由。⚠️ 許可リストを通した符号のみ。 */
   readonly disputeReason: DisputeReason | null;
+  /**
+   * 証拠の提出期限。
+   *
+   * ⚠️ **これを持たないと、運営は期限を Stripe の画面でしか知れない。**
+   * 気づく仕組みを作る意味が半分になる（「1 件ある」だけ見せても、
+   * 急ぐのかどうかが分からない）。
+   *
+   * ⚠️ 決着した争いや警告には無いことがある。
+   */
+  readonly disputeEvidenceDueAt: Date | null;
   readonly occurredAt: Date;
   /**
    * どの世代の鍵で署名を検証できたか（`UD-118` / `UD-128`）。

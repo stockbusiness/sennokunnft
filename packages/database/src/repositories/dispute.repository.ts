@@ -18,6 +18,7 @@ interface Row {
   amount: number;
   currency: string;
   openedAt: Date;
+  evidenceDueAt: Date | null;
   closedAt: Date | null;
   refundId: string | null;
 }
@@ -34,6 +35,7 @@ function toRecord(row: Row): DisputeRecord {
     amount: row.amount,
     currency: row.currency,
     openedAt: row.openedAt,
+    evidenceDueAt: row.evidenceDueAt,
     closedAt: row.closedAt,
     refundId: row.refundId,
   };
@@ -72,6 +74,7 @@ export class PrismaDisputeRepository implements DisputePort {
     readonly reason: DisputeReason;
     readonly amount: number;
     readonly currency: string;
+    readonly evidenceDueAt: Date | null;
     readonly occurredAt: Date;
     readonly now: Date;
   }): Promise<{ readonly record: DisputeRecord; readonly advanced: boolean }> {
@@ -94,6 +97,7 @@ export class PrismaDisputeRepository implements DisputePort {
             amount: input.amount,
             currency: input.currency,
             openedAt: input.occurredAt,
+            evidenceDueAt: input.evidenceDueAt,
             closedAt: closedAtFor(input.status, input.occurredAt),
             createdAt: input.now,
             updatedAt: input.now,
@@ -132,6 +136,13 @@ export class PrismaDisputeRepository implements DisputePort {
           */
           reason: input.reason,
           amount: input.amount,
+          /*
+            ⚠️ **期限は届いた値で上書きする。ただし消さない。**
+               決着の知らせには期限が入っていないことがある。素直に
+               `null` を書くと、**あとから「いつまでだったのか」を
+               読めなくなる**。
+          */
+          evidenceDueAt: input.evidenceDueAt ?? existing.evidenceDueAt,
           closedAt: closedAtFor(input.status, input.occurredAt),
           updatedAt: input.now,
         },

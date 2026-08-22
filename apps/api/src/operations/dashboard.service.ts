@@ -58,7 +58,7 @@ export class OperationsDashboardService {
   async dashboard(): Promise<OperationsDashboardResponse> {
     const now = this.clock.now();
     const [counts, jobs] = await Promise.all([
-      this.operations.counts(now),
+      this.operations.counts(now, disputeDueSoonBefore(now, this.thresholds)),
       this.operations.heartbeats(this.jobKeys),
     ]);
 
@@ -219,4 +219,13 @@ function toDetailView(row: EntitlementAdminDetailRecord): EntitlementAdminDetail
       createdAt: delivery.createdAt.toISOString(),
     })),
   };
+}
+
+/**
+ * 「期限が近い」の境目。
+ *
+ * ⚠️ **設定から引く。** 定数にすると、変えるたびにデプロイが要る。
+ */
+function disputeDueSoonBefore(now: Date, thresholds: OperationsThresholds): Date {
+  return new Date(now.getTime() + thresholds.disputeDueSoonDays * 86_400_000);
 }

@@ -30,6 +30,8 @@ const QUIET: OperationsCounts = {
   notificationPendingCount: 0,
   notificationFailedCount: 0,
   integrationFailureCount: 0,
+  openDisputeCount: 0,
+  disputeDueSoonCount: 0,
   lastWebhookReceivedAt: new Date('2026-08-21T08:00:00.000Z'),
 };
 
@@ -86,6 +88,52 @@ describe('運営ダッシュボードの深刻度', () => {
     expect(row?.severity).toBe('critical');
     // ⚠️ 「異常です」だけでは、受け取った人が動けない。
     expect(row?.action).toBeTruthy();
+  });
+
+  describe('カード会社との争い（2026-08-22）', () => {
+    it('争いが無ければ平常', () => {
+      expect(severityOf('dispute_open')?.severity).toBe('normal');
+      expect(severityOf('dispute_open')?.action).toBeNull();
+    });
+
+    it('決着していない争いがあれば黄', () => {
+      /*
+        ⚠️ **黄。** 期限まで日があるうちから赤にすると、期限が迫った
+           ものと同じ色になり、急ぐべきものが埋もれる。
+      */
+      const row = severityOf('dispute_open', { openDisputeCount: 1 });
+      expect(row?.severity).toBe('warning');
+      expect(row?.action).toBeTruthy();
+    });
+
+    it('提出期限が近ければ赤', () => {
+      /*
+        ⚠️ **過ぎると自動的に負ける。** こちらの言い分に関わらず、証拠を
+           出さなかったという理由で敗訴になる。そのうえ返金は運営が被る。
+      */
+      const row = severityOf('dispute_open', { openDisputeCount: 2, disputeDueSoonCount: 1 });
+      expect(row?.severity).toBe('critical');
+      expect(row?.action).toBeTruthy();
+    });
+
+    it('急ぐときは、何件急ぐのかを文言に出す', () => {
+      /*
+        ⚠️ **「1 件ある」だけでは足りない。** 急ぐのかどうかが分からないと、
+           運営は結局 決済事業者の画面を見に行くことになり、気づく仕組みを
+           作った意味が半分になる。
+      */
+      const row = severityOf('dispute_open', { openDisputeCount: 5, disputeDueSoonCount: 3 });
+      expect(row?.action).toContain('3');
+      // ⚠️ 「過ぎたら負ける」ことを伝える。件数だけでは動く理由にならない。
+      expect(row?.action).toContain('自動的に負けます');
+    });
+
+    it('件数は「決着していない数」を出す', () => {
+      // ⚠️ 期限が近い数を出すと、まだ余裕のある争いが画面から消える。
+      expect(
+        severityOf('dispute_open', { openDisputeCount: 4, disputeDueSoonCount: 1 })?.count,
+      ).toBe(4);
+    });
   });
 
   it('赤い指標には必ず次の一手が添えられる', () => {

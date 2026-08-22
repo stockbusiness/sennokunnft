@@ -481,6 +481,7 @@ describe('解決するゲートウェイ', () => {
                 disputeStatus: null,
                 disputeAmount: null,
                 disputeReason: null,
+                disputeEvidenceDueAt: null,
                 occurredAt: new Date('2026-08-20T00:00:00.000Z'),
                 credentialId: null,
               },
