@@ -349,6 +349,15 @@ export const DOMAIN_ERROR_CODES = [
   'PAYOUT_ACCOUNT_INVALID',
   /** この配備ではお振込先を預かれない（暗号鍵が未設定）。 */
   'PAYOUT_ACCOUNT_UNAVAILABLE',
+  /**
+   * 知らせの設定を受け付けられない（`UD-1102`）。
+   *
+   * ⚠️ **どの項目かは返さない。** 宛先の形・件数・間隔・受け口の URL——
+   * どれも「書き直してください」に落ちる。何が悪いかは画面が入力欄ごとに案内する。
+   */
+  'OPERATIONS_ALERT_SETTINGS_INVALID',
+  /** この配備では知らせの受け口を預かれない（暗号鍵が未設定）。 */
+  'OPERATIONS_ALERT_WEBHOOK_UNAVAILABLE',
 
   // --- 返金の申請と審査 ---
   /**

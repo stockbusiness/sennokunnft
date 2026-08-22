@@ -652,17 +652,17 @@ model Order {
   createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  account       Account                @relation(fields: [accountId], references: [id])
-  creator       Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
-  termsDocument LegalDocumentVersion?  @relation("OrderTermsVersion", fields: [termsVersionId], references: [id], onDelete: Restrict)
-  lines         OrderLine[]
-  payments      Payment[]
-  entitlements  Entitlement[]
-  reservations  InventoryReservation[]
-  webhookEvents WebhookEvent[]
-  notes         OrderNote[]
-  refunds       Refund[]
-  payoutLines   PayoutLine[]
+  account        Account                @relation(fields: [accountId], references: [id])
+  creator        Account                @relation("OrderCreator", fields: [creatorAccountId], references: [id], onDelete: Restrict)
+  termsDocument  LegalDocumentVersion?  @relation("OrderTermsVersion", fields: [termsVersionId], references: [id], onDelete: Restrict)
+  lines          OrderLine[]
+  payments       Payment[]
+  entitlements   Entitlement[]
+  reservations   InventoryReservation[]
+  webhookEvents  WebhookEvent[]
+  notes          OrderNote[]
+  refunds        Refund[]
+  payoutLines    PayoutLine[]
   // 返金の申請と審査（方針整理 2026-08-22）。
   refundRequests RefundRequest[]
   receivable     CreatorReceivable?
@@ -868,14 +868,14 @@ model Refund {
   /// ⚠️ **作家さま負担の分だけが、次回以降の精算で差し引かれる。**
   ///    こちらの落ち度・チャージバック・運営が例外として通したものは
   ///    `platform`（作家さまへ回さない）。
-  clawbackBearer String @default("creator") @map("clawback_bearer")
+  clawbackBearer String  @default("creator") @map("clawback_bearer")
   /// どの申請から実行されたか（方針整理 2026-08-22）。
   /// ⚠️ **NULL 可のまま。** これまでの返金は申請を持たない。
-  requestId String? @map("request_id") @db.Uuid
+  requestId      String? @map("request_id") @db.Uuid
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  actor   Account? @relation("RefundActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment?       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  actor   Account?       @relation("RefundActor", fields: [actorAccountId], references: [id], onDelete: SetNull)
   request RefundRequest? @relation("RefundFromRequest", fields: [requestId], references: [id], onDelete: Restrict)
 
   @@index([orderId, createdAt(sort: Desc)], map: "refunds_order_created_idx")
@@ -1381,23 +1381,23 @@ model HmacNonce {
 /// コードに `?? 14` を書くと、設定行が消えたことに誰も気づかないまま動く。
 model SettlementSettings {
   /// `staging` / `production`。⚠️ CHECK で縛っている。
-  environment         String   @id
+  environment                 String   @id
   /// 返金を受け付ける日数。⚠️ 0 は「受け付けない」であって未設定ではない。
-  refundWindowDays    Int      @map("refund_window_days")
+  refundWindowDays            Int      @map("refund_window_days")
   /// 締めから支払いまでの月数。1 = 月末締め・翌月末払い。
-  payoutOffsetMonths  Int      @map("payout_offset_months")
+  payoutOffsetMonths          Int      @map("payout_offset_months")
   /// 最低支払額（円）。未満は翌月へ繰り越す。
-  minimumPayoutAmount Int      @map("minimum_payout_amount")
+  minimumPayoutAmount         Int      @map("minimum_payout_amount")
   /// `creator` / `platform`。⚠️ CHECK で縛っている。
-  transferFeeBearer   String   @map("transfer_fee_bearer")
+  transferFeeBearer           String   @map("transfer_fee_bearer")
   /// 作家さまの回答期限（営業日・方針整理 2026-08-22）。
   /// ⚠️ **祝日は見ていない**（表を持たないため）。連休のある月は実際より短くなる。
-  creatorInquiryBusinessDays Int  @default(3) @map("creator_inquiry_business_days")
+  creatorInquiryBusinessDays  Int      @default(3) @map("creator_inquiry_business_days")
   /// 二重承認が要る金額。⚠️ **`null` は「二重承認を使わない」。**
   /// 0 を「常に要る」の意味に使わない（設定漏れと区別できなくなる）。
-  dualApprovalThresholdAmount Int? @map("dual_approval_threshold_amount")
-  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedByAccountId  String?  @map("updated_by_account_id") @db.Uuid
+  dualApprovalThresholdAmount Int?     @map("dual_approval_threshold_amount")
+  updatedAt                   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedByAccountId          String?  @map("updated_by_account_id") @db.Uuid
 
   updatedBy Account? @relation("SettlementSettingsEditor", fields: [updatedByAccountId], references: [id], onDelete: SetNull)
 
@@ -1690,6 +1690,41 @@ model CreatorPayoutAccount {
   @@map("creator_payout_accounts")
 }
 
+/// 運営への知らせの設定（`UD-1102` の一部・2026-08-22）。
+///
+/// ⚠️ **環境ごとに 1 件。** staging と production で宛先が違う。1 件に
+/// まとめると、試したつもりの知らせが本番の担当者へ飛ぶ。
+///
+/// ⚠️ **外部の受け口の URL は包んで持つ。** URL 自体が合言葉である
+/// （Slack の受け口などがそう）。**平文の列は無い。**
+///
+/// ⚠️ CHECK 制約（環境・色・間隔の範囲・包みの揃い・宛先の数）は
+/// 手書きのマイグレーション `20260822000000_operations_alerts` にある。
+model OperationsAlertSettings {
+  environment        String    @id
+  enabled            Boolean   @default(false)
+  /// warning / checking ではなく warning / critical。⚠️ CHECK で縛る。
+  minSeverity        String    @default("critical") @map("min_severity")
+  /// 同じ状態が続くときの間隔（分）。⚠️ 15〜1440 を CHECK で縛る。
+  repeatAfterMinutes Int       @default(240) @map("repeat_after_minutes")
+  /// 運営の業務用アドレス。⚠️ **お客さまのアドレスを入れる場所ではない。**
+  emailRecipients    String[]  @default([]) @map("email_recipients")
+  webhookCiphertext  String?   @map("webhook_ciphertext")
+  webhookNonce       String?   @map("webhook_nonce")
+  webhookAuthTag     String?   @map("webhook_auth_tag")
+  webhookKeyVersion  String?   @map("webhook_key_version")
+  /// 画面用。⚠️ ホスト名まで（経路は合言葉なので出さない）。
+  webhookHost        String?   @map("webhook_host")
+  /// 抑制の判断材料。⚠️ 設定の保存では触らない。
+  lastNotifiedAt     DateTime? @map("last_notified_at") @db.Timestamptz(6)
+  lastSeverity       String?   @map("last_severity")
+  lastFingerprint    String?   @map("last_fingerprint")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("operations_alert_settings")
+}
+
 /// 返金の申請と審査（方針整理 2026-08-22）。
 ///
 /// ⚠️ **既存の `Refund` を置き換えない。** あちらは決済事業者への返金
@@ -1703,46 +1738,46 @@ model CreatorPayoutAccount {
 /// ⚠️ CHECK 制約（状態・区分・扱い・金額・二重承認の別人・却下の理由・
 /// 実行済みの返金行）は `20260822010000_refund_requests` にある。
 model RefundRequest {
-  id                    String   @id @default(uuid()) @db.Uuid
-  orderId               String   @map("order_id") @db.Uuid
-  status                String   @default("submitted")
-  reason                String
+  id                       String   @id @default(uuid()) @db.Uuid
+  orderId                  String   @map("order_id") @db.Uuid
+  status                   String   @default("submitted")
+  reason                   String
   /// ⚠️ 理由から決まる。人が選び直せない。
-  category              String
+  category                 String
   /// 運営の書き込み。⚠️ 購入者には見せない。
-  note                  String?
+  note                     String?
   /// 購入者が書いた申し出。⚠️ 文字として扱う（HTML にしない）。
-  buyerStatement        String?  @map("buyer_statement")
-  amount                Int
-  isFullRefund          Boolean  @map("is_full_refund")
+  buyerStatement           String?  @map("buyer_statement")
+  amount                   Int
+  isFullRefund             Boolean  @map("is_full_refund")
   /// `revoke` / `keep`。⚠️ 一部返金では運営が承認のときに指定する。
-  entitlementDisposition String  @default("keep") @map("entitlement_disposition")
-  requestedByAccountId  String?  @map("requested_by_account_id") @db.Uuid
-  reviewedByAccountId   String?  @map("reviewed_by_account_id") @db.Uuid
-  approvedByAccountId   String?  @map("approved_by_account_id") @db.Uuid
-  dualApprovalRequired  Boolean  @default(false) @map("dual_approval_required")
+  entitlementDisposition   String   @default("keep") @map("entitlement_disposition")
+  requestedByAccountId     String?  @map("requested_by_account_id") @db.Uuid
+  reviewedByAccountId      String?  @map("reviewed_by_account_id") @db.Uuid
+  approvedByAccountId      String?  @map("approved_by_account_id") @db.Uuid
+  dualApprovalRequired     Boolean  @default(false) @map("dual_approval_required")
   /// 承認のときに選んだ負担者（決定 2026-08-22）。`platform` / `creator`。
   /// ⚠️ **承認するまで NULL。** 申し出た時点では決まらない。
-  clawbackBearer String? @map("clawback_bearer")
+  clawbackBearer           String?  @map("clawback_bearer")
   /// 既定（事由から決まる値）と違う値を選んだか。
   /// ⚠️ **判断したという事実を、表とは別に残す。** 事由の表を将来変えると
   ///    「そのとき何が既定だったか」を引き直せなくなる。
-  clawbackBearerOverridden Boolean @default(false) @map("clawback_bearer_overridden")
+  clawbackBearerOverridden Boolean  @default(false) @map("clawback_bearer_overridden")
   /// 原則対象外を、運営が例外として通したか。
-  approvedAsException   Boolean  @default(false) @map("approved_as_exception")
-  rejectionNote         String?  @map("rejection_note")
+  approvedAsException      Boolean  @default(false) @map("approved_as_exception")
+  rejectionNote            String?  @map("rejection_note")
   /// 実行してできた返金の行。⚠️ 実行するまで NULL。
-  refundId              String?  @map("refund_id") @db.Uuid
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refundId                 String?  @map("refund_id") @db.Uuid
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  requestedBy Account? @relation("RefundRequestRequester", fields: [requestedByAccountId], references: [id], onDelete: SetNull)
-  reviewedBy Account?  @relation("RefundRequestReviewer", fields: [reviewedByAccountId], references: [id], onDelete: SetNull)
-  approvedBy Account?  @relation("RefundRequestApprover", fields: [approvedByAccountId], references: [id], onDelete: SetNull)
-  events     RefundRequestEvent[]
-  inquiry    CreatorRefundInquiry?
-  refunds    Refund[] @relation("RefundFromRequest")
+  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestedBy Account?              @relation("RefundRequestRequester", fields: [requestedByAccountId], references: [id], onDelete: SetNull)
+  reviewedBy  Account?              @relation("RefundRequestReviewer", fields: [reviewedByAccountId], references: [id], onDelete: SetNull)
+  approvedBy  Account?              @relation("RefundRequestApprover", fields: [approvedByAccountId], references: [id], onDelete: SetNull)
+  events      RefundRequestEvent[]
+  inquiry     CreatorRefundInquiry?
+  refunds     Refund[]              @relation("RefundFromRequest")
 
   @@index([status, createdAt(sort: Desc)])
   @@index([orderId])
@@ -1810,16 +1845,16 @@ model CreatorRefundInquiry {
 /// ⚠️ **同じ注文で 2 行作れない**（UNIQUE）。作れると、1 回の返金で
 /// 二重に取り立てることになる。
 model CreatorReceivable {
-  id                  String    @id @default(uuid()) @db.Uuid
-  creatorAccountId    String    @map("creator_account_id") @db.Uuid
-  orderId             String    @unique @map("order_id") @db.Uuid
+  id                 String    @id @default(uuid()) @db.Uuid
+  creatorAccountId   String    @map("creator_account_id") @db.Uuid
+  orderId            String    @unique @map("order_id") @db.Uuid
   /// ⚠️ **正の数**で持つ。符号は使う側が付ける。
-  amount              Int
-  status              String    @default("outstanding")
-  settledByAccountId  String?   @map("settled_by_account_id") @db.Uuid
-  settledAt           DateTime? @map("settled_at") @db.Timestamptz(6)
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  amount             Int
+  status             String    @default("outstanding")
+  settledByAccountId String?   @map("settled_by_account_id") @db.Uuid
+  settledAt          DateTime? @map("settled_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   creator   Account  @relation("CreatorReceivable", fields: [creatorAccountId], references: [id], onDelete: Restrict)
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)

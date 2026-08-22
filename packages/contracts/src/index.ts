@@ -469,6 +469,17 @@ export {
 } from './reporting';
 
 export {
+  ALERT_MIN_SEVERITY_VALUES,
+  operationsAlertSettingsSchema,
+  operationsAlertSettingsResponseSchema,
+  saveOperationsAlertSettingsRequestSchema,
+  notifyOperationsAlertsResponseSchema,
+  type OperationsAlertSettingsResponse,
+  type OperationsAlertSettingsView,
+  type NotifyOperationsAlertsResponse,
+  type SaveOperationsAlertSettingsRequest,
+} from './operations-alert';
+export {
   REFUND_REQUEST_STATUS_VALUES,
   REFUND_REQUEST_REASON_VALUES,
   BUYER_REFUND_REASON_VALUES,

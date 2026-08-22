@@ -120,6 +120,8 @@ export {
   PrismaCreatorDirectoryRepository,
 } from './repositories/reporting.repository';
 
+// 運営への知らせ（`UD-1102` の一部）。
+export { PrismaOperationsAlertSettingsRepository } from './repositories/operations-alert.repository';
 // 返金の申請と審査（方針整理 2026-08-22）。
 export {
   PrismaRefundRequestRepository,

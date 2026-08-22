@@ -105,6 +105,12 @@ import type {
   AccountNoteRecord,
   CustomerDirectoryPort,
   PayoutAccountCipherPort,
+  AlertMessage,
+  AlertMinSeverity,
+  AlertWebhookPort,
+  OperationsAlertSettingsPort,
+  OperationsAlertSettingsRecord,
+  OperationsSeverity,
   CreatorDirectoryPort,
   CreatorDirectoryQuery,
   CreatorDirectorySummary,
@@ -2879,6 +2885,9 @@ export interface TestHarness extends AppDependencies {
   readonly customerDirectory: InMemoryCustomerDirectory;
   readonly creatorProfileDetails: InMemoryCreatorProfileDetails;
   readonly payoutAccounts: InMemoryPayoutAccounts;
+  readonly alertSettings: InMemoryOperationsAlertSettings;
+  readonly alertWebhook: FakeAlertWebhook;
+  readonly alertMailer: FakeAlertMailer;
   readonly salesReport: InMemorySalesReport;
   readonly creatorDirectory: InMemoryCreatorDirectory;
   readonly creatorEarnings: InMemoryCreatorEarnings;
@@ -3107,6 +3116,9 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const customerDirectory = new InMemoryCustomerDirectory();
   const creatorProfileDetails = new InMemoryCreatorProfileDetails();
   const payoutAccounts = new InMemoryPayoutAccounts();
+  const alertSettings = new InMemoryOperationsAlertSettings();
+  const alertWebhook = new FakeAlertWebhook();
+  const alertMailer = new FakeAlertMailer();
   const salesReport = new InMemorySalesReport();
   const creatorDirectory = new InMemoryCreatorDirectory();
   const creatorEarnings = new InMemoryCreatorEarnings();
@@ -3152,6 +3164,10 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     // 運営の売上レポートと作家さまの一覧（`UD-123` / `UD-124` の一部）。
     salesReport,
     creatorDirectory,
+    // 運営への知らせ（`UD-1102`）。⚠️ 積んだ内容を試験から覗く。
+    alertSettings,
+    alertWebhook,
+    alertMailer,
     reporting: { sales: salesReport, creators: creatorDirectory },
     creatorEarnings,
     creatorOperations: {
@@ -3175,6 +3191,14 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
       entitlements: entitlementAdmin,
       thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
       jobKeys: ['issue-entitlements', 'deliver-entitlements', 'send-notifications'],
+      // 運営への知らせ（`UD-1102`）。⚠️ 試験では既定で配線する。
+      alerts: {
+        settings: alertSettings,
+        dashboardUrl: 'https://example.test/admin',
+        mailer: alertMailer,
+        webhook: alertWebhook,
+        cipher: new FakeAlertWebhookCipher(),
+      },
     },
     /*
       本番販売ガード（P0-7）。
@@ -4469,6 +4493,132 @@ export class InMemoryCreatorDirectory implements CreatorDirectoryPort {
 
   find(accountId: string): Promise<CreatorDirectorySummary | null> {
     return Promise.resolve(this.rows.get(accountId) ?? null);
+  }
+}
+
+/**
+ * 運営への知らせの設定の代役（`UD-1102`）。
+ *
+ * ⚠️ **保存で「知らせた記録」に触れない。** 本物と同じ振る舞いにする——
+ * 触る代役にすると、**宛先を直すたびに鳴り直す穴**を試験が見逃す。
+ */
+export class InMemoryOperationsAlertSettings implements OperationsAlertSettingsPort {
+  readonly rows = new Map<string, OperationsAlertSettingsRecord>();
+
+  find(environment: string): Promise<OperationsAlertSettingsRecord | null> {
+    return Promise.resolve(this.rows.get(environment) ?? null);
+  }
+
+  save(input: {
+    readonly environment: string;
+    readonly enabled: boolean;
+    readonly minSeverity: AlertMinSeverity;
+    readonly repeatAfterMinutes: number;
+    readonly emailRecipients: readonly string[];
+    readonly sealedWebhookUrl?: SealedSecret | null | undefined;
+    readonly webhookHost?: string | null | undefined;
+    readonly now: Date;
+  }): Promise<OperationsAlertSettingsRecord> {
+    const previous = this.rows.get(input.environment) ?? null;
+    const webhook =
+      input.sealedWebhookUrl === undefined
+        ? {
+            sealedWebhookUrl: previous?.sealedWebhookUrl ?? null,
+            webhookHost: previous?.webhookHost ?? null,
+          }
+        : { sealedWebhookUrl: input.sealedWebhookUrl, webhookHost: input.webhookHost ?? null };
+
+    const saved: OperationsAlertSettingsRecord = {
+      environment: input.environment,
+      enabled: input.enabled,
+      minSeverity: input.minSeverity,
+      repeatAfterMinutes: input.repeatAfterMinutes,
+      emailRecipients: [...input.emailRecipients],
+      ...webhook,
+      // ⚠️ 知らせた記録は引き継ぐ（保存では触らない）。
+      lastNotifiedAt: previous?.lastNotifiedAt ?? null,
+      lastSeverity: previous?.lastSeverity ?? null,
+      lastFingerprint: previous?.lastFingerprint ?? null,
+      updatedAt: input.now,
+    };
+    this.rows.set(input.environment, saved);
+    return Promise.resolve(saved);
+  }
+
+  markNotified(input: {
+    readonly environment: string;
+    readonly severity: OperationsSeverity;
+    readonly fingerprint: string;
+    readonly now: Date;
+  }): Promise<void> {
+    const previous = this.rows.get(input.environment);
+    if (previous !== undefined) {
+      this.rows.set(input.environment, {
+        ...previous,
+        lastNotifiedAt: input.now,
+        lastSeverity: input.severity,
+        lastFingerprint: input.fingerprint,
+      });
+    }
+    return Promise.resolve();
+  }
+}
+
+/** 知らせの受け口の代役。⚠️ 送った先と本文を試験から覗く。 */
+export class FakeAlertWebhook implements AlertWebhookPort {
+  readonly calls: { url: string; message: AlertMessage }[] = [];
+  ok = true;
+
+  post(url: string, message: AlertMessage): Promise<{ readonly ok: boolean }> {
+    this.calls.push({ url, message });
+    return Promise.resolve({ ok: this.ok });
+  }
+}
+
+/**
+ * 受け口の URL を包む代役。
+ *
+ * ⚠️ **結び付ける相手（環境）を必ず見る。** 見ない代役にすると、
+ * staging の行から本番の暗号文を貼り替えても通ってしまい、
+ * **本物なら塞げている穴**を試験が見逃す。
+ */
+export class FakeAlertWebhookCipher {
+  seal(plaintext: string, environment: string): SealedSecret {
+    return {
+      ciphertext: Buffer.from(`${environment}|${plaintext}`, 'utf8').toString('base64'),
+      nonce: 'test-nonce',
+      authTag: 'test-tag',
+      keyVersion: 'v1',
+      lastFour: '',
+    };
+  }
+
+  open(sealed: SealedSecret, environment: string): string | null {
+    const decoded = Buffer.from(sealed.ciphertext, 'base64').toString('utf8');
+    const separator = decoded.indexOf('|');
+    return decoded.slice(0, separator) === environment ? decoded.slice(separator + 1) : null;
+  }
+}
+
+/** メールの送り口の代役。⚠️ 宛先と本文を試験から覗く。 */
+export class FakeAlertMailer {
+  readonly sent: { to: string; subject: string; body: string }[] = [];
+  accepted = true;
+
+  send(input: {
+    readonly to: string;
+    readonly subject: string;
+    readonly body: string;
+    readonly idempotencyKey: string;
+  }): Promise<
+    | { readonly kind: 'accepted'; readonly providerMessageId: string | null }
+    | { readonly kind: 'network' }
+  > {
+    if (!this.accepted) {
+      return Promise.resolve({ kind: 'network' as const });
+    }
+    this.sent.push({ to: input.to, subject: input.subject, body: input.body });
+    return Promise.resolve({ kind: 'accepted' as const, providerMessageId: null });
   }
 }
 

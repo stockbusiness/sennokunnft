@@ -117,3 +117,7 @@ export type {
   AuthSubjectLookup,
   SupabaseRecipientResolverOptions,
 } from './supabase-recipient-resolver';
+
+// 運営への知らせ（`UD-1102` の一部）。
+export { HttpAlertWebhook } from './alert-webhook';
+export { AlertWebhookSecretBox } from './alert-webhook-secret-box';

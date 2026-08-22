@@ -14,6 +14,7 @@ import type {
   ReconcileRevocationsResponse,
   ReleaseExpiredResponse,
   EnqueueLegalNoticesResponse,
+  NotifyOperationsAlertsResponse,
   SendNotificationsResponse,
 } from '@sengoku/contracts';
 import {
@@ -27,6 +28,7 @@ import type { ClockPort } from '@sengoku/domain';
 import { Public } from '../auth/auth.guard';
 import type { WalletAutoDeliveryService } from '../claim/auto-delivery.service';
 import type { LegalRevisionNoticeService } from '../legal/legal-revision-notice.service';
+import type { OperationsAlertService } from '../operations/alert.service';
 import {
   REVOCATION_RECONCILE_BATCH_SIZE,
   type RevocationReconcileService,
@@ -50,6 +52,8 @@ export const WATCHED_JOB_KEYS = [
   'reconcile-revocations',
   'send-notifications',
   'enqueue-legal-notices',
+  // 運営への知らせ（`UD-1102` の一部）。
+  'notify-operations-alerts',
 ] as const;
 
 /** 時計仕掛けの結果を記録する口。⚠️ 実装は `@sengoku/database`。 */
@@ -98,6 +102,13 @@ export interface InternalJobConfig {
    * 配備ごとに変えることになり、繋いだ日に設定漏れで動かない。
    */
   readonly legalRevisionNotices: LegalRevisionNoticeService | null;
+  /**
+   * 運営への知らせ（`UD-1102` の一部）。
+   *
+   * ⚠️ **`null` は「この配備では知らせない」。** 必須にすると、
+   * 繋いでいない配備で起動しなくなる。
+   */
+  readonly operationsAlerts: OperationsAlertService | null;
   /**
    * 実行の結果を記録する先（P0-6）。
    *
@@ -353,6 +364,51 @@ export class InternalJobsController {
         return { versionCount: result.versions, enqueuedCount: result.enqueued };
       },
       (result) => result.versionCount,
+    );
+  }
+
+  /**
+   * いまの状況を見て、必要なら運営へ知らせる（`UD-1102` の一部）。
+   *
+   * ⚠️ **これは「異常があれば送る」口であって、「送る」口ではない。**
+   * 送るかどうかはドメインが決める（鳴りっぱなしにしないため）。
+   *
+   * ⚠️ **知らせを送れなくても、この巡回は失敗にしない。** 失敗として
+   * 記録すると、**知らせの不調が「時計の停止」に化ける**——本当に時計が
+   * 止まったときに、それが埋もれる。
+   */
+  @Post('notify-operations-alerts')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async notifyOperationsAlerts(
+    @Headers('x-internal-job-token') token: string | undefined,
+  ): Promise<NotifyOperationsAlertsResponse> {
+    this.assertAuthorized(token);
+    return this.record(
+      'notify-operations-alerts',
+      async () => {
+        const alerts = this.config.operationsAlerts;
+        if (alerts === null) {
+          // 知らせを繋いでいない配備。⚠️ 黙って返す（異常ではない）。
+          return {
+            outcome: 'skipped' as const,
+            reason: 'disabled',
+            emailSent: 0,
+            emailFailed: 0,
+            webhookSent: false,
+          };
+        }
+        const result = await alerts.run();
+        return {
+          outcome: result.decision.kind === 'notify' ? ('notified' as const) : ('skipped' as const),
+          // ⚠️ 沈黙に理由を付ける。理由の無い沈黙は、壊れているのと見分けが付かない。
+          reason: result.decision.reason,
+          emailSent: result.emailSent,
+          emailFailed: result.emailFailed,
+          webhookSent: result.webhookSent,
+        };
+      },
+      (result) => result.emailSent + (result.webhookSent ? 1 : 0),
     );
   }
 

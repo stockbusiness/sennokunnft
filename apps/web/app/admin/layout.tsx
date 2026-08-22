@@ -59,6 +59,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <a href="/admin/legal">規約・法務</a>
         <a href="/admin/consistency">記録の食い違い</a>
         {/*
+          ⚠️ **出しっぱなしでよい。** 変えられるのはオーナーだけで、
+             ほかの人には「権限がありません」と出る。隠すことは保護ではない。
+        */}
+        <a href="/admin/operations-alerts">異常のお知らせ</a>
+        {/*
           ⚠️ **出しっぱなしでよい。** 記録を残せるのはオーナーだけで、
              ほかの人には「権限がありません」と出る。隠すことは保護ではない。
         */}
