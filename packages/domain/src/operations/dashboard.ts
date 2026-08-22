@@ -377,6 +377,13 @@ export const JOB_LABELS: Readonly<Record<string, string>> = {
   'deliver-entitlements': 'ウォレットへのお届け',
   'reconcile-revocations': '取消の知らせの補完',
   'send-notifications': '知らせの送信',
+  /*
+    ⚠️ **名前を書いていなかった 2 つ。** 書いていないと、画面に
+       `enqueue-legal-notices` と英字のまま出る。運営が「これは何か」を
+       判断できず、止まっていても素通りする。
+  */
+  'enqueue-legal-notices': '改定のお知らせの積み込み',
+  'notify-operations-alerts': '運営への異常の知らせ',
 };
 
 function jobLabel(jobKey: string): string {
