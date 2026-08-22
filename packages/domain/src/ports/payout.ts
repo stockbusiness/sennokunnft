@@ -85,6 +85,17 @@ export interface SavePayoutDraftCommand {
   readonly now: Date;
 }
 
+/** 繰越がマイナスのまま残っている作家さま。⚠️ 額は正の数で持つ。 */
+export interface NegativeCarryView {
+  readonly creatorAccountId: string;
+  /** 最後に精算した期間。 */
+  readonly periodKey: string;
+  /** 残っているマイナスの額。⚠️ **正の数**で持つ（符号は画面が付ける）。 */
+  readonly outstandingAmount: number;
+  /** その精算を確定した日時。⚠️ どれだけ放置されているかが読める。 */
+  readonly since: Date;
+}
+
 export interface PayoutRepository {
   /** 一覧。⚠️ 新しい期間から。 */
   list(query: {
@@ -148,6 +159,18 @@ export interface PayoutRepository {
 
   /** 前の期間から持ち越された額。⚠️ 無ければ 0。 */
   carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number>;
+
+  /**
+   * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+   *
+   * ⚠️ **これが無いと、誰も気づかない。** 差し引ききれなかった分は翌月へ
+   * 繰り越されるが、その作家さまが二度と売らなければ**永久に残る**。
+   * 毎月の下書きには出るものの、他の下書きに埋もれて誰も拾わない。
+   *
+   * ⚠️ **取り立てる仕組みではない。** 見えるようにするだけである。大きい額
+   * が出たときに、運営が個別に判断できればよい（請求書を作る口は無い）。
+   */
+  listNegativeCarries(limit: number): Promise<readonly NegativeCarryView[]>;
 
   /**
    * 精算の対象になる作家さまを、その期間から洗い出す。

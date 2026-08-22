@@ -16,11 +16,13 @@ import {
   closePayoutPeriodResponseSchema,
   payoutDetailResponseSchema,
   payoutListQuerySchema,
+  negativeCarryListResponseSchema,
   payoutListResponseSchema,
   payoutSchema,
   type AdminPayoutAccountResponse,
   type ClosePayoutPeriodResponse,
   type PayoutDetailResponse,
+  type NegativeCarryListResponse,
   type PayoutListResponse,
   type PayoutViewDto,
 } from '@sengoku/contracts';
@@ -57,6 +59,29 @@ export class AdminPayoutController {
     const query = parseOrThrow(payoutListQuerySchema, rawQuery);
     const items = await this.payouts.list(query);
     return parseOrThrow(payoutListResponseSchema, { items: items.map(toDto) });
+  }
+
+  /**
+   * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+   *
+   * ⚠️ **`:id` より前に置く。** あとに置くと `negative-carries` が精算の
+   * 識別子として食われる。
+   *
+   * ⚠️ **`auditor` にも開く。** 取り立て漏れが残っていないかは監査の対象
+   * そのものである。額を動かす操作はここに無い。
+   */
+  @Get('negative-carries')
+  @RequireAction('payout.view')
+  async negativeCarries(): Promise<NegativeCarryListResponse> {
+    const items = await this.payouts.listNegativeCarries();
+    return parseOrThrow(negativeCarryListResponseSchema, {
+      items: items.map((row) => ({
+        creatorAccountId: row.creatorAccountId,
+        periodKey: row.periodKey,
+        outstandingAmount: row.outstandingAmount,
+        since: row.since.toISOString(),
+      })),
+    });
   }
 
   @Get(':id')

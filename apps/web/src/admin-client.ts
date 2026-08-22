@@ -40,6 +40,8 @@ import {
   type RefundListResponse,
   type RefundResult,
   payoutListResponseSchema,
+  negativeCarryListResponseSchema,
+  type NegativeCarryListResponse,
   payoutDetailResponseSchema,
   adminPayoutAccountResponseSchema,
   salesReportResponseSchema,
@@ -746,6 +748,16 @@ export function fetchPayouts(
     params.set('status', query.status);
   }
   return callAdmin(`/api/v1/admin/payouts?${params.toString()}`, payoutListResponseSchema);
+}
+
+/**
+ * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
+ *
+ * ⚠️ **取り立てるための一覧ではない。** 見えるようにするだけである。
+ * 請求書を作る口も、金額を書き換える口もここには無い。
+ */
+export function fetchNegativeCarries(): Promise<AdminResult<NegativeCarryListResponse>> {
+  return callAdmin('/api/v1/admin/payouts/negative-carries', negativeCarryListResponseSchema);
 }
 
 export function fetchPayout(id: string): Promise<AdminResult<PayoutDetailResponse>> {

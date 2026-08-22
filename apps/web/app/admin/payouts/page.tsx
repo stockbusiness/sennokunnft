@@ -1,5 +1,5 @@
 import { EmptyState, Notice, PageHeader, PriceTag, StatusBadge } from '@sengoku/ui';
-import { fetchPayouts } from '../../../src/admin-client';
+import { fetchNegativeCarries, fetchPayouts } from '../../../src/admin-client';
 import { ADMIN_COPY } from '../../../src/admin-copy';
 import { formatDateTime, shortId } from '../../../src/order-copy';
 import { PAYOUT_COPY as COPY, payoutStatusLabel, payoutStatusTone } from '../../../src/payout-copy';
@@ -22,7 +22,10 @@ export default async function AdminPayoutsPage({
 }) {
   const params = await searchParams;
   const periodKey = one(params.periodKey);
-  const result = await fetchPayouts({ periodKey });
+  const [result, negativeCarries] = await Promise.all([
+    fetchPayouts({ periodKey }),
+    fetchNegativeCarries(),
+  ]);
 
   return (
     <>
@@ -35,6 +38,54 @@ export default async function AdminPayoutsPage({
              締め済みの月。今月を出すと、必ず断られる欄を既定にすることになる。
         */}
         <ClosePeriodForm defaultPeriod={previousPeriodKey()} />
+      </section>
+
+      {/*
+        お戻しが残っている作家さま（決定 2026-08-22）。
+
+        ⚠️ **これが無いと、誰も気づかない。** 引ききれなかった分は翌月へ
+           繰り越されるが、その作家さまが二度と売らなければ永久に残る。
+           毎月の下書きには出るものの、他の下書きに埋もれて誰も拾わない。
+        ⚠️ **取り立てる口は置かない。** 見えるようにするだけ。
+      */}
+      <section>
+        <h2>{COPY.negativeHeading}</h2>
+        <p className="sengoku-form__hint">{COPY.negativeHint}</p>
+        {!negativeCarries.ok ? (
+          <EmptyState
+            title={ADMIN_COPY.unavailableTitle(negativeCarries.reason)}
+            hint={ADMIN_COPY.unavailableHint}
+          />
+        ) : negativeCarries.data.items.length === 0 ? (
+          <Notice tone="info" title={COPY.negativeEmpty} />
+        ) : (
+          <ul className="sengoku-order-list">
+            {negativeCarries.data.items.map((row) => (
+              <li className="sengoku-order-card" key={row.creatorAccountId}>
+                <div className="sengoku-order-card__head">
+                  {/* ⚠️ 氏名やメールは出せない（`UD-503`）。 */}
+                  <strong>{shortId(row.creatorAccountId)}</strong>
+                </div>
+                <dl className="sengoku-detail-list">
+                  <div>
+                    <dt>{COPY.negativeAmount}</dt>
+                    <dd>
+                      <PriceTag price={{ amount: row.outstandingAmount, currency: 'JPY' }} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{COPY.negativePeriod}</dt>
+                    <dd>{row.periodKey}</dd>
+                  </div>
+                  <div>
+                    <dt>{COPY.negativeSince}</dt>
+                    <dd>{formatDateTime(row.since)}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>

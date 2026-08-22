@@ -1,3 +1,4 @@
+import type { RefundReason } from '../order/refund';
 import type { EntitlementStatus, MintJobStatus } from '../state/machines';
 
 /**
@@ -174,6 +175,71 @@ export const BUYER_SELECTABLE_REFUND_REASONS: readonly RefundRequestReason[] =
   REFUND_REQUEST_REASONS.filter(
     (reason) => reason !== 'chargeback' && reason !== 'wrong_grant' && reason !== 'fraudulent_use',
   );
+
+/**
+ * この返金を、誰が被るか（決定 2026-08-22）。
+ *
+ * ⚠️ **これまで、事由を見ずに全部作家さまから差し引いていた。** 精算の
+ * 差し戻し（`listClawbacks`）に事由の条件が無く、**こちらの不具合で返金した
+ * 分まで作家さまの次回の売上から引いていた**。ここはその手当てである。
+ *
+ * ⚠️ **「払ったあとの返金」はほとんどが作家さまの落ち度ではない。** 精算は
+ * 返金の窓が閉じてから確定する（`canConfirmPayout`）ので、ご購入者都合の
+ * 返金は精算に載る前に決着している。あとから来るのは、こちらの落ち度・
+ * チャージバック・運営が例外として通したもの——どれも作家さまのせいではない。
+ */
+export type ClawbackBearer = 'platform' | 'creator';
+
+export function clawbackBearerFor(input: {
+  readonly reason: RefundRequestReason;
+  /** 原則対象外を、運営が例外として通したか。 */
+  readonly approvedAsException: boolean;
+}): ClawbackBearer {
+  /*
+    ⚠️ **例外として通したなら運営が被る。** 規約では原則お受けしない事由を、
+       運営の判断でお返しした——作家さまは何も間違えていない。ここを
+       作家さま負担にすると、運営の親切の代金を作家さまが払うことになる。
+  */
+  if (input.approvedAsException) {
+    return 'platform';
+  }
+
+  return PLATFORM_BORNE_REASONS.includes(input.reason) ? 'platform' : 'creator';
+}
+
+/**
+ * 運営が被る事由。
+ *
+ * ⚠️ **こちらの落ち度は、作家さまへ回さない。** 作家さまはお渡ししている。
+ * ⚠️ **決済のリスクも運営が備える。** チャージバックと不正利用は、場を
+ * 開いている側が引き受けるもので、手数料がその対価である。
+ * ⚠️ **ここに無い事由は作家さまが負う。** 事由を足したときに、既定で
+ * 作家さま負担へ倒れる——**足し忘れたら作家さまが払う**、という向きなので、
+ * 新しい事由を足すときは必ずこの表を見直すこと。
+ */
+const PLATFORM_BORNE_REASONS: readonly RefundRequestReason[] = [
+  // こちらの落ち度。
+  'duplicate_payment',
+  'wrong_amount',
+  'system_failure',
+  'issuance_failed',
+  'wrong_grant',
+  // 決済のリスク。
+  'chargeback',
+  'fraudulent_use',
+];
+
+/**
+ * 決済事業者へ渡す 3 値から、負担者を割り出す。
+ *
+ * ⚠️ **申請を通らない返金のため。** 運営が注文の画面から直接返した返金には
+ * 15 事由が無く、`refunds.reason` の 3 値しか残っていない。
+ * ⚠️ **`provider_initiated` は運営が被る。** 事業者の画面から返された
+ * ——チャージバックがここに来る。
+ */
+export function clawbackBearerForRefundReason(reason: RefundReason): ClawbackBearer {
+  return reason === 'buyer_request' ? 'creator' : 'platform';
+}
 
 export function isBuyerSelectableReason(reason: RefundRequestReason): boolean {
   return BUYER_SELECTABLE_REFUND_REASONS.includes(reason);

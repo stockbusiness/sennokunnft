@@ -90,6 +90,8 @@ export class AdminRefundRequestController {
         createdAt: event.createdAt.toISOString(),
       })),
       remainingAmount: found.remainingAmount,
+      // ⚠️ 押す前に、誰が被るかを見せるための値。
+      clawbackBearer: found.clawbackBearer,
     });
   }
 

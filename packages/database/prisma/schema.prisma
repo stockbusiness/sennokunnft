@@ -864,6 +864,11 @@ model Refund {
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   settledAt         DateTime? @map("settled_at") @db.Timestamptz(6)
 
+  /// この返金を誰が被るか（決定 2026-08-22）。`platform` / `creator`。
+  /// ⚠️ **作家さま負担の分だけが、次回以降の精算で差し引かれる。**
+  ///    こちらの落ち度・チャージバック・運営が例外として通したものは
+  ///    `platform`（作家さまへ回さない）。
+  clawbackBearer String @default("creator") @map("clawback_bearer")
   /// どの申請から実行されたか（方針整理 2026-08-22）。
   /// ⚠️ **NULL 可のまま。** これまでの返金は申請を持たない。
   requestId String? @map("request_id") @db.Uuid

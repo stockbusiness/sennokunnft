@@ -119,6 +119,16 @@ export const adminRefundRequestDetailSchema = z.object({
   ),
   /** その注文でまだ返せる額。⚠️ 承認の金額を確かめるために出す。 */
   remainingAmount: z.number().int(),
+  /**
+   * この返金を誰が被るか（決定 2026-08-22）。
+   *
+   * ⚠️ **事由と「例外として通すか」から決まる。画面で選ばせない。** 選べる
+   * ようにすると、一度の操作で作家さまへ費用を寄せられてしまう——この
+   * 決定が止めたかったのは、まさにそれである。
+   * ⚠️ **押す前に見せる。** 見えないまま押すと、作家さまの売上から引かれる
+   * ことに気づかないまま承認できてしまう。
+   */
+  clawbackBearer: z.enum(['platform', 'creator']),
 });
 export type AdminRefundRequestDetail = z.infer<typeof adminRefundRequestDetailSchema>;
 

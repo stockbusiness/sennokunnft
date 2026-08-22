@@ -3,6 +3,7 @@ import {
   addBusinessDays,
   canApprove,
   categoryOf,
+  clawbackBearerFor,
   checkRefundAmount,
   creatorInquiryExpired,
   isBuyerSelectableReason,
@@ -12,6 +13,7 @@ import {
   requiresDualApproval,
   suggestDisposition,
   type AuditLogPort,
+  type ClawbackBearer,
   type ClockPort,
   type CreatorInquiryPort,
   type CreatorInquiryRecord,
@@ -79,6 +81,8 @@ export interface RefundRequestDetail {
   readonly inquiry: (CreatorInquiryRecord & { readonly expired: boolean }) | null;
   readonly events: readonly RefundRequestEventRecord[];
   readonly remainingAmount: number;
+  /** 誰が被るか。⚠️ 事由から決まる（画面で選ばせない）。 */
+  readonly clawbackBearer: ClawbackBearer;
 }
 
 /** 実行した結果。⚠️ **入金の完了ではない**（事業者が受け付けただけ）。 */
@@ -159,6 +163,14 @@ export class RefundRequestService {
            別の返金が先に通ったときに、承認の画面が古い残額を出す。
       */
       remainingAmount: context === null ? 0 : context.totalAmount - context.amountRefunded,
+      /*
+        ⚠️ **保存した値ではなく、そのつど出す。** 申請の段階では、まだ
+           「例外として通すか」が決まっていない。承認のときに確定する。
+      */
+      clawbackBearer: clawbackBearerFor({
+        reason: request.reason,
+        approvedAsException: request.approvedAsException,
+      }),
     };
   }
 
@@ -627,6 +639,16 @@ export class RefundRequestService {
         note: `refund_request:${request.id}`,
         amount: request.amount,
         entitlementDisposition: request.entitlementDisposition,
+        /*
+          誰が被るか（決定 2026-08-22）。
+          ⚠️ **承認の内容から決める。** 事由だけで引き直すと、運営が
+             例外として通した判断（`approvedAsException`）がここで消え、
+             運営の親切の代金を作家さまが払うことになる。
+        */
+        clawbackBearer: clawbackBearerFor({
+          reason: request.reason,
+          approvedAsException: request.approvedAsException,
+        }),
       });
 
       await this.config.requests.transition({

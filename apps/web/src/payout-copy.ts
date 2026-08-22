@@ -20,6 +20,18 @@ export const PAYOUT_COPY = {
   closing: '集計しています…',
   closed: (count: number): string => `${String(count)} 件の下書きを作りました。`,
 
+  negativeHeading: 'お戻しが残っている作家さま',
+  /*
+    ⚠️ **「取り立てる」と書かない。** 請求書を出す仕組みは作っていない。
+       ここは気づくための一覧で、額が大きいときに個別にご相談する。
+  */
+  negativeHint:
+    'お支払いのあとに返金が起きて、次の売上から引ききれなかった分です。次に売れたときに差し引かれます。額が大きい場合や、長く残っている場合は、個別にご相談ください。',
+  negativeEmpty: 'お戻しが残っている作家さまはいません',
+  negativeAmount: '残っている額',
+  negativeSince: 'いつから',
+  negativePeriod: '最後の精算',
+
   listHeading: 'これまでの精算',
   listEmpty: 'まだ精算はありません',
 

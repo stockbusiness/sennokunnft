@@ -682,6 +682,7 @@ export {
 
 export type {
   PayoutLineView,
+  NegativeCarryView,
   PayoutRepository,
   PayoutView,
   SavePayoutDraftCommand,
@@ -1065,9 +1066,12 @@ export {
   checkRefundAmount,
   BUYER_SELECTABLE_REFUND_REASONS,
   isBuyerSelectableReason,
+  clawbackBearerFor,
+  clawbackBearerForRefundReason,
 } from './refund/request';
 export type {
   ApprovalDecision,
+  ClawbackBearer,
   EntitlementDisposition,
   RefundAmountCheck,
   RefundCategory,
