@@ -44,8 +44,17 @@ export default async function AdminDashboardPage() {
     ⚠️ **手当てが要るものを上に出す。** 全部を 1 つの表に並べると、
        赤い行が「本日のご注文」の下に埋もれる。運営は上から読む。
   */
-  const actionable = indicators.filter((row) => row.severity !== 'normal');
-  const routine = indicators.filter((row) => row.severity === 'normal');
+  /*
+    ⚠️ **`paused` を手当ての一覧に出さない（2026-08-22）。** 出すと
+       「手当てが要ること」が常に 1 件以上になり、空になる日が来なくなる。
+       止めている処理は下の「今日の動き」に灰色で並べる。
+  */
+  const actionable = indicators.filter(
+    (row) => row.severity !== 'normal' && row.severity !== 'paused',
+  );
+  const routine = indicators.filter(
+    (row) => row.severity === 'normal' || row.severity === 'paused',
+  );
 
   return (
     <>
