@@ -170,12 +170,24 @@ export async function approveAction(
     return { error: `${COPY.approveDispositionLabel}をお選びください。` };
   }
 
+  /*
+    誰が被るか（決定 2026-08-22）。
+    ⚠️ **知らない値は送らない。** 画面は 2 択だが、要求は作り替えられる。
+       既定へ落とすのではなく断る——黙って既定にすると、送った側は
+       選んだつもりのまま違う結果になる。
+  */
+  const bearer = text(form, 'clawbackBearer');
+  if (bearer !== '' && bearer !== 'platform' && bearer !== 'creator') {
+    return { error: `${COPY.bearerLabel}をお選びください。` };
+  }
+
   const note = text(form, 'note');
   const approveAsException = checked(form, 'approveAsException');
   const result = await approveRefundRequest(id, {
     amount,
     entitlementDisposition: disposition,
     ...(approveAsException ? { approveAsException: true } : {}),
+    ...(bearer === '' ? {} : { clawbackBearer: bearer }),
     ...(note === '' ? {} : { note }),
   });
   if (!result.ok) {

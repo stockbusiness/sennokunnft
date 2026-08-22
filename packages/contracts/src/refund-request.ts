@@ -142,6 +142,10 @@ export const adminRefundRequestDetailSchema = z.object({
    * ことに気づかないまま承認できてしまう。
    */
   clawbackBearer: z.enum(['platform', 'creator']),
+  /** 事由から決まる既定。⚠️ 画面はこれを初期値にする。 */
+  clawbackBearerDefault: z.enum(['platform', 'creator']),
+  /** 既定と違う値を選んだか。⚠️ 承認前は `false`。 */
+  clawbackBearerOverridden: z.boolean(),
 });
 export type AdminRefundRequestDetail = z.infer<typeof adminRefundRequestDetailSchema>;
 
@@ -217,6 +221,16 @@ export const approveRefundRequestSchema = z.object({
    * ⚠️ **省略時は `false`。** 押し慣れで越えられるようにしない。
    */
   approveAsException: z.boolean().optional(),
+  /**
+   * この返金を誰が被るか（決定 2026-08-22）。
+   *
+   * ⚠️ **省略なら事由から決まる既定。** 画面は既定を選んだ状態で出し、
+   * 運営が必要なときだけ変える。
+   * ⚠️ **既定と違う値を選んだことは記録される。** あとから「なぜこの
+   * 作家さまが負担したのか」を説明するときに要る。値だけ残しても、
+   * それが既定だったのか判断だったのかが読めない。
+   */
+  clawbackBearer: z.enum(['platform', 'creator']).optional(),
   note: z.string().trim().max(2000).optional(),
 });
 export type ApproveRefundRequest = z.infer<typeof approveRefundRequestSchema>;

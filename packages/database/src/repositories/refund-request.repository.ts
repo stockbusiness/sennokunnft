@@ -3,6 +3,7 @@ import type {
   CreatorInquiryPort,
   CreatorInquiryRecord,
   CreatorReceivablePort,
+  ClawbackBearer,
   EntitlementDisposition,
   ReceivableRecord,
   ReceivableStatus,
@@ -101,6 +102,8 @@ export class PrismaRefundRequestRepository implements RefundRequestPort {
           readonly approvedByAccountId?: string | undefined;
           readonly dualApprovalRequired?: boolean | undefined;
           readonly approvedAsException?: boolean | undefined;
+          readonly clawbackBearer?: ClawbackBearer | undefined;
+          readonly clawbackBearerOverridden?: boolean | undefined;
           readonly entitlementDisposition?: EntitlementDisposition | undefined;
           readonly amount?: number | undefined;
           readonly isFullRefund?: boolean | undefined;
@@ -310,6 +313,8 @@ function toRecord(row: {
   approvedByAccountId: string | null;
   dualApprovalRequired: boolean;
   approvedAsException: boolean;
+  clawbackBearer: string | null;
+  clawbackBearerOverridden: boolean;
   rejectionNote: string | null;
   refundId: string | null;
   createdAt: Date;
@@ -331,6 +336,8 @@ function toRecord(row: {
     approvedByAccountId: row.approvedByAccountId,
     dualApprovalRequired: row.dualApprovalRequired,
     approvedAsException: row.approvedAsException,
+    clawbackBearer: (row.clawbackBearer ?? null) as ClawbackBearer | null,
+    clawbackBearerOverridden: row.clawbackBearerOverridden,
     rejectionNote: row.rejectionNote,
     refundId: row.refundId,
     createdAt: row.createdAt,

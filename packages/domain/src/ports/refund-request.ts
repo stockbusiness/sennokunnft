@@ -1,4 +1,5 @@
 import type {
+  ClawbackBearer,
   EntitlementDisposition,
   RefundCategory,
   RefundRequestReason,
@@ -36,6 +37,22 @@ export interface RefundRequestRecord {
   readonly dualApprovalRequired: boolean;
   /** 原則対象外を、運営が例外として通したか。 */
   readonly approvedAsException: boolean;
+  /**
+   * 承認のときに選んだ負担者（決定 2026-08-22）。
+   *
+   * ⚠️ **承認するまで `null`。** 申し出た時点では決まらない。
+   * ⚠️ **実行はこの値を使う。** 事由から引き直さない——引き直すと、
+   * 承認で選んだ意味が消える。
+   */
+  readonly clawbackBearer: ClawbackBearer | null;
+  /**
+   * 既定（事由から決まる値）と違う値を選んだか。
+   *
+   * ⚠️ **判断したという事実を、表とは別に残す。** 事由の表を将来変えると
+   * 「そのとき何が既定だったか」を引き直せなくなる。値だけ残しても、
+   * それが既定だったのか判断だったのかが読めない。
+   */
+  readonly clawbackBearerOverridden: boolean;
   /** 却下の理由。⚠️ 必ず残す。 */
   readonly rejectionNote: string | null;
   /** 実行してできた返金の行。まだなら `null`。 */
@@ -113,6 +130,8 @@ export interface RefundRequestPort {
           readonly approvedByAccountId?: string | undefined;
           readonly dualApprovalRequired?: boolean | undefined;
           readonly approvedAsException?: boolean | undefined;
+          readonly clawbackBearer?: ClawbackBearer | undefined;
+          readonly clawbackBearerOverridden?: boolean | undefined;
           readonly entitlementDisposition?: EntitlementDisposition | undefined;
           readonly amount?: number | undefined;
           readonly isFullRefund?: boolean | undefined;

@@ -821,10 +821,41 @@ describe('返金の負担者', () => {
     expect(after.body.clawbackBearer).toBe('platform');
   });
 
-  it('負担者を要求本文から指定できない', async () => {
+  it('承認のときに負担者を選び直せる（決定 2026-08-22）', async () => {
     /*
-      ⚠️ **口が無い、という状態を保つ。** 送っても無視される（契約に無い）。
-         受け取る欄を作った瞬間、事由の判断を迂回できる道ができる。
+      ⚠️ **実務では事由の表に当てはまらないことが起きる。** 決めるのは運営で、
+         仕組みはその判断を**記録する**側に回る。
+    */
+    const { requestId } = await reviewed('not_as_described');
+    const before = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-5')))
+      .expect(200);
+    expect(before.body.clawbackBearerDefault).toBe('creator');
+
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({
+        amount: ORDER_TOTAL,
+        entitlementDisposition: 'revoke',
+        clawbackBearer: 'platform',
+      })
+      .expect(201);
+
+    const after = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-6')))
+      .expect(200);
+    expect(after.body.clawbackBearer).toBe('platform');
+    // ⚠️ 既定は動かない。何が既定だったかは、あとから読めるままにする。
+    expect(after.body.clawbackBearerDefault).toBe('creator');
+  });
+
+  it('既定と違う値を選んだことが残る', async () => {
+    /*
+      ⚠️ **値だけ残しても、それが既定だったのか判断だったのかが読めない。**
+         あとから「なぜこの作家さまが負担したのか」を説明するときに要る。
     */
     const { requestId } = await reviewed('not_as_described');
     await request(app.getHttpServer())
@@ -839,9 +870,66 @@ describe('返金の負担者', () => {
 
     const detail = await request(app.getHttpServer())
       .get(`${ADMIN}/${requestId}`)
-      .set(auth(actorToken('operator', 'bearer-reader-5')))
+      .set(auth(actorToken('operator', 'bearer-reader-7')))
       .expect(200);
-    // ⚠️ 送った値は効かない。事由から決まったまま。
+    expect(detail.body.clawbackBearerOverridden).toBe(true);
+
+    const approved = harness.refundRequests.requests.events.find(
+      (event) => event.action === 'refund_request.approved',
+    );
+    expect(approved?.summary).toMatchObject({
+      clawbackBearer: 'platform',
+      clawbackBearerOverridden: true,
+    });
+  });
+
+  it('既定のまま承認したら、変更の印は立たない', async () => {
+    const { requestId } = await reviewed('not_as_described');
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({ amount: ORDER_TOTAL, entitlementDisposition: 'revoke' })
+      .expect(201);
+
+    const detail = await request(app.getHttpServer())
+      .get(`${ADMIN}/${requestId}`)
+      .set(auth(actorToken('operator', 'bearer-reader-8')))
+      .expect(200);
     expect(detail.body.clawbackBearer).toBe('creator');
+    expect(detail.body.clawbackBearerOverridden).toBe(false);
+  });
+
+  it('選び直した値が、操作の記録にも残る', async () => {
+    // ⚠️ 証跡と監査ログの両方。読める人の範囲が違う。
+    const { requestId } = await reviewed('not_as_described');
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({
+        amount: ORDER_TOTAL,
+        entitlementDisposition: 'revoke',
+        clawbackBearer: 'platform',
+      })
+      .expect(201);
+
+    const entry = harness.audit.entries.find((row) => row.action === 'refund_request.approve');
+    expect(entry?.summary).toMatchObject({
+      clawbackBearer: 'platform',
+      clawbackBearerOverridden: true,
+    });
+  });
+
+  it('知らない負担者は受け付けない', async () => {
+    // ⚠️ 黙って既定へ落とさない。送った側は選んだつもりのまま違う結果になる。
+    const { requestId } = await reviewed('not_as_described');
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/approve`)
+      .set(auth(ownerToken()))
+      .send({
+        amount: ORDER_TOTAL,
+        entitlementDisposition: 'revoke',
+        clawbackBearer: 'someone_else',
+      })
+      .expect(400);
   });
 });

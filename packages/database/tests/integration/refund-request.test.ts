@@ -189,7 +189,12 @@ suite('DB が止めること', () => {
         id: created.id,
         from: ['submitted'],
         to: 'approved',
-        patch: { dualApprovalRequired: true, approvedByAccountId: creatorId },
+        // ⚠️ 承認済みには負担者が要る（`refund_requests_approved_has_bearer`）。
+        patch: {
+          dualApprovalRequired: true,
+          approvedByAccountId: creatorId,
+          clawbackBearer: 'creator',
+        },
         now: NOW,
       }),
     ).rejects.toSatisfy((error: unknown) =>
@@ -204,7 +209,11 @@ suite('DB が止めること', () => {
         id: created.id,
         from: ['submitted'],
         to: 'approved',
-        patch: { dualApprovalRequired: true, approvedByAccountId: buyerId },
+        patch: {
+          dualApprovalRequired: true,
+          approvedByAccountId: buyerId,
+          clawbackBearer: 'creator',
+        },
         now: NOW,
       }),
     ).resolves.toBe(true);
@@ -227,7 +236,14 @@ suite('DB が止めること', () => {
   it('返金の行が無い実行済みを拒む', async () => {
     const created = await requests.create(newRequest());
     await expect(
-      requests.transition({ id: created.id, from: ['submitted'], to: 'executed', now: NOW }),
+      requests.transition({
+        id: created.id,
+        from: ['submitted'],
+        to: 'executed',
+        // ⚠️ 負担者は満たしておく。ここで見たいのは**返金の行**が無いこと。
+        patch: { clawbackBearer: 'creator' },
+        now: NOW,
+      }),
     ).rejects.toSatisfy((error: unknown) =>
       violatesConstraint(error, 'refund_requests_executed_has_refund'),
     );
@@ -535,6 +551,67 @@ suite('審査の設定', () => {
   it('回答期限の営業日数は 1〜20 の外を拒む', async () => {
     await expect(setSettings({ creatorInquiryBusinessDays: 21 })).rejects.toSatisfy(
       (error: unknown) => violatesConstraint(error, 'settlement_settings_inquiry_days_range'),
+    );
+  });
+});
+
+/**
+ * 承認のときに選んだ負担者（決定 2026-08-22）。
+ *
+ * ⚠️ **事由から決まる値は、あくまで既定。** 実務では表に当てはまらない
+ * ことが起きる。決めるのは運営で、仕組みはその判断を**記録する**側に回る。
+ */
+suite('返金の負担者', () => {
+  it('承認するまでは決まっていない', async () => {
+    const created = await requests.create(newRequest());
+    expect(await requests.find(created.id)).toMatchObject({
+      clawbackBearer: null,
+      clawbackBearerOverridden: false,
+    });
+  });
+
+  it('承認のときに選んだ値と、既定から変えた印が残る', async () => {
+    const created = await requests.create(newRequest());
+    await requests.transition({
+      id: created.id,
+      from: ['submitted'],
+      to: 'approved',
+      patch: { clawbackBearer: 'platform', clawbackBearerOverridden: true },
+      now: NOW,
+    });
+    expect(await requests.find(created.id)).toMatchObject({
+      clawbackBearer: 'platform',
+      clawbackBearerOverridden: true,
+    });
+  });
+
+  it('負担者が決まっていない承認済みを作れない', async () => {
+    /*
+      ⚠️ **決まらないまま実行へ進むと、事由から引き直すことになる。**
+         承認で選んだ意味が消える。
+    */
+    const created = await requests.create(newRequest());
+    await expect(
+      requests.transition({
+        id: created.id,
+        from: ['submitted'],
+        to: 'approved',
+        now: NOW,
+      }),
+    ).rejects.toSatisfy((error: unknown) =>
+      violatesConstraint(error, 'refund_requests_approved_has_bearer'),
+    );
+  });
+
+  it('知らない負担者を拒む', async () => {
+    const created = await requests.create(newRequest());
+    await expect(
+      prisma.refundRequest.update({
+        where: { id: created.id },
+        data: { clawbackBearer: 'someone_else' },
+      }),
+    ).rejects.toSatisfy((error: unknown) =>
+      violatesConstraint(error, 'refund_requests_clawback_bearer_valid'),
     );
   });
 });

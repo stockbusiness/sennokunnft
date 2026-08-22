@@ -1721,6 +1721,13 @@ model RefundRequest {
   reviewedByAccountId   String?  @map("reviewed_by_account_id") @db.Uuid
   approvedByAccountId   String?  @map("approved_by_account_id") @db.Uuid
   dualApprovalRequired  Boolean  @default(false) @map("dual_approval_required")
+  /// 承認のときに選んだ負担者（決定 2026-08-22）。`platform` / `creator`。
+  /// ⚠️ **承認するまで NULL。** 申し出た時点では決まらない。
+  clawbackBearer String? @map("clawback_bearer")
+  /// 既定（事由から決まる値）と違う値を選んだか。
+  /// ⚠️ **判断したという事実を、表とは別に残す。** 事由の表を将来変えると
+  ///    「そのとき何が既定だったか」を引き直せなくなる。
+  clawbackBearerOverridden Boolean @default(false) @map("clawback_bearer_overridden")
   /// 原則対象外を、運営が例外として通したか。
   approvedAsException   Boolean  @default(false) @map("approved_as_exception")
   rejectionNote         String?  @map("rejection_note")

@@ -208,6 +208,7 @@ import type {
   RefundRequestStatus,
   RefundRequestEventRecord,
   RefundCategory,
+  ClawbackBearer,
   EntitlementDisposition,
   CreatorInquiryPort,
   CreatorInquiryRecord,
@@ -4540,6 +4541,9 @@ export class InMemoryRefundRequests implements RefundRequestPort {
       approvedByAccountId: null,
       dualApprovalRequired: false,
       approvedAsException: false,
+      // ⚠️ 承認するまで決まらない。申し出た時点では分からない。
+      clawbackBearer: null,
+      clawbackBearerOverridden: false,
       rejectionNote: null,
       refundId: null,
       createdAt: input.now,
@@ -4559,6 +4563,8 @@ export class InMemoryRefundRequests implements RefundRequestPort {
           readonly approvedByAccountId?: string | undefined;
           readonly dualApprovalRequired?: boolean | undefined;
           readonly approvedAsException?: boolean | undefined;
+          readonly clawbackBearer?: ClawbackBearer | undefined;
+          readonly clawbackBearerOverridden?: boolean | undefined;
           readonly entitlementDisposition?: EntitlementDisposition | undefined;
           readonly amount?: number | undefined;
           readonly isFullRefund?: boolean | undefined;
@@ -4582,6 +4588,8 @@ export class InMemoryRefundRequests implements RefundRequestPort {
       approvedByAccountId: patch.approvedByAccountId ?? row.approvedByAccountId,
       dualApprovalRequired: patch.dualApprovalRequired ?? row.dualApprovalRequired,
       approvedAsException: patch.approvedAsException ?? row.approvedAsException,
+      clawbackBearer: patch.clawbackBearer ?? row.clawbackBearer,
+      clawbackBearerOverridden: patch.clawbackBearerOverridden ?? row.clawbackBearerOverridden,
       entitlementDisposition: patch.entitlementDisposition ?? row.entitlementDisposition,
       amount: patch.amount ?? row.amount,
       isFullRefund: patch.isFullRefund ?? row.isFullRefund,
