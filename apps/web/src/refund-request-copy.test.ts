@@ -6,6 +6,7 @@ import {
 } from '@sengoku/contracts';
 import {
   buyerRefundReasonLabel,
+  clawbackBearerLabel,
   entitlementDispositionLabel,
   REFUND_REQUEST_COPY,
   receivableStatusLabel,
@@ -184,5 +185,31 @@ describe('その他の言葉', () => {
     expect(refundEventLabel('refund_request.opened')).toBe('お申し出をお受けしました');
     // ⚠️ 新しい操作を足したときに、経過からその行が消えないこと。
     expect(refundEventLabel('refund_request.something_new')).toBe('refund_request.something_new');
+  });
+});
+
+/**
+ * 誰がこの返金を被るか（決定 2026-08-22）。
+ *
+ * ⚠️ **押す前に、誰が被るかが読めること。** 見えないまま押すと、作家さまの
+ * 売上から引かれることに気づかないまま承認できてしまう。
+ */
+describe('返金の負担者の言葉', () => {
+  it('作家さま負担のときは、その先まで書く', () => {
+    /*
+      ⚠️ **「作家さま」とだけ出さない。** 何が起きるのかが伝わらない。
+         次回以降の精算で差し引かれる、という事実まで見えて初めて、
+         押す前に考えられる。
+    */
+    expect(clawbackBearerLabel('creator')).toContain('差し引き');
+  });
+
+  it('運営が被るときは、作家さまから引かないと分かる', () => {
+    expect(clawbackBearerLabel('platform')).toBe('運営');
+    expect(REFUND_REQUEST_COPY.bearerHint).toContain('作家さまの売上からは引きません');
+  });
+
+  it('事由から決まると書いてある（選べると読ませない）', () => {
+    expect(REFUND_REQUEST_COPY.bearerHint).toContain('事由から決まります');
   });
 });

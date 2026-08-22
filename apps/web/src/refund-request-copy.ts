@@ -82,6 +82,17 @@ export const REFUND_REQUEST_COPY = {
   approveExceptionLabel: '原則お受けしない事由ですが、例外としてお返しします',
   approveExceptionHint:
     'お気が変わった・お渡し済みなど、規約では原則お返ししない事由です。例外にする理由を、下の記録へ必ずお書きください。',
+  bearerLabel: 'この返金を被るのは',
+  bearerPlatform: '運営',
+  bearerCreator: '作家さま（次回以降の精算で差し引きます）',
+  /*
+    ⚠️ **選ばせない。** 事由と「例外としてお通しするか」から決まる。選べる
+       ようにすると、一度の操作で作家さまへ費用を寄せられてしまう——この
+       決定が止めたかったのは、まさにそれである。
+  */
+  bearerHint:
+    '事由から決まります。こちらの不具合・カード会社からの申し立て・例外としてお通しする場合は、運営が被ります（作家さまの売上からは引きません）。',
+
   approveNoteLabel: '判断の記録（任意）',
   approveSubmit: 'この金額で承認する',
   approving: '承認しています…',
@@ -277,6 +288,19 @@ export function refundCategoryLabel(
     case 'excluded':
       return '規約では原則お受けしません';
   }
+}
+
+/**
+ * 誰が被るかの言葉。
+ *
+ * ⚠️ **作家さま負担のときは、その先まで書く。** 「作家さま」とだけ出すと、
+ * 何が起きるのかが伝わらない。次回以降の精算で差し引かれる、という事実まで
+ * 見えて初めて、押す前に考えられる。
+ */
+export function clawbackBearerLabel(bearer: 'platform' | 'creator'): string {
+  return bearer === 'platform'
+    ? REFUND_REQUEST_COPY.bearerPlatform
+    : REFUND_REQUEST_COPY.bearerCreator;
 }
 
 export function entitlementDispositionLabel(disposition: 'revoke' | 'keep'): string {

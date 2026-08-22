@@ -5,6 +5,7 @@ import { fetchRefundRequest } from '../../../../src/admin-client';
 import { ADMIN_COPY } from '../../../../src/admin-copy';
 import { formatDateTime, shortId } from '../../../../src/order-copy';
 import {
+  clawbackBearerLabel,
   entitlementDispositionLabel,
   REFUND_REQUEST_COPY as COPY,
   refundCategoryLabel,
@@ -48,7 +49,8 @@ export default async function AdminRefundRequestPage({
     );
   }
 
-  const { request, note, buyerStatement, inquiry, events, remainingAmount } = result.data;
+  const { request, note, buyerStatement, inquiry, events, remainingAmount, clawbackBearer } =
+    result.data;
 
   /*
     どの操作を出すか。
@@ -106,6 +108,11 @@ export default async function AdminRefundRequestPage({
             <dt>{COPY.fieldRemaining}</dt>
             {/* ⚠️ 注文から取り直した値。申し出へ焼き付けた額ではない。 */}
             <dd>{remainingAmount.toLocaleString('ja-JP')} 円</dd>
+          </div>
+          <div>
+            <dt>{COPY.bearerLabel}</dt>
+            {/* ⚠️ 事由から決まる。この画面では読むだけ。 */}
+            <dd>{clawbackBearerLabel(clawbackBearer)}</dd>
           </div>
           <div>
             <dt>{COPY.fieldDisposition}</dt>
@@ -224,6 +231,7 @@ export default async function AdminRefundRequestPage({
             requestId={request.id}
             remainingAmount={remainingAmount}
             isExcluded={request.category === 'excluded'}
+            bearer={clawbackBearer}
           />
         </section>
       )}
