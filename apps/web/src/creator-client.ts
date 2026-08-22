@@ -6,6 +6,11 @@ import {
   creatorProfileDetailSchema,
   payoutAccountResponseSchema,
   creatorProfileSchema,
+  creatorRefundInquiryListResponseSchema,
+  creatorReceivableListResponseSchema,
+  type AnswerRefundInquiryRequest,
+  type CreatorReceivableListResponse,
+  type CreatorRefundInquiryListResponse,
   uploadImageResponseSchema,
   type CreatorArtwork,
   type CreatorEarningsDetailResponse,
@@ -348,4 +353,41 @@ export function saveMyPayoutAccount(input: {
   accountHolderKana: string;
 }): Promise<CreatorResult<PayoutAccountResponse>> {
   return call('/api/v1/creator/payout-account', payoutAccountResponseSchema, json(input, 'PUT'));
+}
+
+// --- 返金の事実確認と売上からのお戻し（方針整理 2026-08-22）-----------------
+//
+// ⚠️ **ここに「返金する」口を足さない。** 作家さまが決済会社へ返金を投げる
+//    経路は、この仕組みに存在しない。販売の代金は運営の決済アカウントで
+//    受けているので、返せるのも運営だけである。
+
+export function fetchMyRefundInquiries(): Promise<CreatorResult<CreatorRefundInquiryListResponse>> {
+  return call('/api/v1/creator/refund-inquiries', creatorRefundInquiryListResponseSchema);
+}
+
+/**
+ * 事実確認に答える。
+ *
+ * ⚠️ **「返金してよい・いけない」を送る欄は無い。** 伺うのは事実で、
+ * 決めるのは運営である。
+ * ⚠️ **期限を過ぎても送れる。** 遅れて届いた事実にも値打ちがある。
+ */
+export function answerRefundInquiry(
+  requestId: string,
+  body: AnswerRefundInquiryRequest,
+): Promise<CreatorResult<{ ok: true }>> {
+  return call(
+    `/api/v1/creator/refund-inquiries/${encodeURIComponent(requestId)}/answer`,
+    z.object({ ok: z.literal(true) }),
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** 売上からのお戻し。⚠️ 金額を書き換える口は無い（記録であって帳簿ではない）。 */
+export function fetchMyReceivables(): Promise<CreatorResult<CreatorReceivableListResponse>> {
+  return call('/api/v1/creator/receivables', creatorReceivableListResponseSchema);
 }

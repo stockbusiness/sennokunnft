@@ -53,6 +53,19 @@ export const BUYER_REFUND_REASON_VALUES = REFUND_REQUEST_REASON_VALUES.filter(
   (reason) => reason !== 'chargeback' && reason !== 'wrong_grant' && reason !== 'fraudulent_use',
 ) as readonly (typeof REFUND_REQUEST_REASON_VALUES)[number][];
 
+/**
+ * 状態と事由の型。
+ *
+ * ⚠️ **`web` が `@sengoku/domain` へ依存できない**（依存の向きの決まり）ので、
+ * 画面の文言はこちらの型で書く。ドメイン側と並びが一致していることは、
+ * `apps/api` の試験が見張っている（両方へ依存できるのはあちらだけ）。
+ */
+export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUS_VALUES)[number];
+export type RefundRequestReason = (typeof REFUND_REQUEST_REASON_VALUES)[number];
+export type RefundCategory = (typeof REFUND_CATEGORY_VALUES)[number];
+export type EntitlementDisposition = (typeof ENTITLEMENT_DISPOSITION_VALUES)[number];
+export type ReceivableStatus = (typeof RECEIVABLE_STATUS_VALUES)[number];
+
 export const REFUND_CATEGORY_VALUES = [
   'operator_only',
   'creator_confirmation',

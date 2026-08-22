@@ -8,7 +8,7 @@ import {
   orderStatusLabel,
   payFailureHint,
 } from '../../../../src/order-copy';
-import { PayButton, PaymentResultPoller } from './forms';
+import { PayButton, PaymentResultPoller, RefundRequestForm } from './forms';
 
 /**
  * 注文の状態と、お支払いへの導線（指示書 §12）。
@@ -101,6 +101,17 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           hint="ご返金の反映には、お支払い方法により数日かかることがあります。"
         />
       )}
+
+      {/*
+        返金のご相談（方針整理 2026-08-22）。
+
+        ⚠️ **お支払いが済んでからだけ出す。** まだ払っていない注文に
+           「返金のご相談」を出すと、払う前から返せるように読める。
+        ⚠️ **すでにご返金が済んでいる注文には出さない。** 出すと、二重に
+           お申し出をいただくことになる（API も断るが、断られる前に
+           出さないほうがよい）。
+      */}
+      {paid && order.refundStatus === 'none' ? <RefundRequestForm orderId={order.id} /> : null}
 
       {awaitingResult ? <PaymentResultPoller /> : null}
 
