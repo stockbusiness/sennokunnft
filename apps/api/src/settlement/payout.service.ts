@@ -310,6 +310,8 @@ export class PayoutService {
         carriedInAmount: draft.carriedInAmount,
         netAmount: draft.netAmount,
         carriedOutAmount: draft.carriedOutAmount,
+        deferredDisputeCount: draft.deferredDisputeCount,
+        deferredDisputeAmount: draft.deferredDisputeAmount,
         minimumPayoutAmount: draft.minimumPayoutAmount,
         transferFeeBearer: draft.transferFeeBearer,
         lines: draft.lines.map((line) => ({ id: this.config.ids.generate(), ...line })),

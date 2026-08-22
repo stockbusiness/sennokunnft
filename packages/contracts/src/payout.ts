@@ -35,6 +35,15 @@ export const payoutSchema = z.object({
   netAmount: z.number().int(),
   /** 翌月への繰越。⚠️ マイナスもありうる。 */
   carriedOutAmount: z.number().int(),
+  /**
+   * 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。
+   *
+   * ⚠️ **合計には入っていない。** 「なぜ今月は少ないのか」を画面へ出す
+   * ためだけの数である。
+   */
+  deferredDisputeCount: z.number().int().nonnegative(),
+  /** 決着待ちで載せなかったぶんの、作家さまの取り分の合計。 */
+  deferredDisputeAmount: z.number().int().nonnegative(),
   /** ⚠️ **その時点の**設定。焼き付けてある。 */
   minimumPayoutAmount: z.number().int(),
   transferFeeBearer: z.enum(['creator', 'platform']),

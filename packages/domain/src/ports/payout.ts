@@ -31,6 +31,15 @@ export interface PayoutView {
   readonly carriedInAmount: number;
   readonly netAmount: number;
   readonly carriedOutAmount: number;
+  /**
+   * 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。
+   *
+   * ⚠️ **合計には入っていない。** 画面へ「なぜ今月は少ないのか」を出す
+   * ためだけの数である。
+   */
+  readonly deferredDisputeCount: number;
+  /** 決着待ちで載せなかったぶんの、作家さまの取り分の合計。 */
+  readonly deferredDisputeAmount: number;
   /** ⚠️ **その時点の**設定。焼き付けてある。 */
   readonly minimumPayoutAmount: number;
   readonly transferFeeBearer: TransferFeeBearer;
@@ -69,6 +78,10 @@ export interface SavePayoutDraftCommand {
   readonly carriedInAmount: number;
   readonly netAmount: number;
   readonly carriedOutAmount: number;
+  /** 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。 */
+  readonly deferredDisputeCount: number;
+  /** 決着待ちで載せなかったぶんの、作家さまの取り分の合計。 */
+  readonly deferredDisputeAmount: number;
   readonly minimumPayoutAmount: number;
   readonly transferFeeBearer: TransferFeeBearer;
   readonly lines: readonly {
@@ -122,9 +135,15 @@ export interface PayoutRepository {
    *
    * 実装の責務:
    *   - 決済が成立し（`payment_status = 'succeeded'`）
-   *   - `paid_at` がその期間に入り
+   *   - `paid_at` が**その期間の終わりより前**（開始では絞らない）
    *   - **返金されていない**（`refund_status = 'none'`）
    *   - **まだどの精算にも載っていない**（`payout_lines` に無い）
+   *   - 決着していない争いがあるかを `isUnderDispute` に入れる
+   *
+   * ⚠️ **開始で絞らない**（決定 B・2026-08-22）。争いのある注文は
+   * `buildPayoutDraft` が下書きから外すので、開始で絞ると**外した注文が
+   * 二度と候補に上がらない**——翌月は翌月に入金された注文しか見ないため、
+   * その注文は永久にお支払いされない。**外すことと拾い直すことは対である。**
    *
    * ⚠️ **「返金の窓が閉じたか」はここで絞らない。** 下書きは窓が開いた
    * ままでも作れてよい（運営が見通しを持てる方がよい）。確定だけを

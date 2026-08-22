@@ -388,6 +388,8 @@ function toEarningsView(view: CreatorPeriodEarnings) {
     minimumPayoutAmount: view.minimumPayoutAmount,
     dueAt: view.dueAt.toISOString(),
     openRefundWindows: view.openRefundWindows,
+    deferredDisputeCount: view.deferredDisputeCount,
+    deferredDisputeAmount: view.deferredDisputeAmount,
   };
 }
 
@@ -412,6 +414,13 @@ function toHistoryDomain(payout: PayoutView): CreatorPeriodEarnings {
     dueAt: payout.dueAt,
     // ⚠️ 締めた時点で 0 だったことは記録として残っている。数え直さない。
     openRefundWindows: 0,
+    /*
+      ⚠️ **保存された値を読む。数え直さない**（決定 B・2026-08-22）。
+         いま数えると、そのあと決着した争いが消えて「今月なぜ少なかったのか」
+         が読めなくなる。締めた時点で外した件数こそが、その月の答えである。
+    */
+    deferredDisputeCount: payout.deferredDisputeCount,
+    deferredDisputeAmount: payout.deferredDisputeAmount,
   };
 }
 

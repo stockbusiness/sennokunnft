@@ -2316,6 +2316,8 @@ export class InMemoryPayouts implements PayoutRepository {
       carriedInAmount: command.carriedInAmount,
       netAmount: command.netAmount,
       carriedOutAmount: command.carriedOutAmount,
+      deferredDisputeCount: command.deferredDisputeCount,
+      deferredDisputeAmount: command.deferredDisputeAmount,
       minimumPayoutAmount: command.minimumPayoutAmount,
       transferFeeBearer: command.transferFeeBearer,
       confirmedAt: null,

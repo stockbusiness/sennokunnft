@@ -59,6 +59,7 @@ describe('見込みは、締めた精算と同じ計算で出す', () => {
           feeAmount: 2_400,
           netAmount: 9_600,
           refundableUntil: new Date('2026-08-15T00:00:00.000Z'),
+          isUnderDispute: false,
         },
       ],
       clawbacks: [],
@@ -114,6 +115,7 @@ describe('見込みは、締めた精算と同じ計算で出す', () => {
           netAmount: 9_600,
           // まだ閉じていない。
           refundableUntil: new Date('2026-10-01T00:00:00.000Z'),
+          isUnderDispute: false,
         },
       ],
       clawbacks: [],

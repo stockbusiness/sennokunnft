@@ -69,6 +69,22 @@ export default async function CreatorEarningsPage() {
             hint={CREATOR_COPY.earningsOpenRefundHint}
           />
         ) : null}
+
+        {/*
+          ⚠️ **「なぜ今月は少ないのか」を書く**（決定 B・2026-08-22）。
+             合計だけ減って理由が無いと、ご不安をおかけする。
+          ⚠️ **0 件なら出さない。** 常に出すと、何も起きていない月まで
+             不穏に見える。
+        */}
+        {current.deferredDisputeCount > 0 ? (
+          <Notice
+            title={CREATOR_COPY.earningsDeferredDisputeNotice(
+              current.deferredDisputeCount,
+              current.deferredDisputeAmount,
+            )}
+            hint={CREATOR_COPY.earningsDeferredDisputeHint}
+          />
+        ) : null}
       </section>
 
       {/* --- 次回のお振込 --- */}

@@ -195,6 +195,7 @@ describe('売上のまとめ', () => {
         feeAmount: 2400,
         netAmount: 9600,
         refundableUntil: new Date('2026-06-24T00:00:00.000Z'),
+        isUnderDispute: false,
       },
     ];
 

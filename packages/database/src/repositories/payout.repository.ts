@@ -90,8 +90,21 @@ export class PrismaPayoutRepository implements PayoutRepository {
       where: {
         creatorAccountId: input.creatorAccountId,
         paymentStatus: 'succeeded',
-        // ⚠️ 半開区間。終了の瞬間は次の期間のもの。
-        paidAt: { gte: input.periodStart, lt: input.periodEnd },
+        /*
+          ⚠️ **開始で絞らない**（決定 B・2026-08-22）。「その期間に入金された」
+             ではなく「**その期間の終わりまでに入金され、まだどの精算にも
+             載っていない**」を拾う。
+
+             争いのある注文は下書きから外す（`buildPayoutDraft`）ため、
+             開始で絞ると**外した注文が二度と候補に上がらない**——翌月の
+             集計は翌月に入金された注文しか見ないので、その注文は永久に
+             お支払いされない。**この 2 つは対で、片方だけ戻さないこと。**
+
+             取りこぼした注文が自然に拾い直される、という副次的な効果も
+             ある。下の「まだどの精算にも載っていない」が二重払いを防ぐ。
+          ⚠️ 半開区間。終了の瞬間は次の期間のもの。
+        */
+        paidAt: { lt: input.periodEnd },
         /*
           ⚠️ **返金された注文は入れない。** 一部返金も外す——作家さまへ
              いくら渡すかは、返した額を差し引いてから決める話で、
@@ -118,6 +131,19 @@ export class PrismaPayoutRepository implements PayoutRepository {
         creatorAmount: true,
         refundableUntil: true,
         lines: { select: { artworkTitleSnapshot: true }, take: 1 },
+        /*
+          ⚠️ **決着していない争いだけを見る**（決定 B・2026-08-22）。
+             `countOpenDisputes` とまったく同じ条件にしてある。ずれると、
+             下書きから外れないのに確定で止まる注文（またはその逆）ができる。
+          ⚠️ **警告（`warning`）は数えない。** カード会社が調べ始めただけで、
+             申し立てにならずに消えることもある。数えると、消えた警告の
+             ぶんまでお支払いが理由なく遅れる。
+        */
+        disputes: {
+          where: { status: { in: ['needs_response', 'under_review'] } },
+          select: { id: true },
+          take: 1,
+        },
       },
     });
 
@@ -134,6 +160,7 @@ export class PrismaPayoutRepository implements PayoutRepository {
       feeAmount: row.platformFeeAmount,
       netAmount: row.creatorAmount,
       refundableUntil: row.refundableUntil,
+      isUnderDispute: row.disputes.length > 0,
     }));
   }
 
@@ -396,6 +423,8 @@ export class PrismaPayoutRepository implements PayoutRepository {
           carriedInAmount: command.carriedInAmount,
           netAmount: command.netAmount,
           carriedOutAmount: command.carriedOutAmount,
+          deferredDisputeCount: command.deferredDisputeCount,
+          deferredDisputeAmount: command.deferredDisputeAmount,
           minimumPayoutAmount: command.minimumPayoutAmount,
           transferFeeBearer: command.transferFeeBearer,
           createdAt: command.now,
@@ -474,6 +503,8 @@ function toView(row: {
   carriedInAmount: number;
   netAmount: number;
   carriedOutAmount: number;
+  deferredDisputeCount: number;
+  deferredDisputeAmount: number;
   minimumPayoutAmount: number;
   transferFeeBearer: string;
   confirmedAt: Date | null;
@@ -498,6 +529,8 @@ function toView(row: {
     carriedInAmount: row.carriedInAmount,
     netAmount: row.netAmount,
     carriedOutAmount: row.carriedOutAmount,
+    deferredDisputeCount: row.deferredDisputeCount,
+    deferredDisputeAmount: row.deferredDisputeAmount,
     minimumPayoutAmount: row.minimumPayoutAmount,
     transferFeeBearer: row.transferFeeBearer as TransferFeeBearer,
     confirmedAt: row.confirmedAt,

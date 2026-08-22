@@ -47,6 +47,20 @@ export interface CreatorPeriodEarnings {
    * 確定しないのか」の答えがこれだから。
    */
   readonly openRefundWindows: number;
+  /**
+   * 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。
+   *
+   * ⚠️ **作家さまにも見せる。** 合計だけ減ると「なぜ今月は少ないのか」が
+   * 読めない。差し戻しを明細に載せているのと同じ理由である。
+   */
+  readonly deferredDisputeCount: number;
+  /**
+   * 決着待ちで載せなかったぶんの、作家さまの取り分の合計。
+   *
+   * ⚠️ **「来月これだけ入る」と読ませない。** 負ければ返金となり払われない。
+   * 画面の文言でそう伝える。
+   */
+  readonly deferredDisputeAmount: number;
 }
 
 /** 見込みを、締めた精算と同じ形に整える。⚠️ 計算はしない。写すだけ。 */
@@ -69,6 +83,8 @@ export function estimateFromDraft(input: {
     minimumPayoutAmount: draft.minimumPayoutAmount,
     dueAt: input.dueAt,
     openRefundWindows: draft.openRefundWindows,
+    deferredDisputeCount: draft.deferredDisputeCount,
+    deferredDisputeAmount: draft.deferredDisputeAmount,
   };
 }
 
