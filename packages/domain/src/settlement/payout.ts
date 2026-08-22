@@ -73,6 +73,24 @@ export interface PayoutCandidate {
    * ⚠️ `null` は「期限が付いていない古い注文」。閉じたとみなさない。
    */
   readonly refundableUntil: Date | null;
+  /**
+   * 決着していないチャージバックがあるか（決定 B・2026-08-22）。
+   *
+   * ⚠️ **`true` の注文は今回の精算に載せない。** 載せたうえで確定を止めると、
+   * 争い 1 件のために**その作家さまの精算が丸ごと止まる**。争いは期限で
+   * 閉じないため、決着まで数週間〜数か月かかる。1 万円の争いで 100 万円の
+   * お支払いが止まる、という事故がこれで起きる。
+   *
+   * ⚠️ **外すのであって、無かったことにしない。** 載らなかった注文は次の
+   * 期間の候補に戻る——`listCandidates` が「期間の終わりまでに入金され、
+   * **まだどの精算にも載っていない**」注文を拾うため。この 2 つは対で、
+   * 片方だけ変えると**永久にお支払いされない注文ができる**。
+   *
+   * ⚠️ **警告（`warning`）は含めない。** カード会社が調べ始めただけで、
+   * 申し立てにならずに消えることもある。含めると、消えた警告のぶんまで
+   * お支払いが理由なく遅れる。
+   */
+  readonly isUnderDispute: boolean;
 }
 
 /**
@@ -145,6 +163,21 @@ export interface PayoutDraft {
    * 「今月はいくらになりそうか」を見られる方が親切なので。確定だけを止める。
    */
   readonly openRefundWindows: number;
+  /**
+   * 決着待ちのため今回は載せなかった注文の数（決定 B・2026-08-22）。
+   *
+   * ⚠️ **合計には入っていない。** 画面へ理由を出すためだけの数である。
+   * 差し戻しと違い、明細の行にはしない——行にすると 0 円の行が並び、
+   * 「払われた 0 円」なのか「まだ払われていない」のか読めなくなる。
+   */
+  readonly deferredDisputeCount: number;
+  /**
+   * 決着待ちで載せなかったぶんの、作家さまの取り分の合計。
+   *
+   * ⚠️ **「いずれ払う額」であって「今回の未払い」ではない。** 決着で
+   * 負ければ返金となり、この額は払われない。画面の文言もそう書く。
+   */
+  readonly deferredDisputeAmount: number;
 }
 
 /**
@@ -156,9 +189,22 @@ export interface PayoutDraft {
  * ⚠️ **繰越は「払わなかった額」であって「利益」ではない。** 最低支払額に
  * 満たないときは全額を翌月へ送る。少額を刻んで振込手数料に消えるのを
  * 避けるための決まりで、こちらが預かる話ではない。
+ *
+ * ⚠️ **争いのある注文だけはここで外す**（決定 B・2026-08-22）。「除く条件を
+ * 2 か所に置かない」という上の但し書きの例外である。呼び出し側で外すと、
+ * **外した件数と額が下書きに残らず**、画面に理由を出せなくなる——作家さまは
+ * 「なぜ今月は少ないのか」を読めないまま待つことになる。
  */
 export function buildPayoutDraft(input: PayoutDraftInput): PayoutDraft {
-  const lines: PayoutLineDraft[] = input.candidates.map((candidate) => ({
+  /*
+    ⚠️ **争いのある注文を先に分ける。** 以降の合計はすべて `included` から
+       取る。1 か所でも `input.candidates` を見ると、外したはずの額が
+       合計に混ざり、**争いの最中の注文までお支払いしてしまう**。
+  */
+  const included = input.candidates.filter((row) => !row.isUnderDispute);
+  const deferred = input.candidates.filter((row) => row.isUnderDispute);
+
+  const lines: PayoutLineDraft[] = included.map((candidate) => ({
     orderId: candidate.orderId,
     orderNumber: candidate.orderNumber,
     artworkTitleSnapshot: candidate.artworkTitleSnapshot,
@@ -187,9 +233,9 @@ export function buildPayoutDraft(input: PayoutDraftInput): PayoutDraft {
     });
   }
 
-  const grossAmount = sum(input.candidates.map((row) => row.grossAmount));
-  const feeAmount = sum(input.candidates.map((row) => row.feeAmount));
-  const earned = sum(input.candidates.map((row) => row.netAmount));
+  const grossAmount = sum(included.map((row) => row.grossAmount));
+  const feeAmount = sum(included.map((row) => row.feeAmount));
+  const earned = sum(included.map((row) => row.netAmount));
   const refundedAmount = sum(input.clawbacks.map((row) => row.netAmount));
 
   /*
@@ -218,7 +264,15 @@ export function buildPayoutDraft(input: PayoutDraftInput): PayoutDraft {
     carriedOutAmount,
     minimumPayoutAmount: input.minimumPayoutAmount,
     transferFeeBearer: input.transferFeeBearer,
-    openRefundWindows: input.candidates.filter((row) => !isWindowClosed(row, input.now)).length,
+    /*
+      ⚠️ **外した注文の窓は数えない。** 外した注文は今回のお支払いに
+         含まれていないので、その窓が開いていても止める理由が無い。
+         `input.candidates` を見ると、争いのある注文の窓のせいで
+         **確定できない精算ができる**——B にした意味が消える。
+    */
+    openRefundWindows: included.filter((row) => !isWindowClosed(row, input.now)).length,
+    deferredDisputeCount: deferred.length,
+    deferredDisputeAmount: sum(deferred.map((row) => row.netAmount)),
   };
 }
 
@@ -240,11 +294,17 @@ export function buildPayoutDraft(input: PayoutDraftInput): PayoutDraft {
 export function canConfirmPayout(subject: {
   readonly openRefundWindows: number;
   /**
-   * 決着していないチャージバックの数（2026-08-22）。
+   * **この精算の明細に載っている**注文のうち、決着していない
+   * チャージバックの数（決定 B・2026-08-22 に意味を変更）。
    *
-   * ⚠️ **0 でなければ確定できない。** 争いの最中にお支払いすると、
-   * 負けたときに作家さまから返してもらう話になる。返金の窓と同じ性質の
-   * 歯止めだが、**期限では閉じない**——カード会社が決めるまで開いたまま。
+   * ⚠️ **これは「下書きを作ったあとに争いが起きた」ための網である。**
+   * 下書きを作る時点で争いのある注文は `buildPayoutDraft` が明細から外すので、
+   * 普通はここは 0 になる。0 でないのは、作ってから確定するまでのあいだに
+   * 新しく争いが起きたときだけ。
+   *
+   * ⚠️ **その場合は下書きを作り直せば通る。** 作り直せばその注文が外れる。
+   * 「決着を待つ」ではない——待っても開かないので、待たせると B にした
+   * 意味が消える。文言もそう出している。
    */
   readonly openDisputes: number;
 }): Result<true, DomainError> {
@@ -253,7 +313,9 @@ export function canConfirmPayout(subject: {
   }
   /*
     ⚠️ **返金の窓とは別の符号で返す。** 一緒にすると、運営が「期限を
-       待てば開く」と読む。争いは待っても開かない——決着を待つしかない。
+       待てば開く」と読む。争いは待っても開かない。
+    ⚠️ **やることは「作り直す」であって「待つ」ではない**（決定 B）。
+       作り直せば争いのある注文が外れ、残りは今回お支払いできる。
   */
   if (subject.openDisputes > 0) {
     return err(domainError('PAYOUT_DISPUTE_OPEN', 'some orders are under dispute'));

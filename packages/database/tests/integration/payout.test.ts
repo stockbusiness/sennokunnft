@@ -124,6 +124,29 @@ async function seedPaidOrder(
   return order.id;
 }
 
+/**
+ * 争いを 1 件（決定 B・2026-08-22）。
+ *
+ * ⚠️ **決着した状態には `closedAt` が要る。** DB の CHECK が
+ * 「`won`/`lost` なら決着の時刻がある」を縛っている。
+ */
+async function seedDispute(orderId: string, status: string): Promise<void> {
+  const closed = status === 'won' || status === 'lost';
+  await prisma.paymentDispute.create({
+    data: {
+      orderId,
+      provider: 'stripe',
+      disputeRef: `dp_${randomUUID()}`,
+      status,
+      reason: 'fraudulent',
+      amount: 12000,
+      currency: 'JPY',
+      openedAt: new Date('2026-08-15T00:00:00.000Z'),
+      closedAt: closed ? new Date('2026-08-20T00:00:00.000Z') : null,
+    },
+  });
+}
+
 function draftCommand(seeded: Seeded, orderIds: readonly string[], overrides = {}) {
   return {
     payoutId: randomUUID(),
@@ -139,6 +162,8 @@ function draftCommand(seeded: Seeded, orderIds: readonly string[], overrides = {
     carriedInAmount: 0,
     netAmount: 9600 * orderIds.length,
     carriedOutAmount: 0,
+    deferredDisputeCount: 0,
+    deferredDisputeAmount: 0,
     minimumPayoutAmount: 1000,
     transferFeeBearer: 'creator' as const,
     lines: orderIds.map((orderId) => ({
@@ -427,6 +452,70 @@ suite('候補の絞り込み', () => {
         periodEnd: PERIOD_END,
       }),
     ).resolves.toHaveLength(0);
+  });
+
+  /*
+    決着待ちのご注文を拾い直す（決定 B・2026-08-22）。
+
+    ⚠️ **これが B のいちばん危ない部分である。** 争いのあるご注文は下書きから
+       外すので、候補を「その期間に入金された」で絞ったままにすると、
+       外したご注文が**二度と候補に上がらない**——翌月は翌月に入金された
+       ご注文しか見ないため、作家さまへ永久にお支払いされない。
+  */
+  it('前の期間に入金され、まだ精算に載っていない注文は、次の期間の候補に上がる', async () => {
+    const seeded = await seedCreator();
+    // ⚠️ 8 月に入金。8 月の精算では争いのため外されたもの、という想定。
+    await seedPaidOrder(seeded, { paidAt: new Date('2026-08-10T00:00:00.000Z') });
+    // 9 月の期間で数える。
+    await expect(
+      repo.listCandidates({
+        creatorAccountId: seeded.creatorAccountId,
+        periodStart: PERIOD_END,
+        periodEnd: new Date('2026-09-30T15:00:00.000Z'),
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('争いのあるご注文は isUnderDispute が立って返る', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await seedDispute(orderId, 'needs_response');
+    const rows = await repo.listCandidates({
+      creatorAccountId: seeded.creatorAccountId,
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.isUnderDispute).toBe(true);
+  });
+
+  it('警告だけでは isUnderDispute が立たない', async () => {
+    /*
+      ⚠️ **警告は申し立てではない。** カード会社が調べ始めただけで、
+         そのまま消えることもある。外すと、消えた警告のぶんまで作家さまへの
+         お支払いが理由なく遅れる。
+    */
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await seedDispute(orderId, 'warning');
+    const rows = await repo.listCandidates({
+      creatorAccountId: seeded.creatorAccountId,
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+    });
+    expect(rows[0]?.isUnderDispute).toBe(false);
+  });
+
+  it('決着した争いでは isUnderDispute が立たない', async () => {
+    const seeded = await seedCreator();
+    const orderId = await seedPaidOrder(seeded);
+    await seedDispute(orderId, 'won');
+    const rows = await repo.listCandidates({
+      creatorAccountId: seeded.creatorAccountId,
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+    });
+    expect(rows[0]?.isUnderDispute).toBe(false);
   });
 
   it('境界の直前は入る', async () => {

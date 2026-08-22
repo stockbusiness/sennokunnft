@@ -107,6 +107,30 @@ export default async function AdminPayoutDetailPage({
         )}
       </dl>
 
+      {/*
+        決着待ちで外したご注文（決定 B・2026-08-22）。
+
+        ⚠️ **合計の下に出す。** 上に出すと、合計に含まれていると読まれる。
+        ⚠️ **0 件なら出さない。** 常に出すと「いつも何かが止まっている」
+           ように見え、本当に止まっているときに気づけない。
+      */}
+      {payout.deferredDisputeCount > 0 ? (
+        <section>
+          <h2>決着待ちのため、今回は含めていないご注文</h2>
+          <p>
+            カード会社との間で争いになっているご注文が{' '}
+            <strong>{payout.deferredDisputeCount.toLocaleString('ja-JP')} 件</strong>
+            （作家さまの取り分で {payout.deferredDisputeAmount.toLocaleString('ja-JP')}{' '}
+            円）あります。 上の合計には<strong>含まれていません</strong>。
+          </p>
+          <p className="sengoku-form__hint">
+            決着したあとの精算に含まれます。負けた場合は返金となり、お支払いは
+            発生しません。争いの最中にお支払いすると、負けたときに作家さまから
+            返していただく話になるため、いったん外しています。
+          </p>
+        </section>
+      ) : null}
+
       <section>
         <h2>{COPY.linesHeading}</h2>
         {lines.length === 0 ? (

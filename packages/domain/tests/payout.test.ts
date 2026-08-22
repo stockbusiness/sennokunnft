@@ -39,6 +39,7 @@ function candidate(overrides: Partial<PayoutCandidate> = {}): PayoutCandidate {
     feeAmount: 2400,
     netAmount: 9600,
     refundableUntil: CLOSED,
+    isUnderDispute: false,
     ...overrides,
   };
 }
@@ -261,5 +262,114 @@ describe('状態', () => {
   it('支払い済みは終着', () => {
     expect(transitionPayoutStatus('paid', 'confirmed').ok).toBe(false);
     expect(transitionPayoutStatus('paid', 'paid').ok).toBe(false);
+  });
+});
+
+/*
+  決着待ちのご注文を外す（決定 B・2026-08-22）。
+
+  ⚠️ ここで守りたいのは 3 つ。
+    1. **外したぶんが合計に入らないこと。** 入ると、争いの最中の注文まで
+       お支払いしてしまう。
+    2. **外した件数と額が残ること。** 残らないと、作家さまが「なぜ今月は
+       少ないのか」を読めない。
+    3. **外した注文の返金の窓で確定が止まらないこと。** 止まると、争いの
+       ある注文のせいで精算が確定できず、B にした意味が消える。
+*/
+describe('決着待ちのご注文', () => {
+  it('争いのあるご注文は合計に入らない', () => {
+    const result = draft({
+      candidates: [
+        candidate(),
+        candidate({ orderId: 'order-2', orderNumber: 'SNK-0002', isUnderDispute: true }),
+      ],
+    });
+    // ⚠️ 1 件ぶんだけ。2 件ぶん（24000 / 4800 / 19200）になってはいけない。
+    expect(result.grossAmount).toBe(12000);
+    expect(result.feeAmount).toBe(2400);
+    expect(result.netAmount).toBe(9600);
+  });
+
+  it('争いのあるご注文は明細にも載らない', () => {
+    const result = draft({
+      candidates: [
+        candidate(),
+        candidate({ orderId: 'order-2', orderNumber: 'SNK-0002', isUnderDispute: true }),
+      ],
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines.map((line) => line.orderId)).toEqual(['order-1']);
+  });
+
+  it('外した件数と額が残る', () => {
+    /*
+      ⚠️ **合計だけ減らして理由を残さないと、作家さまが読めない。**
+         差し戻しを明細に載せているのと同じ理由である。
+    */
+    const result = draft({
+      candidates: [
+        candidate(),
+        candidate({ orderId: 'order-2', orderNumber: 'SNK-0002', isUnderDispute: true }),
+        candidate({ orderId: 'order-3', orderNumber: 'SNK-0003', isUnderDispute: true }),
+      ],
+    });
+    expect(result.deferredDisputeCount).toBe(2);
+    expect(result.deferredDisputeAmount).toBe(19200);
+  });
+
+  it('争いが無ければ 0 件・0 円', () => {
+    const result = draft({ candidates: [candidate()] });
+    expect(result.deferredDisputeCount).toBe(0);
+    expect(result.deferredDisputeAmount).toBe(0);
+  });
+
+  it('外したご注文の返金の窓では確定が止まらない', () => {
+    /*
+      ⚠️ **これが本題である。** 外した注文の窓まで数えると、争いのある
+         注文のせいで確定できない精算ができ、B にした意味が消える。
+    */
+    const result = draft({
+      candidates: [
+        candidate(),
+        candidate({
+          orderId: 'order-2',
+          orderNumber: 'SNK-0002',
+          isUnderDispute: true,
+          // ⚠️ `now` より後 = まだ開いている窓。
+          refundableUntil: new Date('2026-10-01T00:00:00.000Z'),
+        }),
+      ],
+    });
+    expect(result.openRefundWindows).toBe(0);
+    expect(canConfirmPayout({ ...result, openDisputes: 0 }).ok).toBe(true);
+  });
+
+  it('全部が争いなら、お支払いは 0 円になる', () => {
+    /*
+      ⚠️ **0 円でも確定してよい。** 「払う額が無い」ことと「まだ締められない」
+         ことは別。止めると、翌月の繰越が積み上がって話が複雑になる。
+    */
+    const result = draft({
+      candidates: [candidate({ isUnderDispute: true })],
+    });
+    expect(result.netAmount).toBe(0);
+    expect(result.deferredDisputeCount).toBe(1);
+    expect(canConfirmPayout({ ...result, openDisputes: 0 }).ok).toBe(true);
+  });
+
+  it('下書きを作ったあとに争いが起きたら、確定を止める', () => {
+    /*
+      ⚠️ **ここは残す。** 下書きの時点では争いが無かった注文が、確定までの
+         あいだに争いになることがある。そのまま確定すると、争いの最中の
+         注文をお支払いしてしまう。作り直せば外れる。
+    */
+    const result = canConfirmPayout({
+      ...draft({ candidates: [candidate()] }),
+      openDisputes: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('PAYOUT_DISPUTE_OPEN');
+    }
   });
 });

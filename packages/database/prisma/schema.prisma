@@ -776,6 +776,12 @@ model Payout {
   netAmount           Int       @default(0) @map("net_amount")
   /// 翌月への繰越。⚠️ マイナスもありうる。
   carriedOutAmount    Int       @default(0) @map("carried_out_amount")
+  /// 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。
+  /// ⚠️ **合計には入っていない。** 画面へ理由を出すためだけに持つ。
+  deferredDisputeCount  Int     @default(0) @map("deferred_dispute_count")
+  /// 決着待ちで載せなかったぶんの、作家さまの取り分の合計。
+  /// ⚠️ **「いずれ払う額」ではない。** 負ければ返金になり、払われない。
+  deferredDisputeAmount Int     @default(0) @map("deferred_dispute_amount")
   /// ⚠️ **その時点の**設定。焼き付けてある（§0 の②）。
   minimumPayoutAmount Int       @map("minimum_payout_amount")
   transferFeeBearer   String    @map("transfer_fee_bearer")

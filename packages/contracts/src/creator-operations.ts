@@ -30,6 +30,14 @@ export const creatorPeriodEarningsSchema = z.object({
   dueAt: z.string(),
   /** ⚠️ 「なぜまだ確定しないのか」の答え。 */
   openRefundWindows: z.number().int().nonnegative(),
+  /**
+   * 決着待ちのため今回は載せなかったご注文の数（決定 B・2026-08-22）。
+   *
+   * ⚠️ 「なぜ今月は少ないのか」の答え。合計には入っていない。
+   */
+  deferredDisputeCount: z.number().int().nonnegative(),
+  /** 決着待ちで載せなかったぶんの、作家さまの取り分の合計。 */
+  deferredDisputeAmount: z.number().int().nonnegative(),
 });
 export type CreatorPeriodEarningsView = z.infer<typeof creatorPeriodEarningsSchema>;
 

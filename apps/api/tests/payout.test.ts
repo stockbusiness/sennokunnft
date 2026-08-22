@@ -78,6 +78,7 @@ function candidate(overrides: Partial<PayoutCandidate> = {}): PayoutCandidate {
     netAmount: 9600,
     // 8/10 + 14 日 = 8/24。⚠️ `NOW`（9/20）より前なので閉じている。
     refundableUntil: new Date('2026-08-24T00:00:00.000Z'),
+    isUnderDispute: false,
     ...overrides,
   };
 }
