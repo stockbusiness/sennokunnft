@@ -1738,31 +1738,38 @@ model OperationsAlertSettings {
 /// ⚠️ CHECK 制約（状態・区分・扱い・金額・二重承認の別人・却下の理由・
 /// 実行済みの返金行）は `20260822010000_refund_requests` にある。
 model RefundRequest {
-  id                     String   @id @default(uuid()) @db.Uuid
-  orderId                String   @map("order_id") @db.Uuid
-  status                 String   @default("submitted")
-  reason                 String
+  id                       String   @id @default(uuid()) @db.Uuid
+  orderId                  String   @map("order_id") @db.Uuid
+  status                   String   @default("submitted")
+  reason                   String
   /// ⚠️ 理由から決まる。人が選び直せない。
-  category               String
+  category                 String
   /// 運営の書き込み。⚠️ 購入者には見せない。
-  note                   String?
+  note                     String?
   /// 購入者が書いた申し出。⚠️ 文字として扱う（HTML にしない）。
-  buyerStatement         String?  @map("buyer_statement")
-  amount                 Int
-  isFullRefund           Boolean  @map("is_full_refund")
+  buyerStatement           String?  @map("buyer_statement")
+  amount                   Int
+  isFullRefund             Boolean  @map("is_full_refund")
   /// `revoke` / `keep`。⚠️ 一部返金では運営が承認のときに指定する。
-  entitlementDisposition String   @default("keep") @map("entitlement_disposition")
-  requestedByAccountId   String?  @map("requested_by_account_id") @db.Uuid
-  reviewedByAccountId    String?  @map("reviewed_by_account_id") @db.Uuid
-  approvedByAccountId    String?  @map("approved_by_account_id") @db.Uuid
-  dualApprovalRequired   Boolean  @default(false) @map("dual_approval_required")
+  entitlementDisposition   String   @default("keep") @map("entitlement_disposition")
+  requestedByAccountId     String?  @map("requested_by_account_id") @db.Uuid
+  reviewedByAccountId      String?  @map("reviewed_by_account_id") @db.Uuid
+  approvedByAccountId      String?  @map("approved_by_account_id") @db.Uuid
+  dualApprovalRequired     Boolean  @default(false) @map("dual_approval_required")
+  /// 承認のときに選んだ負担者（決定 2026-08-22）。`platform` / `creator`。
+  /// ⚠️ **承認するまで NULL。** 申し出た時点では決まらない。
+  clawbackBearer           String?  @map("clawback_bearer")
+  /// 既定（事由から決まる値）と違う値を選んだか。
+  /// ⚠️ **判断したという事実を、表とは別に残す。** 事由の表を将来変えると
+  ///    「そのとき何が既定だったか」を引き直せなくなる。
+  clawbackBearerOverridden Boolean  @default(false) @map("clawback_bearer_overridden")
   /// 原則対象外を、運営が例外として通したか。
-  approvedAsException    Boolean  @default(false) @map("approved_as_exception")
-  rejectionNote          String?  @map("rejection_note")
+  approvedAsException      Boolean  @default(false) @map("approved_as_exception")
+  rejectionNote            String?  @map("rejection_note")
   /// 実行してできた返金の行。⚠️ 実行するまで NULL。
-  refundId               String?  @map("refund_id") @db.Uuid
-  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refundId                 String?  @map("refund_id") @db.Uuid
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   order       Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
   requestedBy Account?              @relation("RefundRequestRequester", fields: [requestedByAccountId], references: [id], onDelete: SetNull)

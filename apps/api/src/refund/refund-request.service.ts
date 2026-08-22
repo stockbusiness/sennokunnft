@@ -82,8 +82,16 @@ export interface RefundRequestDetail {
   readonly inquiry: (CreatorInquiryRecord & { readonly expired: boolean }) | null;
   readonly events: readonly RefundRequestEventRecord[];
   readonly remainingAmount: number;
-  /** 誰が被るか。⚠️ 事由から決まる（画面で選ばせない）。 */
+  /**
+   * 誰が被るか。
+   *
+   * ⚠️ **承認済みなら、そのとき選んだ値。** まだなら既定（事由から決まる値）。
+   */
   readonly clawbackBearer: ClawbackBearer;
+  /** 事由から決まる既定。⚠️ 画面はこれを初期値にする。 */
+  readonly clawbackBearerDefault: ClawbackBearer;
+  /** 既定と違う値を選んだか。⚠️ 承認前は `false`。 */
+  readonly clawbackBearerOverridden: boolean;
 }
 
 /** 実行した結果。⚠️ **入金の完了ではない**（事業者が受け付けただけ）。 */
@@ -152,6 +160,16 @@ export class RefundRequestService {
       this.config.refunds.loadContext(request.orderId),
     ]);
     const now = this.config.clock.now();
+    /*
+      事由から決まる既定。
+      ⚠️ **「例外として通すか」を織り込む。** 承認前は運営がまだ決めていない
+         ので、いまの印（既定は偽）で出す。承認の画面で例外に印を付けると、
+         既定も動く。
+    */
+    const defaultBearer = clawbackBearerFor({
+      reason: request.reason,
+      approvedAsException: request.approvedAsException,
+    });
     return {
       request,
       inquiry:
@@ -172,13 +190,12 @@ export class RefundRequestService {
       */
       remainingAmount: context === null ? 0 : context.totalAmount - context.amountRefunded,
       /*
-        ⚠️ **保存した値ではなく、そのつど出す。** 申請の段階では、まだ
-           「例外として通すか」が決まっていない。承認のときに確定する。
+        ⚠️ **承認済みなら、そのとき選んだ値を出す。** 事由から引き直すと、
+           運営が選び直した判断が画面から消える。
       */
-      clawbackBearer: clawbackBearerFor({
-        reason: request.reason,
-        approvedAsException: request.approvedAsException,
-      }),
+      clawbackBearer: request.clawbackBearer ?? defaultBearer,
+      clawbackBearerDefault: defaultBearer,
+      clawbackBearerOverridden: request.clawbackBearerOverridden,
     };
   }
 
@@ -485,6 +502,14 @@ export class RefundRequestService {
     readonly amount: number;
     readonly entitlementDisposition: EntitlementDisposition;
     readonly approveAsException: boolean;
+    /**
+     * 誰が被るか（決定 2026-08-22）。
+     *
+     * ⚠️ **`null` なら事由から決まる既定。** 画面は既定を選んだ状態で出す。
+     * ⚠️ **既定と違えば、そのことを残す。** 値だけ残しても、それが既定
+     * だったのか判断だったのかが読めない。
+     */
+    readonly clawbackBearer: ClawbackBearer | null;
     readonly note: string | null;
     readonly actorAccountId: string;
   }): Promise<RefundRequestRecord> {
@@ -538,6 +563,21 @@ export class RefundRequestService {
          `canApprove`（申請者との別人）と、下の「1 人目とは別人」の
          両方で見る。
     */
+    /*
+      誰が被るか。
+
+      ⚠️ **選ばれた値を正とする。** 実務では事由の表に当てはまらないことが
+         起きる。決めるのは運営で、仕組みはその判断を**記録する**側に回る。
+      ⚠️ **既定と違うことを、そのつど数え直さない。** 1 人目が選び直した
+         のに 2 人目の画面で既定へ戻る、という形にしない。
+    */
+    const defaultBearer = clawbackBearerFor({
+      reason: request.reason,
+      approvedAsException: input.approveAsException,
+    });
+    const bearer = input.clawbackBearer ?? defaultBearer;
+    const bearerOverridden = bearer !== defaultBearer;
+
     const firstApproval = dualApprovalRequired && request.status === 'reviewed';
     if (
       dualApprovalRequired &&
@@ -555,6 +595,8 @@ export class RefundRequestService {
         approvedByAccountId: input.actorAccountId,
         dualApprovalRequired,
         approvedAsException: input.approveAsException,
+        clawbackBearer: bearer,
+        clawbackBearerOverridden: bearerOverridden,
         entitlementDisposition: input.entitlementDisposition,
         amount: input.amount,
         isFullRefund: check.isFullRefund,
@@ -573,6 +615,13 @@ export class RefundRequestService {
       dualApprovalRequired,
       stage: firstApproval ? 'first' : 'final',
       approvedAsException: input.approveAsException,
+      clawbackBearer: bearer,
+      /*
+        ⚠️ **既定と違う値を選んだことを残す。** あとから「なぜこの作家さまが
+           負担したのか」を説明するときに要る。値だけ残しても、それが既定
+           だったのか判断だったのかが読めない。
+      */
+      clawbackBearerOverridden: bearerOverridden,
     });
     await this.config.audit.record({
       actorAccountId: input.actorAccountId,
@@ -584,6 +633,8 @@ export class RefundRequestService {
         amount: input.amount,
         stage: firstApproval ? 'first' : 'final',
         dualApprovalRequired,
+        clawbackBearer: bearer,
+        clawbackBearerOverridden: bearerOverridden,
       },
     });
 
@@ -695,14 +746,17 @@ export class RefundRequestService {
         entitlementDisposition: request.entitlementDisposition,
         /*
           誰が被るか（決定 2026-08-22）。
-          ⚠️ **承認の内容から決める。** 事由だけで引き直すと、運営が
-             例外として通した判断（`approvedAsException`）がここで消え、
-             運営の親切の代金を作家さまが払うことになる。
+          ⚠️ **承認のときに選ばれた値をそのまま使う。** ここで事由から
+             引き直すと、運営が選び直した判断が消える。承認していない
+             申請はここへ来ないので、`null` は本来ありえない——念のため
+             既定へ落とすが、そのときは選んだ意味が失われている。
         */
-        clawbackBearer: clawbackBearerFor({
-          reason: request.reason,
-          approvedAsException: request.approvedAsException,
-        }),
+        clawbackBearer:
+          request.clawbackBearer ??
+          clawbackBearerFor({
+            reason: request.reason,
+            approvedAsException: request.approvedAsException,
+          }),
       });
 
       await this.config.requests.transition({

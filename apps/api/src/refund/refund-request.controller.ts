@@ -92,6 +92,8 @@ export class AdminRefundRequestController {
       remainingAmount: found.remainingAmount,
       // ⚠️ 押す前に、誰が被るかを見せるための値。
       clawbackBearer: found.clawbackBearer,
+      clawbackBearerDefault: found.clawbackBearerDefault,
+      clawbackBearerOverridden: found.clawbackBearerOverridden,
     });
   }
 
@@ -168,6 +170,8 @@ export class AdminRefundRequestController {
       amount: input.amount,
       entitlementDisposition: input.entitlementDisposition,
       approveAsException: input.approveAsException ?? false,
+      // ⚠️ 省略なら事由から決まる既定。押した値をそのまま渡す。
+      clawbackBearer: input.clawbackBearer ?? null,
       note: input.note ?? null,
       actorAccountId: requireAccountId(actor),
     });

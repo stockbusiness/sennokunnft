@@ -49,8 +49,17 @@ export default async function AdminRefundRequestPage({
     );
   }
 
-  const { request, note, buyerStatement, inquiry, events, remainingAmount, clawbackBearer } =
-    result.data;
+  const {
+    request,
+    note,
+    buyerStatement,
+    inquiry,
+    events,
+    remainingAmount,
+    clawbackBearer,
+    clawbackBearerDefault,
+    clawbackBearerOverridden,
+  } = result.data;
 
   /*
     どの操作を出すか。
@@ -111,8 +120,19 @@ export default async function AdminRefundRequestPage({
           </div>
           <div>
             <dt>{COPY.bearerLabel}</dt>
-            {/* ⚠️ 事由から決まる。この画面では読むだけ。 */}
-            <dd>{clawbackBearerLabel(clawbackBearer)}</dd>
+            <dd>
+              {clawbackBearerLabel(clawbackBearer)}
+              {/*
+                ⚠️ **既定から変えたことを出す。** 値だけ出しても、それが
+                   既定だったのか判断だったのかが読めない。
+              */}
+              {!clawbackBearerOverridden ? null : (
+                <>
+                  {' '}
+                  <StatusBadge tone="warning" label={COPY.bearerOverriddenBadge} />
+                </>
+              )}
+            </dd>
           </div>
           <div>
             <dt>{COPY.fieldDisposition}</dt>
@@ -231,7 +251,7 @@ export default async function AdminRefundRequestPage({
             requestId={request.id}
             remainingAmount={remainingAmount}
             isExcluded={request.category === 'excluded'}
-            bearer={clawbackBearer}
+            bearer={clawbackBearerDefault}
           />
         </section>
       )}

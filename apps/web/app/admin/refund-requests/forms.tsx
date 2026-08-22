@@ -172,7 +172,7 @@ export function ApproveForm({
   readonly requestId: string;
   readonly remainingAmount: number;
   readonly isExcluded: boolean;
-  /** ⚠️ 事由から決まる値。画面では読むだけ。 */
+  /** 事由から決まる既定。⚠️ 選択肢の初期値になる。 */
   readonly bearer: 'platform' | 'creator';
 }) {
   const [state, action, pending] = useActionState(approveAction, INITIAL);
@@ -188,15 +188,32 @@ export function ApproveForm({
       </p>
 
       {/*
-        ⚠️ **押す前に、誰が被るかを見せる。** 見えないまま押すと、作家さまの
-           売上から引かれることに気づかないまま承認できてしまう。
-        ⚠️ **選ばせない。** 事由から決まる。選べるようにすると、一度の操作で
-           作家さまへ費用を寄せられる。
+        ⚠️ **既定を選んだ状態で出す。** 何もしなければ事由どおりになる。
+           既定を空にすると毎回選ばせることになり、表の意味が薄れる。
+        ⚠️ **どちらが既定かを、選択肢に書く。** 書かないと、選び直したのか
+           そのままなのかが押す人にも分からない。
       */}
-      <p>
-        {COPY.bearerLabel}: <strong>{clawbackBearerLabel(bearer)}</strong>
-      </p>
-      <p className="sengoku-form__hint">{COPY.bearerHint}</p>
+      <div className="sengoku-form__field">
+        <label className="sengoku-form__label" htmlFor="refund-approve-bearer">
+          {COPY.bearerLabel}
+        </label>
+        <select
+          className="sengoku-form__input"
+          id="refund-approve-bearer"
+          name="clawbackBearer"
+          defaultValue={bearer}
+          required
+        >
+          {(['platform', 'creator'] as const).map((value) => (
+            <option key={value} value={value}>
+              {clawbackBearerLabel(value)}
+              {value === bearer ? COPY.bearerDefaultSuffix : ''}
+            </option>
+          ))}
+        </select>
+        <p className="sengoku-form__hint">{COPY.bearerHint}</p>
+        <p className="sengoku-form__hint">{COPY.bearerOverrideHint}</p>
+      </div>
 
       <div className="sengoku-form__field">
         <label className="sengoku-form__label" htmlFor="refund-approve-amount">

@@ -209,7 +209,19 @@ describe('返金の負担者の言葉', () => {
     expect(REFUND_REQUEST_COPY.bearerHint).toContain('作家さまの売上からは引きません');
   });
 
-  it('事由から決まると書いてある（選べると読ませない）', () => {
-    expect(REFUND_REQUEST_COPY.bearerHint).toContain('事由から決まります');
+  it('既定が事由から決まると書いてある', () => {
+    /*
+      ⚠️ **選べるが、何もしなければ表どおりになる。** 「既定」と書かないと、
+         毎回ゼロから選ぶものに見える。
+    */
+    expect(REFUND_REQUEST_COPY.bearerHint).toContain('既定');
+  });
+
+  it('変えたことが記録に残ると、その場で伝えている', () => {
+    /*
+      ⚠️ **黙って残さない。** あとで証跡を見た運営が「監視されていた」と
+         感じる。押す前に書いておく。
+    */
+    expect(REFUND_REQUEST_COPY.bearerOverrideHint).toContain('記録に残ります');
   });
 });
