@@ -28,6 +28,7 @@ import { createLogger } from '@sengoku/observability';
 import { createCommonUserLinkJob } from './common-user-job';
 import { createWalletDeliveryJob } from './wallet-delivery-job';
 import { createReservationReleaseJob } from './reservation-release-job';
+import { createInternalJobCaller, SCHEDULED_INTERNAL_JOBS } from './internal-job-caller';
 import { createWalletDeliveryResolver } from './wallet-delivery-config';
 import { WorkerRunner, type JobHandler } from './runner';
 
@@ -207,6 +208,57 @@ async function bootstrap(): Promise<void> {
         now: () => releaseClock.now(),
         batchSize: RELEASE_BATCH_SIZE,
       }),
+    );
+  }
+
+  /*
+    API の内部ジョブを、決めた間隔で叩く（時計仕掛け・2026-08-22）。
+
+    ⚠️ **口はあったが、叩き手がいなかった。** 内部ジョブは 7 本あるのに、
+       定時に叩く仕掛けがリポジトリのどこにも無かった。worker は既に
+       常駐して巡回しているので、ここを叩き手にする。
+
+    ⚠️ **worker の中で処理を組み直さない。** 発行も知らせも API 側で
+       組み上がっている。同じ配線をもう一組作ると、必ず片方が古くなる。
+  */
+  if (env.INTERNAL_JOB_BASE_URL !== undefined && env.INTERNAL_JOB_TOKEN !== undefined) {
+    const jobClock = new SystemClock();
+    const baseUrl = env.INTERNAL_JOB_BASE_URL.replace(/\/+$/, '');
+    for (const job of SCHEDULED_INTERNAL_JOBS) {
+      handlers.push(
+        createInternalJobCaller({
+          baseUrl,
+          token: env.INTERNAL_JOB_TOKEN,
+          path: job.path,
+          label: job.label,
+          everyMs: job.everyMs,
+          logger,
+          now: () => jobClock.now(),
+          timeoutMs: env.INTERNAL_JOB_TIMEOUT_MS,
+        }),
+      );
+    }
+    logger.info(
+      // ⚠️ 接続先も合言葉も出さない。何本を持ったかまで。
+      { jobCount: SCHEDULED_INTERNAL_JOBS.length },
+      'API の内部ジョブを定時に叩きます',
+    );
+  } else {
+    /*
+      ⚠️ **黙って飛ばさない。** 未設定のまま起動すると、受取権の
+         取りこぼし回収も、知らせの送信も、運営への異常の知らせも
+         **一度も動かない**。しかもエラーは出ない——いちばん困る壊れ方。
+
+      ⚠️ **起動は止めない。** 止めると、設定済みだったウォレットへの
+         お届けまで巻き添えになる。
+    */
+    logger.warn(
+      {
+        hasBaseUrl: env.INTERNAL_JOB_BASE_URL !== undefined,
+        hasToken: env.INTERNAL_JOB_TOKEN !== undefined,
+        jobs: SCHEDULED_INTERNAL_JOBS.map((job) => job.path),
+      },
+      'INTERNAL_JOB_BASE_URL と INTERNAL_JOB_TOKEN が揃っていないため、内部ジョブを叩きません',
     );
   }
 

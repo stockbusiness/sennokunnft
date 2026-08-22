@@ -381,6 +381,29 @@ const workerEnvObject = baseEnvObject.extend({
   WORKER_POLL_INTERVAL_MS: integerFromEnv(100, 3_600_000, 5000),
 
   /**
+   * API の内部ジョブの口（時計仕掛け・2026-08-22）。
+   *
+   * ⚠️ **口はあったが、叩き手がいなかった。** 内部ジョブは 7 本あるのに、
+   * 定時に叩く仕掛けがどこにも無かった。worker を叩き手にする。
+   *
+   * 形式は `https://api.example/api/v1/internal/jobs`（末尾のスラッシュ不要）。
+   * Fly.io の内部網なら `http://<apiのアプリ名>.internal:8080/api/v1/internal/jobs`。
+   *
+   * ⚠️ **`INTERNAL_JOB_TOKEN` と両方そろって初めて動く。** 片方だけでは
+   * 登録しない。**片方だけで黙って動くほうが困る**（叩けていないことに
+   * 気づけない）。起動時に警告を出す。
+   */
+  INTERNAL_JOB_BASE_URL: z.url().optional(),
+  /**
+   * 内部ジョブの合言葉（api と同じ値）。
+   *
+   * ⚠️ 値そのものをリポジトリに入れない。`.env.example` には変数名だけ。
+   */
+  INTERNAL_JOB_TOKEN: z.string().min(32).optional(),
+  /** 内部ジョブの応答を待つ上限。⚠️ 待ち続けると、ほかの仕事まで止まる。 */
+  INTERNAL_JOB_TIMEOUT_MS: integerFromEnv(1000, 300_000, 60_000),
+
+  /**
    * 外部連携の資格情報を包む暗号鍵（api と同じ値）。
    *
    * ⚠️ **worker にも要る。** 管理画面で設定した接続先と鍵を読んで送るため
