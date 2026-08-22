@@ -933,3 +933,126 @@ describe('返金の負担者', () => {
       .expect(400);
   });
 });
+
+/**
+ * 知らせ（方針整理 2026-08-22）。
+ *
+ * ⚠️ **この組のいちばんの主題は、作家さまへ届くこと。** ご回答の期限は
+ * 営業日数で決まるのに、**ログインしない限り依頼が来たことに気づけない**。
+ * 気づかないまま期限が過ぎ、運営が「回答が無いので進めた」と記録する
+ * ——作家さまから見れば、聞かれてすらいない。
+ */
+describe('知らせ', () => {
+  function noticesFor(eventType: string): typeof harness.notifications.rows {
+    return harness.notifications.rows.filter((row) => row.record.eventType === eventType);
+  }
+
+  it('お受けしたことを、購入者へ知らせる', async () => {
+    const { requestId } = await submitted();
+    const notices = noticesFor('refund_request.received');
+    expect(notices).toHaveLength(1);
+    // ⚠️ 対象は申し出。注文にすると 2 度目が重複で捨てられる。
+    expect(notices[0]?.record.subjectId).toBe(requestId);
+    expect(notices[0]?.record.subjectType).toBe('refund_request');
+  });
+
+  it('お受けした知らせに金額を書かない', async () => {
+    /*
+      ⚠️ **お受けした時点の額が約束に見える。** どれだけお返しするかは
+         審査が決める。語彙に金額を入れていないので、書きようが無い。
+    */
+    await submitted();
+    const notice = noticesFor('refund_request.received')[0];
+    const text = `${notice?.record.renderedSubject ?? ''}${notice?.record.renderedBody ?? ''}`;
+    expect(text).not.toContain(String(ORDER_TOTAL));
+    expect(text).not.toContain('12,000');
+  });
+
+  it('作家さまへ事実確認の依頼が届く', async () => {
+    const { requestId } = await submitted();
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/ask-creator`)
+      .set(auth(actorToken('operator', 'notice-asker-1')))
+      .send({})
+      .expect(201);
+
+    const notices = noticesFor('refund_inquiry.asked');
+    expect(notices).toHaveLength(1);
+    // ⚠️ **宛先は作家さま。** 購入者ではない。
+    expect(notices[0]?.record.accountId).toBe(`account-${CREATOR_SUBJECT}`);
+  });
+
+  it('作家さまへの依頼に、金額と購入者を載せない', async () => {
+    /*
+      ⚠️ **事実をお答えいただくのに要らない。** 載せると「いくら返るのか」を
+         先に知ることになり、回答が歪む。
+    */
+    const { requestId, buyer } = await submitted();
+    void buyer;
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/ask-creator`)
+      .set(auth(actorToken('operator', 'notice-asker-2')))
+      .send({})
+      .expect(201);
+
+    const notice = noticesFor('refund_inquiry.asked')[0];
+    const text = `${notice?.record.renderedSubject ?? ''}${notice?.record.renderedBody ?? ''}`;
+    expect(text).not.toContain(String(ORDER_TOTAL));
+    expect(text).not.toContain('user-buyer');
+    expect(text).not.toContain('account-user-buyer');
+  });
+
+  it('作家さまへの依頼に、ご回答の期限を書く', async () => {
+    // ⚠️ 期限の無いお願いは、後回しにされて当然である。
+    const { requestId } = await submitted();
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/ask-creator`)
+      .set(auth(actorToken('operator', 'notice-asker-3')))
+      .send({})
+      .expect(201);
+
+    const notice = noticesFor('refund_inquiry.asked')[0];
+    const text = `${notice?.record.renderedSubject ?? ''}${notice?.record.renderedBody ?? ''}`;
+    expect(text).toContain('2026');
+  });
+
+  it('却下したことを、購入者へ知らせる', async () => {
+    /*
+      ⚠️ **黙って終わらせない。** 申し出た方から見ると、返事が来ないのと
+         断られたのは違う。返事が来なければ、何度でも問い合わせが来る。
+    */
+    const { requestId } = await reviewed();
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/reject`)
+      .set(auth(ownerToken()))
+      .send({ rejectionNote: '規約の範囲外のため、今回はお受けできません。' })
+      .expect(201);
+
+    const notices = noticesFor('refund_request.rejected');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.record.subjectId).toBe(requestId);
+  });
+
+  it('却下の知らせに、運営の記録を写さない', async () => {
+    /*
+      ⚠️ **運営の記録は運営の言葉で書かれている。** そのままお送りする文では
+         ない。個別のご説明は、運営が別途ご連絡する。
+    */
+    const { requestId } = await reviewed();
+    await request(app.getHttpServer())
+      .post(`${ADMIN}/${requestId}/reject`)
+      .set(auth(ownerToken()))
+      .send({ rejectionNote: '常習的なお申し出のため却下' })
+      .expect(201);
+
+    const notice = noticesFor('refund_request.rejected')[0];
+    const text = `${notice?.record.renderedSubject ?? ''}${notice?.record.renderedBody ?? ''}`;
+    expect(text).not.toContain('常習');
+  });
+
+  it('作家さまへ聞かない事由では、作家さまへ届かない', async () => {
+    // ⚠️ 運営だけで判断する事由で作家さまの手を止めない。
+    await submitted('duplicate_payment');
+    expect(noticesFor('refund_inquiry.asked')).toHaveLength(0);
+  });
+});
