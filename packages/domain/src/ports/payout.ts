@@ -157,6 +157,20 @@ export interface PayoutRepository {
    */
   countOpenRefundWindows(payoutId: string, now: Date): Promise<number>;
 
+  /**
+   * その精算に載っている注文のうち、決着していないチャージバックの数
+   *（2026-08-22）。
+   *
+   * ⚠️ **返金の窓と別に数える。** 窓は期限で閉じるが、争いは**待っても
+   * 閉じない**——カード会社が決めるまで開いたまま。一緒にすると、
+   * 運営が「待てば通る」と読む。
+   *
+   * ⚠️ **警告は数えない。** カード会社が調べ始めただけで、申し立てに
+   * ならずに消えることもある。数えると、消えた警告のぶんまで精算を
+   * 止め、作家さまへのお支払いが理由なく遅れる。
+   */
+  countOpenDisputes(payoutId: string): Promise<number>;
+
   /** 前の期間から持ち越された額。⚠️ 無ければ 0。 */
   carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number>;
 

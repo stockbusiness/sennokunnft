@@ -104,7 +104,13 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
            無い」を作れなくなる——二重申請を止められるかを確かめる試験が、
            そこで空振りする。
       */
-      refund_request_events, refund_requests, creator_refund_inquiries, creator_receivables
+      refund_request_events, refund_requests, creator_refund_inquiries, creator_receivables,
+      /*
+        ⚠️ **争いも消す。** 残すと、次の試験が「争われていない注文」を
+           作れなくなる——精算を確定できることを確かめる試験が、そこで
+           空振りする。
+      */
+      payment_disputes
     RESTART IDENTITY CASCADE
   `);
 

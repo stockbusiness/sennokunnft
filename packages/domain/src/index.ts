@@ -1077,6 +1077,19 @@ export type {
   OperationsAlertSettingsRecord,
 } from './ports/alert';
 export {
+  DISPUTE_STATUSES,
+  DISPUTE_OUTCOMES,
+  DISPUTE_REASONS,
+  disputeOutcome,
+  isDisputeOpen,
+  isDisputeClosed,
+  shouldRecordRefund,
+  canAdvanceDispute,
+  toSafeDisputeReason,
+} from './payment/dispute';
+export type { DisputeStatus, DisputeOutcome, DisputeReason } from './payment/dispute';
+export type { DisputePort, DisputeRecord } from './ports/dispute';
+export {
   REFUND_REQUEST_STATUSES,
   REFUND_REQUEST_REASONS,
   REFUND_CATEGORIES,

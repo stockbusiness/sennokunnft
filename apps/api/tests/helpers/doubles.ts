@@ -142,6 +142,7 @@ import {
   NOTIFICATION_VARIABLES,
 } from '@sengoku/domain';
 import {
+  canAdvanceDispute,
   canManuallyResend,
   domainError,
   err,
@@ -151,6 +152,10 @@ import {
   reconcileSupply,
   decideRevocation,
   refundStatusAfter,
+  type DisputePort,
+  type DisputeReason,
+  type DisputeRecord,
+  type DisputeStatus,
   type MissingRevocation,
   type RevocationReconcileRepository,
   type WalletDeliveryEnqueueInput,
@@ -2198,6 +2203,23 @@ export class InMemoryPayouts implements PayoutRepository {
   }
 
   /**
+   * 決着していない争いの数（2026-08-22）。
+   *
+   * ⚠️ **試験から注文IDを置くだけにしてある。** 争いの一覧を代役で
+   * 組み直すと、本物のクエリと食い違ったことに気づけない。ここは
+   * 「その注文が争われているか」だけを預かる。
+   */
+  readonly disputedOrderIds = new Set<string>();
+
+  countOpenDisputes(payoutId: string): Promise<number> {
+    const lines = this.lines.get(payoutId) ?? [];
+    const open = lines.filter(
+      (line) => !line.isClawback && this.disputedOrderIds.has(line.orderId),
+    );
+    return Promise.resolve(open.length);
+  }
+
+  /**
    * 繰越がマイナスのまま残っている作家さま（決定 2026-08-22）。
    *
    * ⚠️ **その作家さまのいちばん新しい確定済みの精算だけを見る。** 途中の
@@ -2894,6 +2916,8 @@ export interface TestHarness extends AppDependencies {
   readonly settlement: InMemorySettlementSettings;
   /** ⚠️ 受取権・発行ジョブの姿を差し替えるため、実体の型で持つ。 */
   readonly refunds: InMemoryRefunds;
+  /** 争いの記録（2026-08-22）。⚠️ 積まれた行を試験から覗く。 */
+  readonly disputes: InMemoryDisputes;
   /** ⚠️ 精算の対象を差し替えるため、実体の型で持つ。 */
   readonly payouts: InMemoryPayouts;
   readonly profiles: InMemoryCreatorProfiles;
@@ -3109,6 +3133,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const orderNotes = new InMemoryOrderNotes();
   const settlementSettings = new InMemorySettlementSettings();
   const refunds = new InMemoryRefunds(orderRepository);
+  const disputes = new InMemoryDisputes();
   const refundRequests = new InMemoryRefundRequests();
   const creatorInquiries = new InMemoryCreatorInquiries();
   const creatorReceivables = new InMemoryCreatorReceivables();
@@ -3164,6 +3189,12 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     settlement: settlementSettings,
     // 返金の記録（`UD-120`）。⚠️ 受取権と発行ジョブの姿は試験ごとに差し替える。
     refunds,
+    /*
+      チャージバック（2026-08-22）。
+      ⚠️ **既定で繋いでおく。** 繋がない配備も作れるが、既定を「受けない」に
+         すると、争いを受ける経路が試験から丸ごと消える。
+    */
+    disputes,
     /*
       返金の申請と審査（方針整理 2026-08-22）。
       ⚠️ **実体の型で持つ。** 積んだ証跡と設定を試験から覗いて差し替える。
@@ -4956,5 +4987,102 @@ export class InMemoryRefundPolicy implements RefundPolicyPort {
 
   clear(): void {
     this.current = null;
+  }
+}
+
+/* --- チャージバック（決済の争い・2026-08-22）------------------------------ */
+
+/**
+ * 争いの入れ物。
+ *
+ * ⚠️ **`record` は本物と同じ判定にする。** 「識別子で束ねる」「決着からは
+ * 戻さない」を素通しにすると、前後して届いた知らせで決着が開き直る穴が
+ * **試験から消える**。
+ */
+export class InMemoryDisputes implements DisputePort {
+  /** 事業者+識別子 → 行。⚠️ 試験から覗ける公開にしてある。 */
+  readonly rows = new Map<string, DisputeRecord>();
+
+  private key(provider: string, disputeRef: string): string {
+    return `${provider}|${disputeRef}`;
+  }
+
+  findByRef(provider: string, disputeRef: string): Promise<DisputeRecord | null> {
+    return Promise.resolve(this.rows.get(this.key(provider, disputeRef)) ?? null);
+  }
+
+  listByOrder(orderId: string): Promise<readonly DisputeRecord[]> {
+    return Promise.resolve([...this.rows.values()].filter((row) => row.orderId === orderId));
+  }
+
+  record(input: {
+    readonly id: string;
+    readonly orderId: string;
+    readonly paymentId: string | null;
+    readonly provider: string;
+    readonly disputeRef: string;
+    readonly status: DisputeStatus;
+    readonly reason: DisputeReason;
+    readonly amount: number;
+    readonly currency: string;
+    readonly occurredAt: Date;
+    readonly now: Date;
+  }): Promise<{ readonly record: DisputeRecord; readonly advanced: boolean }> {
+    const key = this.key(input.provider, input.disputeRef);
+    const existing = this.rows.get(key);
+    const closedAt = input.status === 'won' || input.status === 'lost' ? input.occurredAt : null;
+
+    if (existing === undefined) {
+      const created: DisputeRecord = {
+        id: input.id,
+        orderId: input.orderId,
+        paymentId: input.paymentId,
+        provider: input.provider,
+        disputeRef: input.disputeRef,
+        status: input.status,
+        reason: input.reason,
+        amount: input.amount,
+        currency: input.currency,
+        openedAt: input.occurredAt,
+        closedAt,
+        refundId: null,
+      };
+      this.rows.set(key, created);
+      return Promise.resolve({ record: created, advanced: true });
+    }
+
+    /*
+      ⚠️ **決着からは戻さない。** ドメインの判定をそのまま呼ぶ。
+         代役で書き直すと、本物と食い違ったことに気づけない。
+    */
+    const allowed = canAdvanceDispute(existing.status, input.status);
+    if (!allowed.ok || existing.status === input.status) {
+      return Promise.resolve({ record: existing, advanced: false });
+    }
+
+    const updated: DisputeRecord = {
+      ...existing,
+      status: input.status,
+      reason: input.reason,
+      amount: input.amount,
+      closedAt,
+    };
+    this.rows.set(key, updated);
+    return Promise.resolve({ record: updated, advanced: true });
+  }
+
+  attachRefund(input: {
+    readonly disputeId: string;
+    readonly refundId: string;
+    readonly now: Date;
+  }): Promise<boolean> {
+    for (const [key, row] of this.rows) {
+      // ⚠️ 条件付き。すでに紐づいていたら上書きしない。
+      if (row.id === input.disputeId && row.refundId === null && row.status === 'lost') {
+        this.rows.set(key, { ...row, refundId: input.refundId });
+        return Promise.resolve(true);
+      }
+    }
+    return Promise.resolve(false);
   }
 }

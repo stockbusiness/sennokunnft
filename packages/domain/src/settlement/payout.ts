@@ -239,9 +239,24 @@ export function buildPayoutDraft(input: PayoutDraftInput): PayoutDraft {
  */
 export function canConfirmPayout(subject: {
   readonly openRefundWindows: number;
+  /**
+   * 決着していないチャージバックの数（2026-08-22）。
+   *
+   * ⚠️ **0 でなければ確定できない。** 争いの最中にお支払いすると、
+   * 負けたときに作家さまから返してもらう話になる。返金の窓と同じ性質の
+   * 歯止めだが、**期限では閉じない**——カード会社が決めるまで開いたまま。
+   */
+  readonly openDisputes: number;
 }): Result<true, DomainError> {
   if (subject.openRefundWindows > 0) {
     return err(domainError('PAYOUT_WINDOW_OPEN', 'some orders can still be refunded'));
+  }
+  /*
+    ⚠️ **返金の窓とは別の符号で返す。** 一緒にすると、運営が「期限を
+       待てば開く」と読む。争いは待っても開かない——決着を待つしかない。
+  */
+  if (subject.openDisputes > 0) {
+    return err(domainError('PAYOUT_DISPUTE_OPEN', 'some orders are under dispute'));
   }
   return ok(true);
 }

@@ -449,3 +449,181 @@ describe('事業者の画面からの返金に追随する', () => {
     expect(harness.refunds.all).toHaveLength(0);
   });
 });
+
+describe('チャージバック（決済の争い）', () => {
+  function disputeEvent(orderId: string, overrides: Record<string, unknown> = {}) {
+    return {
+      id: `evt_${randomUUID()}`,
+      type: 'payment.disputed',
+      data: {
+        order_id: orderId,
+        currency: 'jpy',
+        dispute_ref: 'dp_1',
+        dispute_status: 'needs_response',
+        dispute_amount: ORDER_TOTAL,
+        dispute_reason: 'fraudulent',
+        ...overrides,
+      },
+    };
+  }
+
+  it('申し立てを受けても、渡したものを取り消さない', async () => {
+    /*
+      ⚠️ **争いが起きたことと、返金されたことは別である。** ここで
+         取り消すと、**こちらが勝ったときに返せない**——外部のウォレットへ
+         渡したものは、こちらからは戻せない。
+    */
+    const orderId = await paidOrder();
+    harness.refunds.entitlementStatus = 'issued';
+
+    await webhook(disputeEvent(orderId)).expect(200);
+
+    expect(harness.refunds.entitlementStatus).toBe('issued');
+    // ⚠️ 返金も積まない。まだ何も返っていない。
+    expect(harness.refunds.all).toHaveLength(0);
+  });
+
+  it('申し立てを記録する', async () => {
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId)).expect(200);
+
+    const dispute = await harness.disputes.findByRef('fake', 'dp_1');
+    expect(dispute).not.toBeNull();
+    expect(dispute?.status).toBe('needs_response');
+    expect(dispute?.orderId).toBe(orderId);
+    expect(dispute?.closedAt).toBeNull();
+  });
+
+  it('勝っても返金にしない', async () => {
+    const orderId = await paidOrder();
+    harness.refunds.entitlementStatus = 'issued';
+
+    await webhook(disputeEvent(orderId)).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'won' })).expect(200);
+
+    const dispute = await harness.disputes.findByRef('fake', 'dp_1');
+    expect(dispute?.status).toBe('won');
+    expect(dispute?.refundId).toBeNull();
+    expect(harness.refunds.all).toHaveLength(0);
+    // ⚠️ 取り消していないので、そのまま残っている。
+    expect(harness.refunds.entitlementStatus).toBe('issued');
+  });
+
+  it('負けたら返金として記録し、渡したものを取り消す', async () => {
+    /*
+      ⚠️ **敗訴の時点で、もう引かれている。** 記録しないと、帳簿の上では
+         持っていないお金を持っていることになり、**作家さまへその分まで
+         お支払いする**。
+      ⚠️ **`charge.refunded` は届かない。** ここで記録しなければ、
+         どこにも残らない。
+    */
+    const orderId = await paidOrder();
+    harness.refunds.entitlementStatus = 'issued';
+
+    await webhook(disputeEvent(orderId)).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+
+    const rows = harness.refunds.all;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      initiatedBy: 'provider',
+      // ⚠️ 運営の誰かを紐づけない。こちらを経由していない返金である。
+      actorAccountId: null,
+      amount: ORDER_TOTAL,
+      reason: 'provider_initiated',
+    });
+    expect(harness.refunds.entitlementStatus).toBe('revoked');
+  });
+
+  it('負けた返金の事由は `provider_initiated`（＝運営が被る）', async () => {
+    /*
+      ⚠️ **場を開いている側が備える筋のもの。** 作家さまへ転嫁すると、
+         身に覚えのないカード不正で作家さまの売上が削られる。
+
+      ⚠️ **ここで見るのは事由まで。** 負担者そのものは事由から決まり
+         （`clawbackBearerForRefundReason`）、列に書くのは DB の
+         リポジトリである。`RefundRecordView` は負担者を持たないので、
+         **事由が正しいこと**を押さえる——ここが `buyer_request` に
+         化けたら、作家さまの売上から引かれる。
+    */
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId)).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+
+    expect(harness.refunds.all[0]?.reason).toBe('provider_initiated');
+  });
+
+  it('返金の行と争いの行を結ぶ', async () => {
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId)).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+
+    const dispute = await harness.disputes.findByRef('fake', 'dp_1');
+    expect(dispute?.refundId).toBe(harness.refunds.all[0]?.id);
+  });
+
+  it('敗訴の知らせが 2 回来ても、返金を 2 回積まない', async () => {
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+    // ⚠️ イベントIDは別。事業者は同じ決着を別のイベントで再送しうる。
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+
+    expect(harness.refunds.all).toHaveLength(1);
+  });
+
+  it('決着したあとに古い知らせが届いても、開き直さない', async () => {
+    /*
+      ⚠️ **事業者の知らせは前後して届く。** 開き直すと、精算が理由なく
+         止まり続ける。
+    */
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'needs_response' })).expect(200);
+
+    const dispute = await harness.disputes.findByRef('fake', 'dp_1');
+    expect(dispute?.status).toBe('lost');
+    expect(harness.refunds.all).toHaveLength(1);
+  });
+
+  it('警告だけでは何も起きない', async () => {
+    /*
+      ⚠️ **カード会社が調べ始めただけ。** 申し立てにならずに消えることも
+         ある。争いと同じ扱いにすると、消えた警告のぶんまで精算を止める。
+    */
+    const orderId = await paidOrder();
+    harness.refunds.entitlementStatus = 'issued';
+
+    await webhook(disputeEvent(orderId, { dispute_status: 'warning' })).expect(200);
+
+    const dispute = await harness.disputes.findByRef('fake', 'dp_1');
+    expect(dispute?.status).toBe('warning');
+    expect(harness.refunds.all).toHaveLength(0);
+    expect(harness.refunds.entitlementStatus).toBe('issued');
+  });
+
+  it('知らない状態の知らせは、記録に残して無視する', async () => {
+    // ⚠️ 推測で進めるより、無視して記録に残すほうがよい。
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId, { dispute_status: 'maybe_lost' })).expect(200);
+
+    await expect(harness.disputes.findByRef('fake', 'dp_1')).resolves.toBeNull();
+    expect(harness.refunds.all).toHaveLength(0);
+  });
+
+  it('識別子の無い知らせでは記録しない', async () => {
+    // ⚠️ 推測で埋めない。識別子が無ければ 1 行に束ねられない。
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId, { dispute_ref: undefined })).expect(200);
+
+    expect(harness.disputes.rows.size).toBe(0);
+  });
+
+  it('争いは 1 行に束ねる（申し立て → 審理 → 決着）', async () => {
+    const orderId = await paidOrder();
+    await webhook(disputeEvent(orderId)).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'under_review' })).expect(200);
+    await webhook(disputeEvent(orderId, { dispute_status: 'lost' })).expect(200);
+
+    expect(harness.disputes.rows.size).toBe(1);
+  });
+});

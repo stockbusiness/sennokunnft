@@ -284,6 +284,23 @@ export class PrismaPayoutRepository implements PayoutRepository {
     });
   }
 
+  async countOpenDisputes(payoutId: string): Promise<number> {
+    /*
+      ⚠️ **警告は数えない。** カード会社が調べ始めただけで、申し立てに
+         ならずに消えることもある。数えると、消えた警告のぶんまで精算を
+         止め、作家さまへのお支払いが理由なく遅れる。
+      ⚠️ **差し戻しの明細は見ない。** あちらはもう返金された注文で、
+         いま争われている注文ではない。
+    */
+    return this.prisma.payoutLine.count({
+      where: {
+        payoutId,
+        isClawback: false,
+        order: { disputes: { some: { status: { in: ['needs_response', 'under_review'] } } } },
+      },
+    });
+  }
+
   async carriedInAmount(creatorAccountId: string, previousPeriodKey: string): Promise<number> {
     const previous = await this.prisma.payout.findUnique({
       where: { creatorAccountId_periodKey: { creatorAccountId, periodKey: previousPeriodKey } },

@@ -1,3 +1,4 @@
+import type { DisputeReason, DisputeStatus } from './dispute';
 import { domainError, type DomainError } from '../shared/errors';
 import { err, ok, type Result } from '../shared/result';
 
@@ -27,6 +28,14 @@ export const PAYMENT_FACTS = [
    * 誰も気づかない。
    */
   'refunded',
+  /**
+   * 争いが起きた／決着した（チャージバック）。
+   *
+   * ⚠️ **返金と分けている。** 争いが起きただけでは何も返っていない。
+   * 同じ `refunded` に畳むと、申し立てを受けた時点で受取権を取り消す
+   * ことになり、**こちらが勝ったときに返せない**。
+   */
+  'disputed',
   'ignored',
 ] as const;
 export type PaymentFactKind = (typeof PAYMENT_FACTS)[number];
@@ -65,6 +74,20 @@ export interface ProviderPaymentFact {
    * か」を積算で持つ。差分だと、知らせが前後して届いたときに合わなくなる。
    */
   readonly refundedTotal: number | null;
+  /**
+   * 事業者が採番した争いの識別子（`kind === 'disputed'` のときだけ）。
+   *
+   * ⚠️ **これで同じ争いを 1 行に束ねる。** 申し立て・審理・決着で
+   * 別々の知らせが届く。識別子で引き当てないと、1 件の争いが
+   * 3 件に増える。
+   */
+  readonly disputeRef: string | null;
+  /** 争いのいまの状態。 */
+  readonly disputeStatus: DisputeStatus | null;
+  /** 争われている額。⚠️ 注文の総額と一致するとは限らない。 */
+  readonly disputeAmount: number | null;
+  /** 事業者が言う理由。⚠️ 許可リストを通した符号のみ。 */
+  readonly disputeReason: DisputeReason | null;
   readonly occurredAt: Date;
   /**
    * どの世代の鍵で署名を検証できたか（`UD-118` / `UD-128`）。

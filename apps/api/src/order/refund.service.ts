@@ -303,10 +303,45 @@ export class RefundService {
    *
    * @returns 追随したときだけ結果。何も新しくなければ `null`。
    */
+  /**
+   * チャージバックの敗訴を、返金として記録する。
+   *
+   * ⚠️ **敗訴の時点で、もう引かれている。** こちらの都合で「対象外」に
+   * しても、事実は変わらない。記録しないと、帳簿の上では持っていない
+   * お金を持っていることになり、**作家さまへその分までお支払いする**。
+   *
+   * ⚠️ **争いの識別子を返金の識別子として使う。** 同じ争いで 2 回
+   * 記録しないための鍵。事業者は敗訴の知らせを再送しうる。
+   *
+   * ⚠️ **`charge.refunded` は届かない。** 敗訴で引かれても、事業者は
+   * 返金（Refund）を作らない。ここで記録しなければ、どこにも残らない。
+   */
+  async recordDisputeLoss(input: {
+    readonly orderId: string;
+    readonly disputeRef: string;
+    readonly amount: number;
+    readonly now: Date;
+  }): Promise<RefundOutcome | null> {
+    const context = await this.refunds.loadContext(input.orderId);
+    if (context === null) {
+      return null;
+    }
+    return this.followProviderRefund({
+      orderId: input.orderId,
+      providerRefundRef: input.disputeRef,
+      // ⚠️ 累計で渡す。事業者は積算で持つので、こちらもそろえる。
+      refundedTotal: context.amountRefunded + input.amount,
+      note: 'チャージバックで敗訴したため、返金として記録しました。',
+      now: input.now,
+    });
+  }
+
   async followProviderRefund(input: {
     readonly orderId: string;
     readonly providerRefundRef: string | null;
     readonly refundedTotal: number;
+    /** 記録に残す注記。⚠️ 省略すると事業者の画面からの返金として書く。 */
+    readonly note?: string | undefined;
     readonly now: Date;
   }): Promise<RefundOutcome | null> {
     /*
@@ -351,7 +386,7 @@ export class RefundService {
       // ⚠️ 運営の誰かを紐づけない。こちらを経由していない返金である。
       actorAccountId: null,
       providerRefundRef: input.providerRefundRef,
-      note: '決済事業者の画面からの返金に追随しました。',
+      note: input.note ?? '決済事業者の画面からの返金に追随しました。',
       now: input.now,
     });
 

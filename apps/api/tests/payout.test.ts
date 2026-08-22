@@ -317,6 +317,40 @@ describe('確定', () => {
     expect(response.body.confirmedAt).not.toBeNull();
   });
 
+  it('決着していないチャージバックがあれば確定できない', async () => {
+    /*
+      ⚠️ **争いの最中にお支払いすると、負けたときに作家さまから返して
+         もらう話になる。** 返金の窓と同じ性質の歯止めだが、こちらは
+         **期限では閉じない**——カード会社が決めるまで開いたまま。
+    */
+    harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
+    harness.payouts.disputedOrderIds.add('order-1');
+    const operator = actorToken('operator', 'operator-15');
+    const payoutId = await draftPayout(operator);
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/v1/admin/payouts/${payoutId}/confirm`)
+      .set(auth(operator))
+      .expect(409);
+    /*
+      ⚠️ **返金の窓とは別の符号。** 一緒にすると、運営が「期限を待てば
+         開く」と読む。争いは待っても開かない。
+    */
+    expect(response.body.error.code).toBe('PAYOUT_DISPUTE_OPEN');
+  });
+
+  it('争いが決着していれば確定できる', async () => {
+    // ⚠️ 決着した争いは歯止めにならない。止め続けると、いつまでも払えない。
+    harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
+    const operator = actorToken('operator', 'operator-16');
+    const payoutId = await draftPayout(operator);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/payouts/${payoutId}/confirm`)
+      .set(auth(operator))
+      .expect(200);
+  });
+
   it('二度目は断る（同時に押されても 1 回）', async () => {
     harness.payouts.candidates = [candidate({ orderId: 'order-1' })];
     const operator = actorToken('operator', 'operator-14');

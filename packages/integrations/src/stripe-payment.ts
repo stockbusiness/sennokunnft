@@ -3,9 +3,11 @@ import {
   domainError,
   err,
   ok,
+  toSafeDisputeReason,
   toSafeFailureCode,
   type CheckoutSessionCreated,
   type CreateCheckoutSessionInput,
+  type DisputeStatus,
   type DomainError,
   type PaymentFactKind,
   type PaymentGatewayPort,
@@ -225,6 +227,11 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
     // 返金のときだけ埋まる。それ以外は `null`。
     refundRef: null,
     refundedTotal: null,
+    // 争いのときだけ埋まる。それ以外は `null`。
+    disputeRef: null,
+    disputeStatus: null,
+    disputeAmount: null,
+    disputeReason: null,
   };
 
   switch (event.type) {
@@ -326,6 +333,40 @@ export function toFact(event: Stripe.Event): ProviderPaymentFact {
       };
     }
 
+    case 'charge.dispute.created':
+    case 'charge.dispute.updated':
+    case 'charge.dispute.closed':
+    case 'charge.dispute.funds_withdrawn':
+    case 'charge.dispute.funds_reinstated': {
+      const dispute = event.data.object;
+      /*
+        ⚠️ **イベント名で決着を判断しない。** `closed` が届いても、
+           勝ったのか負けたのかは `status` にしか書いていない。名前で
+           分けると、勝った争いを返金として記録することになる。
+
+        ⚠️ **`funds_withdrawn` を敗訴と読まない。** 引き落としは審理中にも
+           起きる（あとで戻る）。負けたかどうかは `status` が言う。
+      */
+      const status = toDisputeStatus(dispute.status);
+      return {
+        ...base,
+        // ⚠️ 知らない状態は畳めない。推測で進めるより、無視して記録に残す。
+        kind: status === null ? 'ignored' : 'disputed',
+        orderId: readOrderId(dispute.metadata),
+        sessionRef: null,
+        paymentRef: typeof dispute.payment_intent === 'string' ? dispute.payment_intent : null,
+        chargeRef: typeof dispute.charge === 'string' ? dispute.charge : null,
+        amount: null,
+        currency: dispute.currency,
+        failureCode: null,
+        disputeRef: dispute.id,
+        disputeStatus: status,
+        // ⚠️ **争われている額。** 注文の総額と一致するとは限らない。
+        disputeAmount: dispute.amount,
+        disputeReason: toSafeDisputeReason(dispute.reason),
+      };
+    }
+
     default:
       /*
         ⚠️ **知らないイベントは無視して 2xx を返す**（指示書 §5.4）。
@@ -411,5 +452,35 @@ export async function probeStripeAccount(
   } catch {
     // ⚠️ 例外を握りつぶすのではなく、**外へ出さない**。理由は上のとおり。
     return { ok: false };
+  }
+}
+
+/**
+ * Stripe の争いの状態を、こちらの語彙へ畳む。
+ *
+ * ⚠️ **`warning_*` を争いと同じにしない。** カード会社が調べ始めただけで、
+ * 申し立てにならずに消えることもある。同じ扱いにすると、消えた警告の
+ * ぶんまで精算を止め、作家さまへのお支払いが理由なく遅れる。
+ *
+ * ⚠️ **知らない状態は `null` を返す。** 推測で進めるより、無視して
+ * 記録に残すほうがよい。Stripe が語彙を増やしたときに、こちらが
+ * 勝手に「決着した」と読むのがいちばん困る。
+ */
+function toDisputeStatus(raw: string): DisputeStatus | null {
+  switch (raw) {
+    case 'warning_needs_response':
+    case 'warning_under_review':
+    case 'warning_closed':
+      return 'warning';
+    case 'needs_response':
+      return 'needs_response';
+    case 'under_review':
+      return 'under_review';
+    case 'won':
+      return 'won';
+    case 'lost':
+      return 'lost';
+    default:
+      return null;
   }
 }

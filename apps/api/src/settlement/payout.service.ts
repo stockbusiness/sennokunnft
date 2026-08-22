@@ -337,6 +337,10 @@ export class PayoutService {
    * （`SETTLEMENT_AND_REFUND.md` §2-3）。閉じる前に確定すると、返金のたびに
    * 作家さまから返してもらう話になる。いちばん揉める作業で、少額なら
    * 回収を諦めることになり、諦めた分は運営の損になる。
+   *
+   * ⚠️ **決着していないチャージバックがあるときも断る**（2026-08-22）。
+   * 同じ理由だが、こちらは**期限では閉じない**——カード会社が決着させる
+   * まで開いたまま。別の符号で返し、画面も別の文言で伝える。
    */
   async confirm(input: {
     readonly payoutId: string;
@@ -352,7 +356,13 @@ export class PayoutService {
          作った時点で止めると、いつまでも確定できない精算ができる。
     */
     const openRefundWindows = await this.config.repository.countOpenRefundWindows(payout.id, now);
-    const allowed = canConfirmPayout({ openRefundWindows });
+    /*
+      ⚠️ **争いも数える。** 争いの最中にお支払いすると、負けたときに
+         作家さまから返してもらう話になる。返金の窓と同じ性質の歯止めだが、
+         **期限では閉じない**——カード会社が決めるまで開いたまま。
+    */
+    const openDisputes = await this.config.repository.countOpenDisputes(payout.id);
+    const allowed = canConfirmPayout({ openRefundWindows, openDisputes });
     if (!allowed.ok) {
       throw new DomainErrorException(allowed.error.code);
     }
