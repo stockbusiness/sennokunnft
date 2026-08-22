@@ -252,3 +252,110 @@ describe('全体の色', () => {
     expect(overallSeverity(build({ integrationFailureCount: 1 }))).toBe('warning');
   });
 });
+
+/**
+ * 止めている処理の色（2026-08-22）。
+ *
+ * ⚠️ ここで守っているのは **「消えない警告を作らないこと」** の一点。
+ * 止めているあいだ心拍は増えないので、そのままでは黄色が永久に残る。
+ * 消えない色があると、運営はその行を読み飛ばすようになり、**本当に
+ * 止まった日にも気づけなくなる**。
+ */
+describe('止めている時計仕掛け', () => {
+  const NEVER_RAN: readonly JobHeartbeat[] = Object.keys(JOB_LABELS).map((jobKey) => ({
+    jobKey,
+    lastSucceededAt: null,
+    lastFailedAt: null,
+    lastOutcome: null,
+  }));
+
+  function buildPaused(jobs: readonly JobHeartbeat[], pausedJobKeys: readonly string[]) {
+    return buildIndicators({
+      counts: QUIET,
+      jobs,
+      pausedJobKeys,
+      thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
+      now: NOW,
+    });
+  }
+
+  it('止めている処理は灰色（paused）になる', () => {
+    const rows = buildPaused(NEVER_RAN, ['deliver-entitlements']);
+    const row = rows.find((item) => item.key === 'job_deliver-entitlements');
+    expect(row?.severity).toBe('paused');
+    // ⚠️ 次にすることは無い。止まっているのが正しい状態である。
+    expect(row?.action).toBeNull();
+  });
+
+  /*
+    ⚠️ **止めていない処理まで灰色にしない。** 名前で選んでいるので、
+       ここを取り違えると、動いているはずの処理の異常が丸ごと隠れる。
+  */
+  it('止めていない処理は今までどおり黄色のまま', () => {
+    const rows = buildPaused(NEVER_RAN, ['deliver-entitlements']);
+    const row = rows.find((item) => item.key === 'job_release-expired-reservations');
+    expect(row?.severity).toBe('warning');
+  });
+
+  /*
+    ⚠️ **止めていても項目ごと消さない。** 消すと「止めている」ではなく
+       「そんな処理は無い」に見える。
+  */
+  it('止めていても項目は残る', () => {
+    const rows = buildPaused(NEVER_RAN, ['deliver-entitlements']);
+    expect(rows.some((item) => item.key === 'job_deliver-entitlements')).toBe(true);
+  });
+
+  it('止めている処理があっても全体は平常のまま', () => {
+    expect(overallSeverity(buildPaused(NEVER_RAN, Object.keys(JOB_LABELS)))).toBe('normal');
+  });
+
+  /*
+    ⚠️ **溜まっている数は隠れない。** 心拍を灰色にしても、お届け待ちの
+       件数は別の項目として出続ける。ここが隠れると、フラグを下ろした
+       まま注文を受け続けても誰も気づけない。
+  */
+  it('お届け待ちの件数は隠れない', () => {
+    const rows = buildIndicators({
+      counts: { ...QUIET, walletDeliveryPendingCount: 7 },
+      jobs: NEVER_RAN,
+      pausedJobKeys: ['deliver-entitlements'],
+      thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
+      now: NOW,
+    });
+    const row = rows.find((item) => item.key === 'wallet_delivery_pending');
+    expect(row?.count).toBe(7);
+  });
+
+  /*
+    ⚠️ **止めていれば、長く動いていなくても赤にしない。** 一度動かして
+       から止めた場合、心拍は古いまま残る。そこで赤くすると、止めた
+       とたんに赤が点く。
+  */
+  it('一度動かしてから止めた処理も赤にしない', () => {
+    const stale: readonly JobHeartbeat[] = Object.keys(JOB_LABELS).map((jobKey) => ({
+      jobKey,
+      lastSucceededAt: new Date('2026-08-01T00:00:00.000Z'),
+      lastFailedAt: null,
+      lastOutcome: 'succeeded' as const,
+    }));
+    const row = buildPaused(stale, ['deliver-entitlements']).find(
+      (item) => item.key === 'job_deliver-entitlements',
+    );
+    expect(row?.severity).toBe('paused');
+  });
+
+  /*
+    ⚠️ **既定は「何も止めていない」。** 渡し忘れた配備で、止めていない
+       処理まで灰色になると、異常が丸ごと隠れる。
+  */
+  it('止めている種別を渡さなければ、今までどおりの色になる', () => {
+    const row = buildIndicators({
+      counts: QUIET,
+      jobs: NEVER_RAN,
+      thresholds: DEFAULT_OPERATIONS_THRESHOLDS,
+      now: NOW,
+    }).find((item) => item.key === 'job_deliver-entitlements');
+    expect(row?.severity).toBe('warning');
+  });
+});

@@ -9,8 +9,26 @@
  * 「止まっている」の判定を試験で再現できなくなる。
  */
 
-/** 見出しの色。⚠️ 3 段しか無い。増やすと運営が優先順位を決められない。 */
+/**
+ * 見出しの色。
+ *
+ * ⚠️ **手当ての段は 3 つしか無い。** 増やすと運営が優先順位を決められない。
+ * `paused` は段ではなく「そもそも動かしていない」という別の話で、
+ * `normal` より下でも上でもない。
+ */
 export const OPERATIONS_SEVERITIES = [
+  /**
+   * 止めている（2026-08-22）。
+   *
+   * ⚠️ **「壊れている」と混ぜない。** 人が意図して止めた処理は、
+   * 動かないのが正しい状態である。黄色にすると**消えない警告**になり、
+   * 運営はその行を読み飛ばすようになる——**本当に止まった日にも
+   * 気づけなくなる**。
+   *
+   * ⚠️ **手当ての一覧に出さない。** 出すと「手当てが要ること」が
+   * 常に 1 件以上になり、空になる日が来なくなる。
+   */
+  'paused',
   /** 平常。 */
   'normal',
   /** 気に留める。⚠️ **今日中に見ればよい。** */
@@ -140,6 +158,17 @@ export interface OperationsIndicator {
 export function buildIndicators(input: {
   readonly counts: OperationsCounts;
   readonly jobs: readonly JobHeartbeat[];
+  /**
+   * 人が意図して止めている時計仕掛け（2026-08-22）。
+   *
+   * ⚠️ **フラグそのものをここへ持ち込まない。** 「どの環境変数で
+   * 止まるか」は配線の都合で、判定の都合ではない。止まっている種別の
+   * 名前だけを受け取る。
+   *
+   * ⚠️ **これに入れても、溜まっている数は隠れない。** お届け待ちの
+   * 件数は別の項目として出続ける。隠れるのは**心拍だけ**である。
+   */
+  readonly pausedJobKeys?: readonly string[];
   readonly thresholds: OperationsThresholds;
   readonly now: Date;
 }): readonly OperationsIndicator[] {
@@ -292,7 +321,9 @@ export function buildIndicators(input: {
           : null,
     },
     webhookIndicator(counts.lastWebhookReceivedAt, thresholds, now),
-    ...input.jobs.map((job) => jobIndicator(job, thresholds, now)),
+    ...input.jobs.map((job) =>
+      jobIndicator(job, thresholds, now, (input.pausedJobKeys ?? []).includes(job.jobKey)),
+    ),
   ];
 }
 
@@ -342,8 +373,30 @@ function jobIndicator(
   job: JobHeartbeat,
   thresholds: OperationsThresholds,
   now: Date,
+  paused: boolean,
 ): OperationsIndicator {
   const label = `${jobLabel(job.jobKey)}の最終成功`;
+  /*
+    ⚠️ **止めている処理は、色を付けない（2026-08-22）。** 止めているあいだ
+       心拍は増えないので、そのままでは「まだ一度も成功していません」の
+       黄色が**永久に**残る。消えない警告は警告として働かず、運営が
+       その行を読み飛ばすようになる。
+
+    ⚠️ **溜まっている数は隠れない。** 「ウォレットへのお届け待ち」は
+       別の項目として出続ける。ここで消すのは心拍だけである。
+
+    ⚠️ **これは本番販売ガードとは別の話。** 画面の色を変えても、
+       「発行・お届けの時計」の条件は緩まない（`production/readiness.ts`）。
+  */
+  if (paused) {
+    return {
+      key: `job_${job.jobKey}`,
+      label,
+      count: null,
+      severity: 'paused',
+      action: null,
+    };
+  }
   if (job.lastSucceededAt === null) {
     return {
       key: `job_${job.jobKey}`,
@@ -392,6 +445,11 @@ function jobLabel(jobKey: string): string {
 
 /** 画面全体でいちばん重い色。⚠️ 一覧の先頭に出す。 */
 export function overallSeverity(indicators: readonly OperationsIndicator[]): OperationsSeverity {
+  /*
+    ⚠️ **`paused` は全体の色を上げない。** 止めている処理があることは
+       異常ではない。上げると、フラグを下ろしている配備は毎朝
+       黄色を見ることになる。
+  */
   if (indicators.some((row) => row.severity === 'critical')) {
     return 'critical';
   }

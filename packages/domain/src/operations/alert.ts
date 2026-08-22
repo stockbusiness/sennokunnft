@@ -82,14 +82,27 @@ export type AlertDecision =
  * 見えると、画面を触るたびに知らせが飛ぶ。
  */
 export function alertFingerprint(indicators: readonly OperationsIndicator[]): string {
-  return indicators
-    .filter((row) => row.severity !== 'normal')
-    .map((row) => `${row.key}:${row.severity}`)
-    .sort()
-    .join('|');
+  return (
+    indicators
+      /*
+      ⚠️ **`paused` を数に入れない（2026-08-22）。** 止めている処理は
+         異常ではない。入れると、フラグを下ろしているだけの配備で
+         「異常あり」の指紋ができ、**知らせが止まらなくなる**。
+    */
+      .filter((row) => row.severity !== 'normal' && row.severity !== 'paused')
+      .map((row) => `${row.key}:${row.severity}`)
+      .sort()
+      .join('|')
+  );
 }
 
 const SEVERITY_RANK: Readonly<Record<OperationsSeverity, number>> = {
+  /*
+    ⚠️ **`paused` は平常より下（2026-08-22）。** どのしきい値を選んでも
+       知らせが飛ばないようにする。止めていることを毎回知らせても、
+       受け取る側にできることは無い。
+  */
+  paused: -1,
   normal: 0,
   warning: 1,
   critical: 2,
@@ -172,6 +185,12 @@ export interface AlertMessage {
 }
 
 const SEVERITY_LABELS: Readonly<Record<OperationsSeverity, string>> = {
+  /*
+    ⚠️ **知らせの見出しに `paused` は出ない**（しきい値に届かないため）。
+       それでも書いておく——網羅を外すと、将来しきい値を触ったときに
+       英字がそのまま件名へ出る。
+  */
+  paused: '止めています',
   normal: '平常',
   warning: '要確認',
   critical: '至急',
