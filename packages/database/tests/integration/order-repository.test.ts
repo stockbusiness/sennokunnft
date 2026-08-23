@@ -272,10 +272,25 @@ suite('期限切れ予約の解放', () => {
     await repo.createWithReservation(command(seeded));
     await repo.createWithReservation(command(seeded));
 
+    /*
+      ⚠️ **落ちたときに、原因の切り分けまで出す。** 件数だけを見て落ちると
+         「上限が効かなかった」のか「掃除が済まずに前の試験の行が残って
+         いた」のかが読み取れない。2026-08-23 に CI で 1 度だけ
+         「上限 2 に対して 3 件」で落ち、**手元で再現できず原因が
+         分からないまま**になった（`docs/TEST_STRATEGY.md` §8-1）。
+         次に出たときは、この文脈があれば切り分けられる。
+    */
+    const reservedBefore = await prisma.inventoryReservation.count({
+      where: { status: 'reserved' },
+    });
     const first = await repo.releaseExpiredReservations(AFTER_EXPIRY, 2);
-    expect(first).toHaveLength(2);
+    expect({ released: first.length, reservedBefore }).toEqual({
+      released: 2,
+      reservedBefore: 3,
+    });
+
     const second = await repo.releaseExpiredReservations(AFTER_EXPIRY, 2);
-    expect(second).toHaveLength(1);
+    expect({ released: second.length }).toEqual({ released: 1 });
   });
 
   it('解放したあと、同じ枠をもう一度買える', async () => {
