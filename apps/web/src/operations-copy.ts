@@ -21,6 +21,23 @@ export const OPERATIONS_COPY = {
   notificationsTitle: '知らせの送信履歴',
   allClear: '手当てが要ることはありません。',
   noFindings: '食い違いは見つかりませんでした。',
+  reservedCountDriftTitle: 'お取り置きの数の食い違い',
+  reservedCountDriftDescription:
+    'お取り置き（販売枠の押さえ）と、実際のご注文が合っていない作品の一覧です。⚠️ ここでは直しません。どのご注文でずれたかを追うための画面です。',
+  reservedCountDriftNone: 'お取り置きの数は、すべての作品で合っています。',
+  reservedCountDriftNoneHint:
+    '押さえている数と、ご注文から数え直した数が一致しています。手当ては要りません。',
+  /*
+    ⚠️ **上限で切ったことを必ず伝える。** 「これで全部」と読まれると、
+       残りに気づかないまま片付いたことにされる。
+  */
+  reservedCountDriftTruncated: '⚠️ 多いため、先頭のぶんだけをお見せしています。',
+  /*
+    ⚠️ **直せないことを画面に書く。** 書かないと、押せるものを探して
+       画面を彷徨うことになる。
+  */
+  reservedCountDriftNoRepair:
+    '⚠️ この画面から数を直すことはできません。直し方（誰が・いつ・どの単位で）が決まるまで、見つけることだけを行います。',
 } as const;
 
 /** 見出しの色。⚠️ `critical` だけが赤。 */

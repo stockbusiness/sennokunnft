@@ -340,6 +340,17 @@ export type {
 } from './ports/revocation-reconcile';
 
 export {
+  RESERVED_COUNT_DRIFT_DIRECTIONS,
+  buildReservedCountDriftViews,
+  stillHeldQuantity,
+  type ReservedCountDriftDirection,
+  type ReservedCountDriftOrder,
+  type ReservedCountDriftOrderView,
+  type ReservedCountDriftRecord,
+  type ReservedCountDriftView,
+} from './operations/reserved-count-drift';
+
+export {
   availableSupply,
   reserveSupply,
   releaseReservation,

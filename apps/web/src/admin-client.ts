@@ -93,6 +93,7 @@ import {
   consistencyResponseSchema,
   entitlementAdminDetailSchema,
   disputeAdminListResponseSchema,
+  reservedCountDriftListResponseSchema,
   entitlementAdminListResponseSchema,
   notificationHistoryListResponseSchema,
   operationsDashboardResponseSchema,
@@ -110,6 +111,7 @@ import {
   type CustomerSearchResponse,
   type EntitlementAdminDetailView,
   type DisputeAdminListResponse,
+  type ReservedCountDriftListResponse,
   type EntitlementAdminListResponse,
   type NotificationHistoryListResponse,
   type OperationsDashboardResponse,
@@ -959,6 +961,18 @@ export function fetchDisputes(
   return callAdmin(
     `/api/v1/admin/operations/disputes${query === '' ? '' : `?${query}`}`,
     disputeAdminListResponseSchema,
+  );
+}
+
+/**
+ * 押さえがずれた作品の一覧（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-23）。
+ *
+ * ⚠️ **読むだけ。** 直す口は無い。
+ */
+export function fetchReservedCountDrift(): Promise<AdminResult<ReservedCountDriftListResponse>> {
+  return callAdmin(
+    '/api/v1/admin/operations/reserved-count-drift',
+    reservedCountDriftListResponseSchema,
   );
 }
 

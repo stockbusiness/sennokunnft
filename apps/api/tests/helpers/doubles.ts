@@ -94,6 +94,7 @@ import type {
   NotificationTemplateRepository,
   NotificationTemplateStatus,
   ConsistencyCounts,
+  ReservedCountDriftRecord,
   EntitlementAdminDetailRecord,
   EntitlementAdminPort,
   EntitlementAdminRecord,
@@ -3988,6 +3989,18 @@ export class InMemoryOperations implements OperationsMetricsPort {
     disputeDueSoonCount: 0,
     lastWebhookReceivedAt: TEST_NOW,
   };
+
+  reservedCountDrift_: {
+    items: readonly ReservedCountDriftRecord[];
+    hasMore: boolean;
+  } = { items: [], hasMore: false };
+
+  reservedCountDrift(_limit: number): Promise<{
+    readonly items: readonly ReservedCountDriftRecord[];
+    readonly hasMore: boolean;
+  }> {
+    return Promise.resolve(this.reservedCountDrift_);
+  }
 
   consistency_: ConsistencyCounts = {
     paidWithoutEntitlements: [],

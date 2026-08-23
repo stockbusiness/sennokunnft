@@ -9,11 +9,14 @@ import type {
   EntitlementAdminQuery,
   OperationsDashboardResponse,
   RedeliverResponse,
+  ReservedCountDriftListResponse,
+  ReservedCountDriftQuery,
   RetryIssuanceResponse,
 } from '@sengoku/contracts';
 import {
   buildConsistencyFindings,
   buildIndicators,
+  buildReservedCountDriftViews,
   disputeUrgency,
   overallSeverity,
   type ClockPort,
@@ -120,6 +123,31 @@ export class OperationsDashboardService {
         action: row.action,
       })),
       generatedAt: now.toISOString(),
+    };
+  }
+
+  /**
+   * 押さえがずれた作品の一覧（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-23）。
+   *
+   * ⚠️ **読むだけ。直す口はここに作らない。** 修復をどう置くかは未決で、
+   * いまの整合性チェックは「直さない。数えるだけ」という方針で作られて
+   * いる。覆すのは決まってからである。
+   *
+   * ⚠️ **食い違いの画面が識別子しか出せなかったのを補う。** 道具を渡さずに
+   * 「突き合わせて特定してください」と言う画面は、赤いまま放置される。
+   */
+  async listReservedCountDrift(
+    query: ReservedCountDriftQuery,
+  ): Promise<ReservedCountDriftListResponse> {
+    const page = await this.operations.reservedCountDrift(query.limit);
+    return {
+      // ⚠️ 契約側は可変配列なので、読み取り専用のまま渡せない。
+      items: [...buildReservedCountDriftViews(page.items)].map((row) => ({
+        ...row,
+        orders: [...row.orders],
+      })),
+      hasMore: page.hasMore,
+      generatedAt: this.clock.now().toISOString(),
     };
   }
 

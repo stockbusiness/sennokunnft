@@ -6,9 +6,14 @@ import type {
   EntitlementAdminListResponse,
   OperationsDashboardResponse,
   RedeliverResponse,
+  ReservedCountDriftListResponse,
   RetryIssuanceResponse,
 } from '@sengoku/contracts';
-import { disputeAdminQuerySchema, entitlementAdminQuerySchema } from '@sengoku/contracts';
+import {
+  disputeAdminQuerySchema,
+  entitlementAdminQuerySchema,
+  reservedCountDriftQuerySchema,
+} from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
 import { CurrentActor, RequireAction } from '../auth/auth.guard';
 import { parseOrThrow } from '../common/validation';
@@ -44,6 +49,24 @@ export class OperationsController {
   @RequireAction('operations.view')
   consistency(): Promise<ConsistencyResponse> {
     return this.operations.consistency();
+  }
+
+  /**
+   * 押さえがずれた作品の一覧（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-23）。
+   *
+   * ⚠️ **読むだけの口しか作らない。** 直す口をどう置くかは未決である。
+   * 食い違いの画面が「突き合わせて特定してください」としか言えなかった
+   * のを、数値と関わっている注文で補う。
+   *
+   * ⚠️ **閲覧者にも開く。** 数を動かす操作は無く、売り越しの芽が
+   * 残っていないかは監査の対象そのものである。
+   */
+  @Get('reserved-count-drift')
+  @RequireAction('operations.view')
+  listReservedCountDrift(@Query() query: unknown): Promise<ReservedCountDriftListResponse> {
+    return this.operations.listReservedCountDrift(
+      parseOrThrow(reservedCountDriftQuerySchema, query),
+    );
   }
 
   /**

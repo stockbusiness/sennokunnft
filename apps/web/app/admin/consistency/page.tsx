@@ -74,7 +74,20 @@ export default async function AdminConsistencyPage() {
                 </td>
                 <td>{row.label}</td>
                 <td className="sengoku-table__nowrap">{String(row.count)} 件</td>
-                <td>{row.count === 0 ? '' : row.action}</td>
+                <td>
+                  {row.count === 0 ? '' : row.action}
+                  {/*
+                    ⚠️ **調べる口があるものは、そこへ繋ぐ。** 手がかりの
+                       識別子だけ見せて「突き合わせてください」と言う画面は、
+                       赤いまま放置される。
+                  */}
+                  {row.count > 0 && row.key === 'reserved_count_drift' ? (
+                    <>
+                      {' '}
+                      <a href="/admin/consistency/reserved-count-drift">ずれた作品とご注文を見る</a>
+                    </>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>

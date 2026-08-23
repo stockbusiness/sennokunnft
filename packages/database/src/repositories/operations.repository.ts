@@ -1,4 +1,10 @@
-import type { ConsistencyCounts, JobHeartbeat, OperationsCounts } from '@sengoku/domain';
+import type {
+  ConsistencyCounts,
+  JobHeartbeat,
+  OperationsCounts,
+  ReservedCountDriftOrder,
+  ReservedCountDriftRecord,
+} from '@sengoku/domain';
 import { CONSISTENCY_SAMPLE_LIMIT } from '@sengoku/domain';
 import { Prisma } from '../../generated/client';
 import type { PrismaClient } from '../../generated/client';
@@ -12,6 +18,14 @@ import type { PrismaClient } from '../../generated/client';
  * ⚠️ **個人を特定できる値を返さない。** 返すのは件数と識別子まで。
  * ダッシュボードは運営が広く開く画面で、置いたものはそのまま目に触れる。
  */
+/**
+ * 一度に返す作品の上限。
+ *
+ * ⚠️ **画面が固まらない数にする。** ずれが数千件あるような事態では、
+ * 全部見せることより「起きている」と伝わることのほうが大事である。
+ */
+const MAX_DRIFT_LIMIT = 100;
+
 export class PrismaOperationsRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -194,6 +208,112 @@ export class PrismaOperationsRepository {
    * ⚠️ **直さない。数えるだけ。** 黙って直すと、なぜ食い違ったのかが
    * 分からないまま同じことが繰り返される。
    */
+  /**
+   * 押さえがずれた作品を、数値と関わっている注文つきで返す。
+   *
+   * ⚠️ **2 回に分けて引く。** 作品を絞ってから、その作品に関わる注文だけを
+   * 引く。1 本の照会で注文まで持ってくると、ずれていない作品の注文まで
+   * 走査することになる。
+   *
+   * ⚠️ **あるべき値の計算はドメインが持つ**（`buildReservedCountDriftViews`）。
+   * ここは素の数を返すだけ。SQL とドメインの両方に同じ算術を書くと、
+   * 片方だけ直したときに画面と検知が食い違う。
+   */
+  async reservedCountDrift(limit: number): Promise<{
+    readonly items: readonly ReservedCountDriftRecord[];
+    readonly hasMore: boolean;
+  }> {
+    // ⚠️ 1 件多く引いて、切ったかどうかを知る。
+    const probe = Math.min(Math.max(limit, 1), MAX_DRIFT_LIMIT) + 1;
+
+    const artworks = await this.prisma.$queryRaw<
+      readonly { id: string; title: string; reserved_count: number }[]
+    >(Prisma.sql`
+      SELECT a."id", a."title", a."reserved_count"
+        FROM "artworks" a
+       WHERE a."reserved_count" <> COALESCE((
+         SELECT sum(GREATEST(0, g."held" - g."issued"))
+           FROM (
+             SELECT r."order_id",
+                    sum(r."quantity") AS "held",
+                    (SELECT count(*)
+                       FROM "entitlements" e
+                      WHERE e."order_id" = r."order_id"
+                        AND e."artwork_id" = a."id") AS "issued"
+               FROM "inventory_reservations" r
+              WHERE r."artwork_id" = a."id"
+                AND r."status" IN ('reserved', 'consumed')
+              GROUP BY r."order_id"
+           ) g
+       ), 0)
+       ORDER BY a."created_at"
+       LIMIT ${probe}
+    `);
+
+    const hasMore = artworks.length === probe;
+    const page = hasMore ? artworks.slice(0, probe - 1) : artworks;
+    if (page.length === 0) {
+      return { items: [], hasMore: false };
+    }
+
+    const artworkIds = page.map((row) => row.id);
+    const orders = await this.prisma.$queryRaw<
+      readonly {
+        artwork_id: string;
+        order_id: string;
+        order_number: string;
+        order_status: string;
+        held: bigint;
+        issued: bigint;
+      }[]
+    >(Prisma.sql`
+      SELECT r."artwork_id",
+             r."order_id",
+             o."order_number",
+             o."status" AS "order_status",
+             sum(r."quantity") AS "held",
+             (SELECT count(*)
+                FROM "entitlements" e
+               WHERE e."order_id" = r."order_id"
+                 AND e."artwork_id" = r."artwork_id") AS "issued"
+        FROM "inventory_reservations" r
+        JOIN "orders" o ON o."id" = r."order_id"
+       WHERE r."artwork_id" IN (${Prisma.join(artworkIds.map((id) => Prisma.sql`${id}::uuid`))})
+         AND r."status" IN ('reserved', 'consumed')
+       GROUP BY r."artwork_id", r."order_id", o."order_number", o."status"
+       ORDER BY o."order_number"
+    `);
+
+    const byArtwork = new Map<string, ReservedCountDriftOrder[]>();
+    for (const row of orders) {
+      const list = byArtwork.get(row.artwork_id) ?? [];
+      list.push({
+        orderId: row.order_id,
+        orderNumber: row.order_number,
+        orderStatus: row.order_status,
+        // ⚠️ `sum` と `count` は bigint で返る。そのまま渡すと JSON にできない。
+        heldQuantity: Number(row.held),
+        issuedCount: Number(row.issued),
+      });
+      byArtwork.set(row.artwork_id, list);
+    }
+
+    return {
+      items: page.map((row) => ({
+        artworkId: row.id,
+        artworkTitle: row.title,
+        reservedCount: row.reserved_count,
+        /*
+          ⚠️ **注文が 1 件も無いこともある。** 仮引当が無いのに押さえが
+             立っている作品がそれ——空の配列を返すのが正しい姿で、
+             ドメイン側であるべき値 0 と数え直される。
+        */
+        orders: byArtwork.get(row.id) ?? [],
+      })),
+      hasMore,
+    };
+  }
+
   async consistency(): Promise<ConsistencyCounts> {
     const limit = CONSISTENCY_SAMPLE_LIMIT;
 
