@@ -11,6 +11,7 @@ import {
 const EMPTY: ConsistencyCounts = {
   paidWithoutEntitlements: [],
   supplyDrift: [],
+  reservedCountDrift: [],
   revokedWithoutWalletNotice: [],
   claimedWithoutDelivery: [],
   unmaskedRecipient: [],
@@ -30,6 +31,19 @@ describe('食い違いの一覧', () => {
 
   it('0 件でも次の一手は用意しておく（見つかったときにすぐ動けるように）', () => {
     expect(buildConsistencyFindings(EMPTY).every((row) => row.action !== '')).toBe(true);
+  });
+
+  it('押さえのずれは至急として出す', () => {
+    /*
+      ⚠️ **`supply_drift` とは別の項目にしてある。** あちらは発行した数、
+         こちらは「まだ受取権になっていない枠」。混ぜると、どちらが
+         ずれたのか読み取れない。
+    */
+    const findings = buildConsistencyFindings({ ...EMPTY, reservedCountDrift: ['artwork-1'] });
+    const row = findings.find((item) => item.key === 'reserved_count_drift');
+    expect(row?.count).toBe(1);
+    expect(row?.severity).toBe('critical');
+    expect(findings.find((item) => item.key === 'supply_drift')?.severity).toBe('normal');
   });
 
   it('1 件でもあれば色が付く', () => {

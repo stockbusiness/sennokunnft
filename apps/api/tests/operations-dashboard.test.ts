@@ -11,6 +11,7 @@ import {
   SenNoKuniHmacVerifier,
   Sha256ClaimTokenService,
 } from '@sengoku/integrations';
+import { CONSISTENCY_CHECK_KEYS } from '@sengoku/domain';
 import { createLogger } from '@sengoku/observability';
 import type { ClaimTokenRotationSource } from '../src/claim/reissue.service';
 import type { Role } from '@sengoku/auth';
@@ -267,8 +268,15 @@ describe('記録の食い違い', () => {
       .get('/api/v1/admin/operations/consistency')
       .set(auth(actorToken('operator')))
       .expect(200);
-    // ⚠️ 0 件の項目を消すと「調べたのか」が分からない。
-    expect(response.body.findings).toHaveLength(5);
+    /*
+      ⚠️ 0 件の項目を消すと「調べたのか」が分からない。
+      ⚠️ **数を直に書かない。** 調べる項目が増えるたびにここを直すことに
+         なり、直すついでに数を合わせてしまう。語彙のほうを正とする。
+    */
+    expect(response.body.findings).toHaveLength(CONSISTENCY_CHECK_KEYS.length);
+    expect(response.body.findings.map((row: { key: string }) => row.key)).toEqual([
+      ...CONSISTENCY_CHECK_KEYS,
+    ]);
     expect(response.body.overall).toBe('normal');
   });
 

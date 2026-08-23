@@ -245,6 +245,7 @@ suite('記録の食い違い', () => {
     const found = await repo.consistency();
     expect(found.paidWithoutEntitlements).toEqual([]);
     expect(found.supplyDrift).toEqual([]);
+    expect(found.reservedCountDrift).toEqual([]);
     expect(found.unmaskedRecipient).toEqual([]);
   });
 

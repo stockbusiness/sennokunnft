@@ -3992,6 +3992,7 @@ export class InMemoryOperations implements OperationsMetricsPort {
   consistency_: ConsistencyCounts = {
     paidWithoutEntitlements: [],
     supplyDrift: [],
+    reservedCountDrift: [],
     revokedWithoutWalletNotice: [],
     claimedWithoutDelivery: [],
     unmaskedRecipient: [],

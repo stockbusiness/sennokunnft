@@ -17,6 +17,8 @@ export const CONSISTENCY_CHECK_KEYS = [
   'paid_without_entitlements',
   /** 作品の発行済み数と、実際の受取権の数が合わない。 */
   'supply_drift',
+  /** 作品の押さえている数と、実際の仮引当が合わない。 */
+  'reserved_count_drift',
   /** 取り消したのに、Wallet へ取消を送っていない受取権（M3a）。 */
   'revoked_without_wallet_notice',
   /** 受取記録があるのに、配送の行が 1 件も無い受取権。 */
@@ -45,6 +47,7 @@ export interface ConsistencyFinding {
 export interface ConsistencyCounts {
   readonly paidWithoutEntitlements: readonly string[];
   readonly supplyDrift: readonly string[];
+  readonly reservedCountDrift: readonly string[];
   readonly revokedWithoutWalletNotice: readonly string[];
   readonly claimedWithoutDelivery: readonly string[];
   readonly unmaskedRecipient: readonly string[];
@@ -75,6 +78,19 @@ const DEFINITIONS: Readonly<
          「多く数えている」側なら売り越しは起きないため、まず調べる。
     */
     action: '作品の発行済み数と受取権の実数を照合し、原因を特定してください。自動では直しません。',
+    critical: true,
+  },
+  reserved_count_drift: {
+    label: '押さえている数と仮引当が合わない作品',
+    /*
+      ⚠️ **重い。どちらへずれても困る。**
+         多く数えていれば売れるはずの枠が売れず、少なく数えていれば
+         売り越しになる。⚠️ **`issued_count` のずれ（`supply_drift`）とは
+         別の話。** あちらは発行した数、こちらは「まだ受取権になって
+         いない枠」を数えているかどうか。
+    */
+    action:
+      '仮引当の行と受取権の数を突き合わせ、どの注文でずれたかを特定してください。自動では直しません。',
     critical: true,
   },
   revoked_without_wallet_notice: {
@@ -113,6 +129,7 @@ export function buildConsistencyFindings(counts: ConsistencyCounts): readonly Co
   const entries: readonly [ConsistencyCheckKey, readonly string[]][] = [
     ['paid_without_entitlements', counts.paidWithoutEntitlements],
     ['supply_drift', counts.supplyDrift],
+    ['reserved_count_drift', counts.reservedCountDrift],
     ['revoked_without_wallet_notice', counts.revokedWithoutWalletNotice],
     ['claimed_without_delivery', counts.claimedWithoutDelivery],
     ['unmasked_recipient', counts.unmaskedRecipient],
