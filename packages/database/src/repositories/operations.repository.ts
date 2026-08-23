@@ -197,7 +197,7 @@ export class PrismaOperationsRepository {
   async consistency(): Promise<ConsistencyCounts> {
     const limit = CONSISTENCY_SAMPLE_LIMIT;
 
-    const [paid, drift, revoked, claimed, unmasked] = await Promise.all([
+    const [paid, drift, reservedDrift, revoked, claimed, unmasked] = await Promise.all([
       // 支払い済みなのに受取権が数量ぶん無い注文。
       this.prisma.$queryRaw<readonly { id: string }[]>(Prisma.sql`
         SELECT DISTINCT o."id"
@@ -221,6 +221,40 @@ export class PrismaOperationsRepository {
          WHERE a."issued_count" <> (
            SELECT count(*) FROM "entitlements" e WHERE e."artwork_id" = a."id"
          )
+         LIMIT ${limit}
+      `),
+      /*
+        押さえている数と、実際の仮引当の食い違い。
+
+        ⚠️ **`reserved` の数量を足すだけでは足りない。** 決済が済むと
+           仮引当は `consumed` になるが、押さえは `reserved_count` に
+           残る（決定 A）。受取権を発行した時点でだけ `issued_count` へ
+           移る。つまり `consumed` の行は「数量 − その注文で発行済みの
+           受取権の数」ぶんを、まだ押さえている。
+        ⚠️ **注文と作品の組ごとに数える。** 同じ作品の仮引当が 1 注文に
+           2 件あるとき、各件で発行済み数をまるごと引くと引きすぎる。
+        ⚠️ **取り消した受取権も数える。** 通し番号を使った枠は戻らない。
+        ⚠️ **負にしない。** 二重発行などで数が壊れていても、
+           期待値を押し上げないため `GREATEST(0, …)` で止める。
+      */
+      this.prisma.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+        SELECT a."id"
+          FROM "artworks" a
+         WHERE a."reserved_count" <> COALESCE((
+           SELECT sum(GREATEST(0, g."held" - g."issued"))
+             FROM (
+               SELECT r."order_id",
+                      sum(r."quantity") AS "held",
+                      (SELECT count(*)
+                         FROM "entitlements" e
+                        WHERE e."order_id" = r."order_id"
+                          AND e."artwork_id" = a."id") AS "issued"
+                 FROM "inventory_reservations" r
+                WHERE r."artwork_id" = a."id"
+                  AND r."status" IN ('reserved', 'consumed')
+                GROUP BY r."order_id"
+             ) g
+         ), 0)
          LIMIT ${limit}
       `),
       // 取り消したのに Wallet へ取消を送っていない受取権（M3a）。
@@ -266,6 +300,7 @@ export class PrismaOperationsRepository {
     return {
       paidWithoutEntitlements: paid.map((row) => row.id),
       supplyDrift: drift.map((row) => row.id),
+      reservedCountDrift: reservedDrift.map((row) => row.id),
       revokedWithoutWalletNotice: revoked.map((row) => row.id),
       claimedWithoutDelivery: claimed.map((row) => row.id),
       unmaskedRecipient: unmasked.map((row) => row.id),
