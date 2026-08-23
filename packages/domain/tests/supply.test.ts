@@ -3,6 +3,7 @@ import {
   allocateSerialNumbers,
   availableSupply,
   finalizeConsumedReservation,
+  planReservationRelease,
   releaseReservation,
   reserveSupply,
   type SupplyCounters,
@@ -90,5 +91,65 @@ describe('シリアル番号の採番', () => {
 
   it('数量 1 なら 1 件だけ返す', () => {
     expect(allocateSerialNumbers(counters({ issuedCount: 4 }), 1)).toEqual([5]);
+  });
+});
+
+describe('planReservationRelease', () => {
+  const reservation = (reservationId: string, artworkId: string, quantity: number) => ({
+    reservationId,
+    artworkId,
+    quantity,
+  });
+
+  it('受取権をまだ発行していなければ、数量ぶんそのまま戻す', () => {
+    const plan = planReservationRelease([reservation('r1', 'a1', 2)], new Map());
+
+    expect(plan).toEqual([
+      { reservationId: 'r1', artworkId: 'a1', quantity: 2, releaseQuantity: 2 },
+    ]);
+  });
+
+  it('発行済みのぶんは戻さない（発行時に issuedCount へ移っている）', () => {
+    const plan = planReservationRelease([reservation('r1', 'a1', 2)], new Map([['a1', 2]]));
+
+    expect(plan[0]?.releaseQuantity).toBe(0);
+  });
+
+  it('一部だけ発行済みなら、残りだけ戻す', () => {
+    const plan = planReservationRelease([reservation('r1', 'a1', 3)], new Map([['a1', 1]]));
+
+    expect(plan[0]?.releaseQuantity).toBe(2);
+  });
+
+  it('同じ作品の仮引当が 2 件あっても、発行済みを二重に引かない', () => {
+    /*
+      ⚠️ **各件でまるごと引くと引きすぎる。** 発行済み 2 を両方から引くと
+         戻す枠が 0 + 1 になり、本来戻すべき 1 枠が失われる。
+    */
+    const plan = planReservationRelease(
+      [reservation('r1', 'a1', 2), reservation('r2', 'a1', 1)],
+      new Map([['a1', 2]]),
+    );
+
+    expect(plan.map((row) => row.releaseQuantity)).toEqual([0, 1]);
+  });
+
+  it('作品が違えば、互いの発行済みを引かない', () => {
+    const plan = planReservationRelease(
+      [reservation('r1', 'a1', 1), reservation('r2', 'a2', 1)],
+      new Map([['a1', 1]]),
+    );
+
+    expect(plan.map((row) => row.releaseQuantity)).toEqual([0, 1]);
+  });
+
+  it('発行済みが数量を上回っていても、戻す枠が負にならない', () => {
+    /*
+      ⚠️ **ここが負になると `reserved_count` を増やしてしまう。**
+         二重発行などで数が壊れていても、押さえを水増ししない。
+    */
+    const plan = planReservationRelease([reservation('r1', 'a1', 1)], new Map([['a1', 5]]));
+
+    expect(plan[0]?.releaseQuantity).toBe(0);
   });
 });

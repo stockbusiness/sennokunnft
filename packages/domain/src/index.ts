@@ -344,8 +344,11 @@ export {
   reserveSupply,
   releaseReservation,
   finalizeConsumedReservation,
+  planReservationRelease,
   allocateSerialNumbers,
   type SupplyCounters,
+  type ReservationToRelease,
+  type ReservationRelease,
 } from './supply/supply';
 
 export {

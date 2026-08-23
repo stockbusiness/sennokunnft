@@ -2,6 +2,7 @@ import {
   clawbackBearerForRefundReason,
   TARGET_SITE_KEY,
   decideRevocation,
+  planReservationRelease,
   refundStatusAfter,
   revocableEntitlementStatuses,
   type EntitlementStatus,
@@ -264,20 +265,61 @@ export class PrismaRefundRepository implements RefundRepository {
         where: { orderId: command.orderId, status: { in: ['reserved', 'consumed'] } },
         select: { id: true, artworkId: true, quantity: true },
       });
-      for (const reservation of reservations) {
+
+      /*
+        ⚠️ **数量ぶんそのまま戻さない。** 受取権になった枠は、発行の時点で
+           すでに `reserved_count` から `issued_count` へ移っている
+           （決定 A）。ここでもう一度引くと同じ枠を二度戻すことになり、
+           ほかの方の押さえを削るか、`artworks_reserved_count_non_negative`
+           で落ちて**返金の記録そのものが失敗する**。
+        ⚠️ **取り消した受取権も数える。** 4 番で `revoked` へ進めた行は
+           残っており、その枠は戻らない（通し番号は使い切り）。
+      */
+      const issuedByArtwork = new Map<string, number>();
+      for (const artworkId of new Set(reservations.map((row) => row.artworkId))) {
+        issuedByArtwork.set(
+          artworkId,
+          await tx.entitlement.count({ where: { orderId: command.orderId, artworkId } }),
+        );
+      }
+
+      const plan = planReservationRelease(
+        reservations.map((row) => ({
+          reservationId: row.id,
+          artworkId: row.artworkId,
+          quantity: row.quantity,
+        })),
+        issuedByArtwork,
+      );
+
+      for (const reservation of plan) {
         const released = await tx.inventoryReservation.updateMany({
           // ⚠️ 条件付き更新。二重に戻さない。
-          where: { id: reservation.id, status: { in: ['reserved', 'consumed'] } },
+          where: { id: reservation.reservationId, status: { in: ['reserved', 'consumed'] } },
           data: { status: 'released', releasedAt: command.now, updatedAt: command.now },
         });
         if (released.count !== 1) {
           continue;
         }
+        /*
+          ⚠️ **戻す枠が 0 でも、仮引当は上で `released` にしてある。**
+             行の状態は「この注文はもう枠を持たない」という事実であって、
+             カウンタを動かしたかどうかとは別である。順序を入れ替えて
+             ここより手前で弾くと、枠を持ったままの行が残る。
+          ⚠️ この分岐は**正しさのためではない**（0 を引いても値は変わらない）。
+             作品行に触らずに済ませ、`updated_at` を無意味に進めないため。
+        */
+        if (reservation.releaseQuantity === 0) {
+          continue;
+        }
         await tx.artwork.update({
           where: { id: reservation.artworkId },
-          data: { reservedCount: { decrement: reservation.quantity }, updatedAt: command.now },
+          data: {
+            reservedCount: { decrement: reservation.releaseQuantity },
+            updatedAt: command.now,
+          },
         });
-        restoredSupply += reservation.quantity;
+        restoredSupply += reservation.releaseQuantity;
       }
 
       /*

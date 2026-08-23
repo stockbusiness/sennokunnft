@@ -72,6 +72,56 @@ export function releaseReservation(
   return ok({ ...counters, reservedCount: counters.reservedCount - quantity });
 }
 
+/** 返金で解放する仮引当 1 件。 */
+export interface ReservationToRelease {
+  readonly reservationId: string;
+  readonly artworkId: string;
+  readonly quantity: number;
+}
+
+export interface ReservationRelease extends ReservationToRelease {
+  /**
+   * 実際に `reservedCount` から戻す数。
+   *
+   * ⚠️ **数量そのものではない。** 受取権になったぶんは、発行の時点で
+   * すでに `reservedCount` から `issuedCount` へ移っている。
+   */
+  readonly releaseQuantity: number;
+}
+
+/**
+ * 返金するとき、押さえをいくつ戻すかを決める。
+ *
+ * ⚠️ **「予約の数量ぶん戻す」は誤り。** 決定 A により、決済が済んでも枠は
+ * `reservedCount` に残るが、**受取権を発行した時点で** `issuedCount` へ
+ * 移る。移したあとに数量ぶんを戻すと、**同じ枠を二度戻す**ことになる。
+ * 戻しすぎた押さえは「まだ売れる枠」に見えるので、売り越しになる
+ * （下がりきると `artworks_reserved_count_non_negative` で落ちる）。
+ *
+ * ⚠️ **`issuedCount` は減らさない。** 通し番号は使い切りで、返金した枠は
+ * 失われる（`SETTLEMENT_AND_REFUND.md`）。ここは押さえ側だけを扱う。
+ *
+ * @param issuedByArtwork 作品ごとの、その注文で発行済みの受取権の数。
+ *   ⚠️ **取り消した受取権も数える。** 通し番号を使った枠は戻らない。
+ */
+export function planReservationRelease(
+  reservations: readonly ReservationToRelease[],
+  issuedByArtwork: ReadonlyMap<string, number>,
+): readonly ReservationRelease[] {
+  /*
+    ⚠️ **作品ごとに配り切る。** 同じ作品の仮引当が 1 注文に 2 件あるとき、
+       各件で発行済み数をまるごと引くと引きすぎる。残りを持ち回る。
+  */
+  const remaining = new Map(issuedByArtwork);
+
+  return reservations.map((reservation) => {
+    const issued = remaining.get(reservation.artworkId) ?? 0;
+    const consumed = Math.min(issued, reservation.quantity);
+    remaining.set(reservation.artworkId, issued - consumed);
+    return { ...reservation, releaseQuantity: reservation.quantity - consumed };
+  });
+}
+
 /**
  * 押さえていた枠を、受取権の発行済みへ**移す**。
  *
