@@ -280,6 +280,86 @@ describe('記録の食い違い', () => {
     expect(response.body.overall).toBe('normal');
   });
 
+  it('押さえのずれは、数値と関わっている注文つきで返す', async () => {
+    /*
+      ⚠️ **食い違いの画面が識別子しか出せなかったのを補う口。**
+         数値も注文も返さないなら、この口を足す意味がない。
+    */
+    harness.operationsMetrics.reservedCountDrift_ = {
+      items: [
+        {
+          artworkId: 'artwork-1',
+          artworkTitle: '雪の城',
+          reservedCount: 5,
+          orders: [
+            {
+              orderId: 'order-1',
+              orderNumber: 'SG-0001',
+              orderStatus: 'paid',
+              heldQuantity: 2,
+              issuedCount: 1,
+            },
+          ],
+        },
+      ],
+      hasMore: false,
+    };
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/reserved-count-drift')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0]).toMatchObject({
+      artworkTitle: '雪の城',
+      reservedCount: 5,
+      expectedReservedCount: 1,
+      difference: 4,
+      direction: 'over',
+    });
+    expect(response.body.items[0].orders[0]).toMatchObject({
+      orderNumber: 'SG-0001',
+      stillHeld: 1,
+    });
+    expect(response.body.hasMore).toBe(false);
+  });
+
+  it('ずれが無ければ空で返す', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/reserved-count-drift')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    expect(response.body.items).toEqual([]);
+  });
+
+  it('お名前もメールも返さない（UD-503）', async () => {
+    /*
+      ⚠️ **契約に項目が無いことを、返り値でも確かめる。** 型は消えるが、
+         この試験は消えない。
+    */
+    harness.operationsMetrics.reservedCountDrift_ = {
+      items: [
+        {
+          artworkId: 'artwork-1',
+          artworkTitle: '雪の城',
+          reservedCount: 1,
+          orders: [],
+        },
+      ],
+      hasMore: false,
+    };
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/operations/reserved-count-drift')
+      .set(auth(actorToken('operator')))
+      .expect(200);
+
+    const body = JSON.stringify(response.body);
+    expect(body).not.toMatch(/email|mail|@/i);
+  });
+
   it('見つかれば件数と手がかりを返す', async () => {
     harness.operationsMetrics.consistency_ = {
       ...harness.operationsMetrics.consistency_,

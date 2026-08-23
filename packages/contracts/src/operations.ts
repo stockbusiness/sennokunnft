@@ -4,6 +4,7 @@ import {
   DISPUTE_STATUSES,
   DISPUTE_URGENCIES,
   OPERATIONS_SEVERITIES,
+  RESERVED_COUNT_DRIFT_DIRECTIONS,
 } from '@sengoku/domain';
 import type { OperationsSeverity } from '@sengoku/domain';
 import { z } from 'zod';
@@ -144,6 +145,50 @@ export const disputeAdminQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 export type DisputeAdminQuery = z.infer<typeof disputeAdminQuerySchema>;
+
+/**
+ * 押さえがずれた作品 1 件（`ADMIN_OPERATIONS_GAP.md` §I）。
+ *
+ * ⚠️ **買った方を特定できる項目を置かない**（`UD-503`）。注文の識別子と
+ * 注文番号までで、氏名・メール・住所は**項目そのものが無い**。
+ */
+export const reservedCountDriftOrderSchema = z.object({
+  orderId: z.string(),
+  orderNumber: z.string(),
+  orderStatus: z.string(),
+  /** `reserved` / `consumed` の仮引当の数量の合計。 */
+  heldQuantity: z.number().int(),
+  /** その注文・その作品で発行済みの受取権の数。⚠️ 取り消したぶんも含む。 */
+  issuedCount: z.number().int(),
+  /** この注文がまだ押さえているはずの数。 */
+  stillHeld: z.number().int(),
+});
+
+export const reservedCountDriftSchema = z.object({
+  artworkId: z.string(),
+  artworkTitle: z.string(),
+  reservedCount: z.number().int(),
+  expectedReservedCount: z.number().int(),
+  /** ⚠️ 符号を保つ。多いのか少ないのかで起きることが違う。 */
+  difference: z.number().int(),
+  direction: z.enum(RESERVED_COUNT_DRIFT_DIRECTIONS),
+  consequence: z.string(),
+  orders: z.array(reservedCountDriftOrderSchema),
+});
+export type ReservedCountDriftAdminView = z.infer<typeof reservedCountDriftSchema>;
+
+export const reservedCountDriftListResponseSchema = z.object({
+  items: z.array(reservedCountDriftSchema),
+  /** ⚠️ **上限で切ったことを隠さない。** 全部見えていると読ませない。 */
+  hasMore: z.boolean(),
+  generatedAt: z.string(),
+});
+export type ReservedCountDriftListResponse = z.infer<typeof reservedCountDriftListResponseSchema>;
+
+export const reservedCountDriftQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type ReservedCountDriftQuery = z.infer<typeof reservedCountDriftQuerySchema>;
 
 export const entitlementAdminQuerySchema = z.object({
   status: z.string().optional(),

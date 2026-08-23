@@ -1,5 +1,6 @@
 import type { JobHeartbeat, OperationsCounts } from '../operations/dashboard';
 import type { ConsistencyCounts } from '../operations/consistency';
+import type { ReservedCountDriftRecord } from '../operations/reserved-count-drift';
 
 /**
  * 運営ダッシュボードが読む口（P0-6）。
@@ -33,6 +34,18 @@ export interface OperationsMetricsPort {
   }): Promise<void>;
   /** ⚠️ 直さない。数えるだけ。 */
   consistency(): Promise<ConsistencyCounts>;
+  /**
+   * 押さえがずれた作品を、数値と関わっている注文つきで返す。
+   *
+   * ⚠️ **`consistency()` と重ねて数えない。** あちらは「何件あるか」、
+   * こちらは「どこがどうずれたか」。役割が違うので分けてある。
+   *
+   * ⚠️ **上限で切ったことを隠さない。** 切ったなら `hasMore` で伝える。
+   */
+  reservedCountDrift(limit: number): Promise<{
+    readonly items: readonly ReservedCountDriftRecord[];
+    readonly hasMore: boolean;
+  }>;
 }
 
 /** 一覧の 1 行。⚠️ 氏名・メール・受取トークンの項目を持たない。 */
