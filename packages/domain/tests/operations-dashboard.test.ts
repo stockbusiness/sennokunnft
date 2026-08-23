@@ -32,6 +32,7 @@ const QUIET: OperationsCounts = {
   integrationFailureCount: 0,
   openDisputeCount: 0,
   disputeDueSoonCount: 0,
+  unexplainedRepairCount: 0,
   lastWebhookReceivedAt: new Date('2026-08-21T08:00:00.000Z'),
 };
 
@@ -357,5 +358,40 @@ describe('止めている時計仕掛け', () => {
       now: NOW,
     }).find((item) => item.key === 'job_deliver-entitlements');
     expect(row?.severity).toBe('warning');
+  });
+});
+
+/**
+ * 原因が分からないまま直した押さえ（`ADMIN_OPERATIONS_GAP.md` §I）。
+ *
+ * ⚠️ **消えない指標として置いてある。** 修復すれば食い違いの検知は 0 件へ
+ * 戻る。そこで終わりにできると、バグを黙って洗浄する機械になる。
+ */
+describe('原因が分からないまま直した押さえ', () => {
+  function row(unexplainedRepairCount: number) {
+    return build({ unexplainedRepairCount }).find((item) => item.key === 'unexplained_repair');
+  }
+
+  it('1 件でもあれば黄で、次の一手を添える', () => {
+    expect({ severity: row(1)?.severity, hasAction: row(1)?.action !== null }).toEqual({
+      severity: 'warning',
+      hasAction: true,
+    });
+  });
+
+  /*
+    ⚠️ **赤にしない。** 押さえは数え直した値へ直っており、いま何かが
+       壊れているわけではない。急ぐのは「直すこと」ではなく「なぜ
+       そうなったかを突き止めること」。赤を安売りすると本当の赤が埋もれる。
+  */
+  it('赤にはしない', () => {
+    expect(row(9)?.severity).toBe('warning');
+  });
+
+  it('0 件なら静かにする', () => {
+    expect({ severity: row(0)?.severity, action: row(0)?.action }).toEqual({
+      severity: 'normal',
+      action: null,
+    });
   });
 });

@@ -79,6 +79,15 @@ export interface OperationsCounts {
    * ——急ぐのかどうかが分からない。
    */
   readonly disputeDueSoonCount: number;
+  /**
+   * 原因が分からないまま押さえのずれを直し、まだ閉じていない件数
+   * （`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+   *
+   * ⚠️ **これは「直し忘れ」ではなく「調べ忘れ」の数である。** 直した時点で
+   * 整合性チェックは 0 件へ戻る。**直したことで赤が消えるのを許さない**
+   * ために、この数を別に持つ。
+   */
+  readonly unexplainedRepairCount: number;
   /** 決済事業者からの知らせを最後に受け取った時刻。 */
   readonly lastWebhookReceivedAt: Date | null;
 }
@@ -288,6 +297,26 @@ export function buildIndicators(input: {
           : counts.openDisputeCount > 0
             ? '決済事業者の画面で内容を確かめ、証拠を出す準備をしてください。'
             : null,
+    },
+    {
+      key: 'unexplained_repair',
+      label: '原因が分からないまま直した押さえ',
+      count: counts.unexplainedRepairCount,
+      /*
+        ⚠️ **黄。売り越しの芽そのものは止まっている**——押さえは数え直した
+           値へ直っており、いま何かが壊れているわけではない。急ぐのは
+           「直すこと」ではなく「なぜそうなったかを突き止めること」。
+
+        ⚠️ **消えない指標として置いてある。** 修復すれば食い違いの検知は
+           0 件へ戻る。そこで終わりにできると、**バグを黙って洗浄する
+           機械**になる。2026-08-23 に見つかった返金の二重解放は、修復の
+           口が先にあったら押して終わりにしていた可能性が高い。
+      */
+      severity: counts.unexplainedRepairCount > 0 ? 'warning' : 'normal',
+      action:
+        counts.unexplainedRepairCount > 0
+          ? '直した記録の内訳から原因を追い、分かったことを書いて閉じてください。'
+          : null,
     },
     {
       key: 'notification_pending',

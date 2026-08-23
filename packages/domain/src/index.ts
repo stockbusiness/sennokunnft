@@ -351,6 +351,28 @@ export {
 } from './operations/reserved-count-drift';
 
 export {
+  RESERVED_COUNT_REPAIR_CAUSE_STATES,
+  RESERVED_COUNT_REPAIR_REASON_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_REASON_MIN_LENGTH,
+  RESERVED_COUNT_REPAIR_REFUSALS,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MIN_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLVE_REFUSALS,
+  pendingRepairCount,
+  planReservedCountRepair,
+  planReservedCountRepairResolution,
+  type ReservedCountRepairCauseState,
+  type ReservedCountRepairCommand,
+  type ReservedCountRepairDecision,
+  type ReservedCountRepairPlan,
+  type ReservedCountRepairRecord,
+  type ReservedCountRepairRefusal,
+  type ReservedCountRepairResolveDecision,
+  type ReservedCountRepairResolveRefusal,
+  type ReservedCountRepairSubject,
+} from './operations/reserved-count-repair';
+
+export {
   availableSupply,
   reserveSupply,
   releaseReservation,
@@ -904,6 +926,10 @@ export type {
   EntitlementAdminPort,
   EntitlementAdminRecord,
   OperationsMetricsPort,
+  ReservedCountRepairMissing,
+  ReservedCountRepairOutcome,
+  ReservedCountRepairPort,
+  ReservedCountRepairResolveOutcome,
 } from './ports/operations';
 
 // --- 本番販売ガード（P0-7） -----------------------------------------------

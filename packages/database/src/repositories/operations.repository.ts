@@ -52,6 +52,7 @@ export class PrismaOperationsRepository {
       integrationFailureCount,
       openDisputeCount,
       disputeDueSoonCount,
+      unexplainedRepairCount,
       lastWebhook,
     ] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: start, lt: end } } }),
@@ -121,6 +122,16 @@ export class PrismaOperationsRepository {
           evidenceDueAt: { not: null, lt: disputeDueSoonBefore },
         },
       }),
+      /*
+        原因が分からないまま直した押さえ（`ADMIN_OPERATIONS_GAP.md` §I）。
+        ⚠️ **直せば食い違いの検知は 0 件へ戻る。** そこで終わりにできると、
+           バグを黙って洗浄する機械になる。**直したことで赤が消えるのを
+           許さない**ためにこの数を別に持つ。
+        ⚠️ 部分索引 `reserved_count_repairs_pending_idx` と同じ条件にする。
+      */
+      this.prisma.reservedCountRepair.count({
+        where: { causeState: 'unknown', resolvedAt: null },
+      }),
       this.prisma.webhookEvent.findFirst({
         orderBy: [{ receivedAt: 'desc' }],
         select: { receivedAt: true },
@@ -142,6 +153,7 @@ export class PrismaOperationsRepository {
       integrationFailureCount,
       openDisputeCount,
       disputeDueSoonCount,
+      unexplainedRepairCount,
       lastWebhookReceivedAt: lastWebhook?.receivedAt ?? null,
     };
   }

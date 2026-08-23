@@ -1,12 +1,16 @@
 import { EmptyState, Notice, PageHeader, StatusBadge } from '@sengoku/ui';
 import { fetchReservedCountDrift } from '../../../../src/admin-client';
 import { ADMIN_COPY } from '../../../../src/admin-copy';
+import { RepairReservedCountForm } from '../forms';
 import { OPERATIONS_COPY, formatJst } from '../../../../src/operations-copy';
 
 /**
  * 押さえがずれた作品の一覧（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-23）。
  *
- * ⚠️ **読むだけの画面。直す口は置かない。** 修復をどう置くかは未決である。
+ * ⚠️ **1 件ずつしか直せない。** 一括のボタンは置かない。ずれはバグ由来だと
+ * 同時に何十件も出るので、一括だと**1 回の操作で、本人が下していない判断を
+ * 数十件ぶん下せてしまう。**1 件ずつなら「50 回押している」こと自体が
+ * 異常の合図になる（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
  *
  * ⚠️ **この画面が要る理由。** 食い違いの画面は作品の識別子しか出せず、
  * 「突き合わせて特定してください」としか言えなかった。**道具を渡さずに
@@ -135,11 +139,27 @@ export default async function AdminReservedCountDriftPage() {
                 </table>
               </div>
             )}
+
+            {/*
+              ⚠️ **急ぐ向きと、そうでない向きを分けて書く。** 押さえが
+                 足りない側はいま売り越しが起きうる。多い側は売れる枠が
+                 売れないだけで、お客さまに二重に売ることはない。
+              ⚠️ **多い側は「取り返しがつきにくい」。** 枠を解放するので、
+                 数え直しが間違っていればすぐ売れてしまう。急かさない。
+            */}
+            <details className="sengoku-panel">
+              <summary>この作品のお取り置きの数を直す</summary>
+              <RepairReservedCountForm
+                artworkId={row.artworkId}
+                observedReservedCount={row.reservedCount}
+                expectedReservedCount={row.expectedReservedCount}
+              />
+            </details>
           </section>
         ))
       )}
 
-      <p className="sengoku-form__hint">{OPERATIONS_COPY.reservedCountDriftNoRepair}</p>
+      <p className="sengoku-form__hint">{OPERATIONS_COPY.reservedCountRepairNote}</p>
     </>
   );
 }

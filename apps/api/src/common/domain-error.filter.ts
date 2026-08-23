@@ -216,6 +216,19 @@ export const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>>
        している、という状態の食い違いである。
   */
   DISPUTE_NOT_ACTIONABLE: HttpStatus.CONFLICT,
+  // 押さえのずれを直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+  RESERVED_COUNT_REPAIR_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  RESERVED_COUNT_REPAIR_REASON_REQUIRED: HttpStatus.BAD_REQUEST,
+  /*
+    ⚠️ **409。失敗ではなく「正しく止まった」。** 画面を開き直せば直せる。
+       400 にすると、送った中身が悪いように読める。
+  */
+  RESERVED_COUNT_REPAIR_STALE_VIEW: HttpStatus.CONFLICT,
+  RESERVED_COUNT_REPAIR_NO_DRIFT: HttpStatus.CONFLICT,
+  RESERVED_COUNT_REPAIR_EXCEEDS_MAX_SUPPLY: HttpStatus.CONFLICT,
+  RESERVED_COUNT_REPAIR_NOTE_REQUIRED: HttpStatus.BAD_REQUEST,
+  RESERVED_COUNT_REPAIR_NOT_PENDING: HttpStatus.CONFLICT,
+  RESERVED_COUNT_REPAIR_ALREADY_RESOLVED: HttpStatus.CONFLICT,
 };
 
 /** 利用者に見せる文言。内部実装の詳細を含めない。 */
@@ -454,6 +467,28 @@ const USER_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
     '返金と精算の設定がまだ登録されていません。管理画面の設定をご確認ください。',
   DISPUTE_NOT_ACTIONABLE:
     'このチャージバックは、いまその操作ができない状態です。画面を読み込み直して、最新の状態をご確認ください。',
+  /*
+    押さえのずれを直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+
+    ⚠️ **次の一手が分かる文言にする。** 「直せませんでした」だけだと、
+       開き直せばよいのか、そもそも直す話ではないのかが分からない。
+  */
+  RESERVED_COUNT_REPAIR_UNAVAILABLE:
+    'お取り置きの数を直す機能が、この環境では使えません。開発の担当者へご連絡ください。',
+  RESERVED_COUNT_REPAIR_REASON_REQUIRED:
+    'なぜ直すのかを、10 文字以上で書いてください。あとから読む方が、原因を追う手がかりになります。',
+  RESERVED_COUNT_REPAIR_STALE_VIEW:
+    '画面を開いてから、この作品のお取り置きの数が変わりました。画面を開き直して、もう一度お確かめください。',
+  RESERVED_COUNT_REPAIR_NO_DRIFT:
+    'この作品のお取り置きの数は、すでに合っています。直すところがありません。',
+  RESERVED_COUNT_REPAIR_EXCEEDS_MAX_SUPPLY:
+    '数え直すと、この作品の販売できる数を超えてしまいます。すでに売り越している状態です。ご注文の取り消しか、販売できる数の見直しが必要です。',
+  RESERVED_COUNT_REPAIR_NOTE_REQUIRED:
+    '何が原因だったのかを、10 文字以上で書いてください。書けない場合は、まだ閉じるときではありません。',
+  RESERVED_COUNT_REPAIR_NOT_PENDING:
+    'これは原因が分かったうえで直した記録です。閉じる対象ではありません。',
+  RESERVED_COUNT_REPAIR_ALREADY_RESOLVED:
+    'この記録は、すでにどなたかが閉じています。画面を開き直してご確認ください。',
 };
 
 /** ドメインエラーを HTTP 境界へ運ぶための例外。 */

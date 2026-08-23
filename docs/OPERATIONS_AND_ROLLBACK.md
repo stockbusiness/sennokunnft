@@ -226,26 +226,55 @@ pnpm wallet:resend --event-id=<お問い合わせ番号>
 
 ⚠️ **この画面から記録を消したり直したりはできない。** 経路そのものが無い。
 
-### 5.8 在庫（発行上限）の不整合を疑うとき
+### 5.8 在庫（お取り置き・発行済み）の食い違いを疑うとき
 
-```sql
--- reserved_count が実際の pending 注文と一致するか
-SELECT a.id, a.reserved_count,
-       COALESCE(SUM(ol.quantity), 0) AS actual_reserved
-  FROM artworks a
-  LEFT JOIN order_lines ol ON ol.artwork_id = a.id
-  LEFT JOIN orders o ON o.id = ol.order_id AND o.status = 'pending'
- GROUP BY a.id
-HAVING a.reserved_count <> COALESCE(SUM(ol.quantity), 0);
+⚠️ **手で SQL を書かない。** ここには以前、`orders.status = 'pending'` を
+前提にした照会が載っていたが、**決定 A（決済が済んでも枠は押さえたままで、
+受取権を発行した時点で移る）より前の意味**のままだった。いま実行すると
+**存在しないずれが大量に出る。** 照合は実装済みのものを使う。
 
--- issued_count が entitlements 件数と一致するか
-SELECT a.id, a.issued_count, COUNT(e.id) AS actual_issued
-  FROM artworks a LEFT JOIN entitlements e ON e.artwork_id = a.id
- GROUP BY a.id HAVING a.issued_count <> COUNT(e.id);
-```
+#### 見つける
 
-🟡 **仮決定:** この整合性チェックを**日次で自動実行**し、
-不一致があればアラートする。カウンタのずれは静かに進行するため。
+| 画面                                        | 何が分かるか                                           |
+| ------------------------------------------- | ------------------------------------------------------ |
+| `/admin/consistency`                        | 6 種類の食い違いの件数。**0 件が正常**                 |
+| `/admin/consistency/reserved-count-drift`   | ずれた作品ごとの数と、**原因になっているご注文の内訳** |
+| `/admin/consistency/reserved-count-repairs` | 直したが**原因がまだ分かっていない**もの               |
+
+- `supply_drift` … `issued_count` と受取権の実数が合わない
+- `reserved_count_drift` … `reserved_count` と仮引当が合わない
+
+#### 直す（2026-08-24 決定・`ADMIN_OPERATIONS_GAP.md` §I）
+
+1. `/admin/consistency/reserved-count-drift` を開き、**ご注文の内訳から原因を
+   追う**。注文番号から注文の画面へ回れる
+2. 直すなら、その作品の「お取り置きの数を直す」を開き、理由を書いて押す
+   （`operations.retry` が要る）
+3. **原因がまだ分からなければ、正直に「まだ分かっていない」を選ぶ。** 直せる
+   が、`/admin/consistency/reserved-count-repairs` に残り続ける
+4. 原因が分かったら、その一覧から**何が分かったかを書いて閉じる**
+
+⚠️ **急ぎ方が向きで違う。**
+
+- **押さえが足りない**（`under`）… いま売り越しが起きうる。**急ぐ**
+- **押さえが多い**（`over`）… 売れる枠が売れないだけで、二重に売ることはない。
+  そのうえ直すと枠が解放されて**すぐ売れてしまい、間違いを戻せない。**急がない
+
+⚠️ **一括では直せない。** 何度も押すことになったら、それ自体が「同じ原因で
+何件も出ている」という合図である。押す前に原因を追うこと。
+
+#### 直しても赤が消えない場合
+
+押した直後にまた食い違いが出るなら、**カウンタではなく仮引当の側がおかしい。**
+この口はカウンタを仮引当に合わせるだけなので、仮引当が壊れていれば直らない
+（切り分けの道具として使える）。`inventory_reservations` に、解放されるはずの
+まま残っている行が無いか見る。
+
+#### 「直すと上限を超える」と断られた場合
+
+⚠️ **これはずれではなく、すでに売り越している。** 押さえと発行済みの合計が
+販売できる数を超えている。ご注文の取り消しか、販売できる数の見直しかの判断が
+要る事態で、この口では扱わない。**運営の判断を仰ぐこと。**
 
 ---
 

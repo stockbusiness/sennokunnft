@@ -115,6 +115,10 @@ const MENU: readonly MenuGroup[] = [
     items: [
       { href: '/admin/consistency', label: '記録の食い違い' },
       { href: '/admin/consistency/reserved-count-drift', label: 'お取り置きの数' },
+      {
+        href: '/admin/consistency/reserved-count-repairs',
+        label: '原因の分からない修復',
+      },
       { href: '/admin/production', label: '本番販売の準備' },
       { href: '/admin/audit-logs', label: '操作の記録' },
     ],

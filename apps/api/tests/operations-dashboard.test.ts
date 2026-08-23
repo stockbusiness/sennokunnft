@@ -725,3 +725,284 @@ describe('争いの一覧', () => {
       .expect(404);
   });
 });
+
+/**
+ * 押さえのずれを直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+ *
+ * ⚠️ **この組で見たいのは 3 つ。**
+ *  1. **見るのと直すのを分けていること。** 監査担当は記録を読めるが、
+ *     直すことも閉じることもできない
+ *  2. **断った理由が、次の一手の分かる形で返ること。** 画面を開き直せば
+ *     よいのか、そもそも直す話ではないのかで、運営の動きが変わる
+ *  3. **一括で直す口が無いこと。** 作品を 1 件ずつしか渡せないこと
+ *
+ * ⚠️ **本物の歯止め（作品行の `FOR UPDATE`・数え直し）はここに無い。**
+ * 実 PostgreSQL でしか試せないので、DB の結合試験が受け持っている。
+ */
+describe('押さえのずれを直す', () => {
+  const ARTWORK_ID = 'c0ffee00-0000-4000-8000-000000000009';
+  const REPAIR_ID = 'c0ffee00-0000-4000-8000-00000000000a';
+  const REASON = '返金の二重解放が原因と分かったので、押さえを数え直す';
+
+  function repairRecord(overrides: Record<string, unknown> = {}) {
+    return {
+      id: REPAIR_ID,
+      artworkId: ARTWORK_ID,
+      artworkTitle: '雪の城',
+      before: 5,
+      after: 2,
+      difference: 3,
+      direction: 'over' as const,
+      reason: REASON,
+      causeState: 'unknown' as const,
+      snapshot: [
+        {
+          orderId: 'c0ffee00-0000-4000-8000-00000000000b',
+          orderNumber: 'SG-0001',
+          orderStatus: 'paid',
+          heldQuantity: 3,
+          issuedCount: 1,
+        },
+      ],
+      repairedByAccountId: ACCOUNT_ID,
+      repairedAt: TEST_NOW,
+      resolvedAt: null,
+      resolvedByAccountId: null,
+      resolutionNote: null,
+      ...overrides,
+    };
+  }
+
+  it('運営が直すと、直した記録が返る', async () => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: true, record: repairRecord() };
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({ observedReservedCount: 5, reason: REASON, causeState: 'identified' })
+      .expect(201);
+
+    expect(response.body).toMatchObject({ before: 5, after: 2, difference: 3, direction: 'over' });
+    // ⚠️ 直す前の内訳が返る。これが無いと後から原因を辿れない。
+    expect(response.body.snapshot).toHaveLength(1);
+  });
+
+  /*
+    ⚠️ **一括で直す口が無いことの証。** 作品の識別子は経路に 1 つだけで、
+       本文に作品の一覧を渡す余地が無い。ずれはバグ由来だと同時に何十件も
+       出るので、一括だと本人が下していない判断を数十件ぶん下せてしまう。
+  */
+  it('作品は 1 件ずつしか渡せない', async () => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: true, record: repairRecord() };
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({
+        observedReservedCount: 5,
+        reason: REASON,
+        causeState: 'identified',
+        // ⚠️ 余計な項目は落ちる。ここから一括にはできない。
+        artworkIds: ['a', 'b', 'c'],
+      })
+      .expect(201);
+
+    expect(harness.reservedCountRepairs.repairCalls).toHaveLength(1);
+    expect(harness.reservedCountRepairs.repairCalls[0]?.command.artworkId).toBe(ARTWORK_ID);
+  });
+
+  it('監査担当は直せない', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('auditor')))
+      .send({ observedReservedCount: 5, reason: REASON, causeState: 'identified' })
+      .expect(403);
+  });
+
+  it('理由を書かなければ受け付けない', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({ observedReservedCount: 5, reason: '直した', causeState: 'identified' })
+      .expect(400);
+  });
+
+  /*
+    ⚠️ **人が数字を選べる口を作らない。** 直す先はサーバー側が仮引当と
+       受取権から計算で出す。決済 P0/P1 §9.3 が禁じているのはここ。
+  */
+  it('直す先の数を送りつけても、受け取らない', async () => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: true, record: repairRecord() };
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({
+        observedReservedCount: 5,
+        reason: REASON,
+        causeState: 'identified',
+        after: 999,
+        reservedCount: 999,
+      })
+      .expect(201);
+
+    const call = harness.reservedCountRepairs.repairCalls[0];
+    expect(Object.keys(call?.command ?? {}).sort()).toEqual([
+      'artworkId',
+      'causeState',
+      'observedReservedCount',
+      'reason',
+    ]);
+  });
+
+  /*
+    ⚠️ **断った理由ごとに違う答えを返す。** 「直せませんでした」だけだと、
+       画面を開き直せばよいのか、そもそも直す話ではないのかが分からない。
+  */
+  it.each([
+    ['stale_view', 409],
+    ['no_drift', 409],
+    ['exceeds_max_supply', 409],
+    ['reason_required', 400],
+  ] as const)('断った理由 %s は %i で返る', async (refusal, status) => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: false, refusal };
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({ observedReservedCount: 5, reason: REASON, causeState: 'identified' })
+      .expect(status);
+
+    // ⚠️ 符号をそのまま返す。画面が文言を決められるように。
+    expect(response.body.error.code).toBe(`RESERVED_COUNT_REPAIR_${refusal.toUpperCase()}`);
+  });
+
+  it('作品が無ければ 404', async () => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: false, refusal: 'artwork_not_found' };
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({ observedReservedCount: 5, reason: REASON, causeState: 'identified' })
+      .expect(404);
+  });
+
+  /*
+    ⚠️ **押した人と、直す前の内訳を記録に残す。** 前後の値だけでは
+       後から原因を辿れない。修復の口を置くための引き換えがこれ。
+  */
+  it('直したことは、内訳ごと操作の記録に残る', async () => {
+    harness.reservedCountRepairs.repairOutcome_ = { ok: true, record: repairRecord() };
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/operations/reserved-count-drift/${ARTWORK_ID}/repair`)
+      .set(auth(actorToken('operator')))
+      .send({ observedReservedCount: 5, reason: REASON, causeState: 'identified' })
+      .expect(201);
+
+    const recorded = harness.audit.entries.filter(
+      (row) => row.action === 'operations.repair_reserved_count',
+    );
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.targetId).toBe(ARTWORK_ID);
+    expect(recorded[0]?.summary).toMatchObject({ before: 5, after: 2 });
+    expect((recorded[0]?.summary as { snapshot: unknown[] }).snapshot).toHaveLength(1);
+  });
+
+  describe('原因未特定の積み残し', () => {
+    it('監査担当も一覧を読める', async () => {
+      harness.reservedCountRepairs.records_ = [repairRecord()];
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/admin/operations/reserved-count-repairs')
+        .set(auth(actorToken('auditor')))
+        .expect(200);
+
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.pendingCount).toBe(1);
+    });
+
+    /*
+      ⚠️ **既定は積み残しのみ。** 閉じたものまで既定で出すと、
+         「まだ調べていないもの」が埋もれる。
+    */
+    it('既定では、閉じたものと原因の分かっているものを出さない', async () => {
+      harness.reservedCountRepairs.records_ = [
+        repairRecord({ id: 'a', causeState: 'unknown', resolvedAt: null }),
+        repairRecord({ id: 'b', causeState: 'identified', resolvedAt: null }),
+        repairRecord({ id: 'c', causeState: 'unknown', resolvedAt: TEST_NOW }),
+      ];
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/admin/operations/reserved-count-repairs')
+        .set(auth(actorToken('operator')))
+        .expect(200);
+
+      expect(response.body.items.map((row: { id: string }) => row.id)).toEqual(['a']);
+    });
+
+    it('すべてを求めれば、閉じたものも出す', async () => {
+      harness.reservedCountRepairs.records_ = [
+        repairRecord({ id: 'a' }),
+        repairRecord({ id: 'b', causeState: 'identified' }),
+      ];
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/admin/operations/reserved-count-repairs?state=all')
+        .set(auth(actorToken('operator')))
+        .expect(200);
+
+      expect(response.body.items).toHaveLength(2);
+      // ⚠️ 積み残しの数は一覧の件数と別に返す。上限で切れても数は正しい。
+      expect(response.body.pendingCount).toBe(1);
+    });
+
+    it('監査担当は閉じられない', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/operations/reserved-count-repairs/${REPAIR_ID}/resolve`)
+        .set(auth(actorToken('auditor')))
+        .send({ note: '返金の二重解放が原因だった。PR #86 で修正済み' })
+        .expect(403);
+    });
+
+    it('何が分かったのかを書かなければ受け付けない', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/operations/reserved-count-repairs/${REPAIR_ID}/resolve`)
+        .set(auth(actorToken('operator')))
+        .send({ note: '解決' })
+        .expect(400);
+    });
+
+    it('閉じたことも操作の記録に残る', async () => {
+      harness.reservedCountRepairs.resolveOutcome_ = {
+        ok: true,
+        record: repairRecord({ resolvedAt: TEST_NOW, resolvedByAccountId: ACCOUNT_ID }),
+      };
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/operations/reserved-count-repairs/${REPAIR_ID}/resolve`)
+        .set(auth(actorToken('operator')))
+        .send({ note: '返金の二重解放が原因だった。PR #86 で修正済み' })
+        .expect(201);
+
+      const recorded = harness.audit.entries.filter(
+        (row) => row.action === 'operations.resolve_reserved_count_repair',
+      );
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.targetId).toBe(REPAIR_ID);
+    });
+
+    it('すでに閉じているものは 409', async () => {
+      harness.reservedCountRepairs.resolveOutcome_ = {
+        ok: false,
+        refusal: 'already_resolved',
+      };
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/admin/operations/reserved-count-repairs/${REPAIR_ID}/resolve`)
+        .set(auth(actorToken('operator')))
+        .send({ note: '返金の二重解放が原因だった。PR #86 で修正済み' })
+        .expect(409);
+    });
+  });
+});
