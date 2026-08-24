@@ -61,6 +61,7 @@ import {
   PrismaNotificationHistoryRepository,
   PrismaNotificationOutboxRepository,
   PrismaEntitlementAdminRepository,
+  PrismaReservedCountRepairRepository,
   PrismaAttestationRepository,
   PrismaProductionReadinessRepository,
   PrismaAccountNoteRepository,
@@ -760,6 +761,12 @@ async function bootstrap(): Promise<void> {
         ⚠️ **省略できない。** 指標の見えない配備は「正常」に見えてしまい、
            止まっていることに誰も気づけない。
       */
+      /*
+        押さえのずれを直す口（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+        ⚠️ **省略できない。** 直す口が無いと、売り越しの芽を見つけても
+           運営が手を出せず、開発の担当者を待つあいだ売り越しが続く。
+      */
+      reservedCountRepairs: new PrismaReservedCountRepairRepository(prisma),
       operations: {
         repository: operationsRepository,
         entitlements: new PrismaEntitlementAdminRepository(prisma),

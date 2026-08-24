@@ -101,6 +101,11 @@ import type {
   JobHeartbeat,
   OperationsCounts,
   OperationsMetricsPort,
+  ReservedCountRepairCommand,
+  ReservedCountRepairOutcome,
+  ReservedCountRepairPort,
+  ReservedCountRepairRecord,
+  ReservedCountRepairResolveOutcome,
   // 顧客サポート（P1-1）。
   AccountNotePort,
   AccountNoteRecord,
@@ -2933,6 +2938,7 @@ export interface TestHarness extends AppDependencies {
   readonly notifications: InMemoryNotifications;
   /** ⚠️ 置いた数から正しい色が出るかを見るため、実体の型で持つ。 */
   readonly operationsMetrics: InMemoryOperations;
+  readonly reservedCountRepairs: InMemoryReservedCountRepairs;
   /** 本番販売ガード（P0-7）。⚠️ 条件を 1 つずつ崩すため実体の型で持つ。 */
   readonly productionReadiness: InMemoryProductionReadiness;
   readonly attestations: InMemoryAttestations;
@@ -3166,6 +3172,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
   const operationsReviews = new InMemoryOperationsReviews();
   const notifications = new InMemoryNotifications();
   const operationsMetrics = new InMemoryOperations();
+  const reservedCountRepairs = new InMemoryReservedCountRepairs();
   const productionReadiness = new InMemoryProductionReadiness();
   const attestations = new InMemoryAttestations();
   const mailTestSender = new FakeMailTestSender();
@@ -3214,6 +3221,7 @@ export function buildHarness(tokenVerifier: TokenVerifierPort): TestHarness {
     operationsReviews,
     // 運営ダッシュボード（P0-6）。⚠️ 置いた数から色が決まるかを見る。
     operationsMetrics,
+    reservedCountRepairs,
     entitlementAdmin,
     // 顧客サポート（P1-1）。⚠️ 積んだ行を試験から覗くため、実体の型で持つ。
     customerDirectory,
@@ -3971,6 +3979,65 @@ export class InMemoryNotifications implements NotificationOutboxPort, Notificati
  * なってしまう（そちらは DB の結合試験で見る）。ここで見たいのは
  * 「置いた数から、正しい色が出るか」である。
  */
+/**
+ * 押さえのずれを直す口（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+ *
+ * ⚠️ **本物の歯止め（作品行の `FOR UPDATE`・数え直し）はここに無い。**
+ * それは実 PostgreSQL でしか試せないので、DB の結合試験で見ている
+ * （`reserved-count-repair.test.ts`）。ここで見たいのは
+ * **「誰が押せて、断ったときに何が返るか」**である。
+ */
+export class InMemoryReservedCountRepairs implements ReservedCountRepairPort {
+  /** 次に `repair` が返すもの。⚠️ 試験ごとに差し替える。 */
+  repairOutcome_: ReservedCountRepairOutcome = {
+    ok: false,
+    refusal: 'no_drift',
+  };
+  resolveOutcome_: ReservedCountRepairResolveOutcome = { ok: false, refusal: 'not_found' };
+  records_: readonly ReservedCountRepairRecord[] = [];
+  hasMore_ = false;
+  /** 呼ばれた履歴。⚠️ 一括で呼ばれていないことを確かめる。 */
+  readonly repairCalls: {
+    command: ReservedCountRepairCommand;
+    actorAccountId: string;
+  }[] = [];
+
+  repair(input: {
+    readonly command: ReservedCountRepairCommand;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<ReservedCountRepairOutcome> {
+    this.repairCalls.push({ command: input.command, actorAccountId: input.actorAccountId });
+    return Promise.resolve(this.repairOutcome_);
+  }
+
+  list(query: { readonly state: 'pending' | 'all'; readonly limit: number }): Promise<{
+    readonly items: readonly ReservedCountRepairRecord[];
+    readonly hasMore: boolean;
+  }> {
+    const items =
+      query.state === 'pending'
+        ? this.records_.filter((row) => row.causeState === 'unknown' && row.resolvedAt === null)
+        : this.records_;
+    return Promise.resolve({ items: items.slice(0, query.limit), hasMore: this.hasMore_ });
+  }
+
+  resolve(_input: {
+    readonly repairId: string;
+    readonly note: string;
+    readonly actorAccountId: string;
+    readonly now: Date;
+  }): Promise<ReservedCountRepairResolveOutcome> {
+    return Promise.resolve(this.resolveOutcome_);
+  }
+
+  pendingCount(): Promise<number> {
+    return Promise.resolve(
+      this.records_.filter((row) => row.causeState === 'unknown' && row.resolvedAt === null).length,
+    );
+  }
+}
+
 export class InMemoryOperations implements OperationsMetricsPort {
   counts_: OperationsCounts = {
     todayOrderCount: 0,
@@ -3987,6 +4054,7 @@ export class InMemoryOperations implements OperationsMetricsPort {
     integrationFailureCount: 0,
     openDisputeCount: 0,
     disputeDueSoonCount: 0,
+    unexplainedRepairCount: 0,
     lastWebhookReceivedAt: TEST_NOW,
   };
 

@@ -49,6 +49,7 @@ export {
   openOperationsReview,
 } from './repositories/operations-review.repository';
 export { PrismaRevocationReconcileRepository } from './repositories/revocation-reconcile.repository';
+export { PrismaReservedCountRepairRepository } from './repositories/reserved-count-repair.repository';
 export { PrismaWalletDeliveryAdminRepository } from './repositories/wallet-delivery-admin.repository';
 
 export { encodeCursor, decodeCursor, type Cursor } from './repositories/mappers';

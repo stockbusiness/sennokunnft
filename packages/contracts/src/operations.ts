@@ -5,6 +5,11 @@ import {
   DISPUTE_URGENCIES,
   OPERATIONS_SEVERITIES,
   RESERVED_COUNT_DRIFT_DIRECTIONS,
+  RESERVED_COUNT_REPAIR_CAUSE_STATES,
+  RESERVED_COUNT_REPAIR_REASON_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_REASON_MIN_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MIN_LENGTH,
 } from '@sengoku/domain';
 import type { OperationsSeverity } from '@sengoku/domain';
 import { z } from 'zod';
@@ -190,6 +195,96 @@ export const reservedCountDriftQuerySchema = z.object({
 });
 export type ReservedCountDriftQuery = z.infer<typeof reservedCountDriftQuerySchema>;
 
+/**
+ * 押さえのずれを直す申し入れ（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+ *
+ * ⚠️ **直す先の数を受け取らない。** 人が数字を選べる口にすると、決済
+ * P0/P1 §9.3 が禁じる「在庫数と無関係な予約作成」になる。直す先は
+ * サーバー側が仮引当と受取権から**計算で出す。**
+ */
+export const reservedCountRepairRequestSchema = z.object({
+  /**
+   * 画面が見ていた押さえの数。
+   *
+   * ⚠️ **これが要の歯止め。** 画面を開いてから押すまでに正常なご注文が
+   * 入ると、古い数字で上書きして**逆にずれを作る。**サーバー側は掴んで
+   * 読み直し、この値と違えば直さない。
+   */
+  observedReservedCount: z.number().int().nonnegative(),
+  /** ⚠️ 空では押せない。中身は検められないが、一度手を止めさせる。 */
+  reason: z
+    .string()
+    .trim()
+    .min(RESERVED_COUNT_REPAIR_REASON_MIN_LENGTH)
+    .max(RESERVED_COUNT_REPAIR_REASON_MAX_LENGTH),
+  /**
+   * 原因を突き止めたうえで直すのか、分からないまま急ぐのか。
+   *
+   * ⚠️ **`unknown` を選んでも押せる。** 押さえが足りない側はいま売り越しが
+   * 起きうる状態で、原因究明が済むまで待たせるほうが危ない。そのかわり
+   * **積み残しとして残り続ける。**
+   */
+  causeState: z.enum(RESERVED_COUNT_REPAIR_CAUSE_STATES),
+});
+export type ReservedCountRepairRequest = z.infer<typeof reservedCountRepairRequestSchema>;
+
+/** 直した記録 1 件。⚠️ 買った方を特定できる項目を置かない（`UD-503`）。 */
+export const reservedCountRepairSchema = z.object({
+  id: z.string(),
+  artworkId: z.string(),
+  /** 直した時点の作品名。⚠️ 改題されても動かない。 */
+  artworkTitle: z.string(),
+  before: z.number().int(),
+  after: z.number().int(),
+  /** ⚠️ 符号を保つ。多かったのか足りなかったのか。 */
+  difference: z.number().int(),
+  direction: z.enum(RESERVED_COUNT_DRIFT_DIRECTIONS),
+  reason: z.string(),
+  causeState: z.enum(RESERVED_COUNT_REPAIR_CAUSE_STATES),
+  /** ⚠️ 直す前の内訳。これが無いと後から原因を辿れない。 */
+  snapshot: z.array(reservedCountDriftOrderSchema.omit({ stillHeld: true })),
+  repairedByAccountId: z.string(),
+  repairedAt: z.string(),
+  resolvedAt: z.string().nullable(),
+  resolvedByAccountId: z.string().nullable(),
+  resolutionNote: z.string().nullable(),
+});
+export type ReservedCountRepairAdminView = z.infer<typeof reservedCountRepairSchema>;
+
+export const reservedCountRepairListResponseSchema = z.object({
+  items: z.array(reservedCountRepairSchema),
+  /** ⚠️ **上限で切ったことを隠さない。** 全部見えていると読ませない。 */
+  hasMore: z.boolean(),
+  /** 原因未特定でまだ閉じていない件数。⚠️ 画面の見出しに使う。 */
+  pendingCount: z.number().int().nonnegative(),
+  generatedAt: z.string(),
+});
+export type ReservedCountRepairListResponse = z.infer<typeof reservedCountRepairListResponseSchema>;
+
+export const reservedCountRepairQuerySchema = z.object({
+  /** ⚠️ 既定は積み残しのみ。閉じたものは探しに行くもの。 */
+  state: z.enum(['pending', 'all']).default('pending'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type ReservedCountRepairQuery = z.infer<typeof reservedCountRepairQuerySchema>;
+
+/**
+ * 積み残しを閉じる申し入れ。
+ *
+ * ⚠️ **消す操作ではない。** 閉じるのは「原因が分かった」と言うこと。
+ * 何が分かったのかを書けないなら、まだ閉じるときではない。
+ */
+export const reservedCountRepairResolveRequestSchema = z.object({
+  note: z
+    .string()
+    .trim()
+    .min(RESERVED_COUNT_REPAIR_RESOLUTION_MIN_LENGTH)
+    .max(RESERVED_COUNT_REPAIR_RESOLUTION_MAX_LENGTH),
+});
+export type ReservedCountRepairResolveRequest = z.infer<
+  typeof reservedCountRepairResolveRequestSchema
+>;
+
 export const entitlementAdminQuerySchema = z.object({
   status: z.string().optional(),
   walletDeliveryStatus: z.string().optional(),
@@ -234,4 +329,18 @@ export { OPERATIONS_SEVERITIES };
  * 見出しが全件そろっているかは画面側の試験で確かめている。
  */
 export { DISPUTE_STATUSES, DISPUTE_REASONS, DISPUTE_URGENCIES };
+/**
+ * 修復まわりの語彙と長さも素通しする（2026-08-24）。
+ *
+ * ⚠️ **画面がここから読むためにある。** 画面は `@sengoku/domain` へ依存
+ * できない（依存検査で止まる）。文字数の下限を画面側で別に持つと、
+ * **画面は通すのにサーバーが弾く**という一番わかりにくい形になる。
+ */
+export {
+  RESERVED_COUNT_REPAIR_CAUSE_STATES,
+  RESERVED_COUNT_REPAIR_REASON_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_REASON_MIN_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MAX_LENGTH,
+  RESERVED_COUNT_REPAIR_RESOLUTION_MIN_LENGTH,
+};
 export type { OperationsSeverity };

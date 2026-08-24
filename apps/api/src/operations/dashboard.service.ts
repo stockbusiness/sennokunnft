@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   ConsistencyResponse,
   DisputeAdminListResponse,
@@ -11,6 +11,11 @@ import type {
   RedeliverResponse,
   ReservedCountDriftListResponse,
   ReservedCountDriftQuery,
+  ReservedCountRepairAdminView,
+  ReservedCountRepairListResponse,
+  ReservedCountRepairQuery,
+  ReservedCountRepairRequest,
+  ReservedCountRepairResolveRequest,
   RetryIssuanceResponse,
 } from '@sengoku/contracts';
 import {
@@ -27,6 +32,11 @@ import {
   type EntitlementAdminRecord,
   type OperationsMetricsPort,
   type OperationsThresholds,
+  type DomainErrorCode,
+  type ReservedCountRepairPort,
+  type ReservedCountRepairRecord,
+  type ReservedCountRepairRefusal,
+  type ReservedCountRepairResolveRefusal,
 } from '@sengoku/domain';
 import type { Actor } from '@sengoku/auth';
 
@@ -77,6 +87,13 @@ export class OperationsDashboardService {
      * 空の一覧を返す。口ごと消すと、画面が配備ごとに変わる。
      */
     private readonly disputes: DisputePort | null = null,
+    /**
+     * 押さえのずれを直す口（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+     *
+     * ⚠️ **`null` は「この配備では押せない」を意味する。** 口は生やし、
+     * 押されたら断る。口ごと消すと、画面が配備ごとに変わる。
+     */
+    private readonly repairs: ReservedCountRepairPort | null = null,
   ) {}
 
   async dashboard(): Promise<OperationsDashboardResponse> {
@@ -149,6 +166,149 @@ export class OperationsDashboardService {
       hasMore: page.hasMore,
       generatedAt: this.clock.now().toISOString(),
     };
+  }
+
+  /**
+   * 押さえのずれを 1 件だけ直す。
+   *
+   * ⚠️ **一括で直す口を作らない。** ずれはバグ由来だと同時に何十件も出る。
+   * 一括だと 1 回の操作で、本人が下していない判断を数十件ぶん下せてしまう。
+   *
+   * ⚠️ **監査ログには前後の値だけでなく内訳も残す。** 「12 → 9」だけでは
+   * 後から何ひとつ辿れない。
+   */
+  async repairReservedCount(
+    actor: Actor,
+    artworkId: string,
+    request: ReservedCountRepairRequest,
+  ): Promise<ReservedCountRepairAdminView> {
+    if (this.repairs === null) {
+      throw new DomainErrorException('RESERVED_COUNT_REPAIR_UNAVAILABLE');
+    }
+    /*
+      ⚠️ **押した人が特定できないなら直させない。** 記録の `repaired_by` は
+         NULL を許さない列で、誰が押したか分からない修復の記録は記録として
+         意味がない。認可（`can`）が先に弾くはずだが、**断定（`!`）で
+         潰さない**——弾く条件が変わったときに、ここが静かに穴になる。
+    */
+    const actorAccountId = actor.accountId;
+    if (actorAccountId === null) {
+      throw new ForbiddenException();
+    }
+    const outcome = await this.repairs.repair({
+      command: {
+        artworkId,
+        observedReservedCount: request.observedReservedCount,
+        reason: request.reason,
+        causeState: request.causeState,
+      },
+      actorAccountId,
+      now: this.clock.now(),
+    });
+    if (!outcome.ok) {
+      if (outcome.refusal === 'artwork_not_found') {
+        throw new NotFoundException();
+      }
+      /*
+        ⚠️ **断った理由をそのまま返す。** 「直せませんでした」だけだと、
+           画面を開き直せばよいのか、そもそも直す話ではないのかが
+           分からない。文言は画面側が符号から決める。
+      */
+      throw new DomainErrorException(REPAIR_ERROR_CODES[outcome.refusal]);
+    }
+
+    await this.audit.record({
+      actorAccountId: actor.accountId,
+      action: 'operations.repair_reserved_count',
+      targetType: 'artwork',
+      targetId: artworkId,
+      summary: {
+        before: outcome.record.before,
+        after: outcome.record.after,
+        difference: outcome.record.difference,
+        causeState: outcome.record.causeState,
+        // ⚠️ 内訳ごと残す。前後の値だけでは原因を追えない。
+        snapshot: outcome.record.snapshot,
+      },
+    });
+
+    return toRepairView(outcome.record);
+  }
+
+  /** 直した記録の一覧。⚠️ 既定は原因未特定の積み残しのみ。 */
+  async listReservedCountRepairs(
+    query: ReservedCountRepairQuery,
+  ): Promise<ReservedCountRepairListResponse> {
+    if (this.repairs === null) {
+      return {
+        items: [],
+        hasMore: false,
+        pendingCount: 0,
+        generatedAt: this.clock.now().toISOString(),
+      };
+    }
+    const [page, pendingCount] = await Promise.all([
+      this.repairs.list({ state: query.state, limit: query.limit }),
+      this.repairs.pendingCount(),
+    ]);
+    return {
+      items: page.items.map(toRepairView),
+      hasMore: page.hasMore,
+      /*
+        ⚠️ **一覧の件数と別に返す。** 一覧は上限で切れるので、
+           切れた数を見出しに出すと「2 件しか無い」と読まれる。
+      */
+      pendingCount,
+      generatedAt: this.clock.now().toISOString(),
+    };
+  }
+
+  /**
+   * 原因未特定の積み残しを閉じる。
+   *
+   * ⚠️ **消す操作ではない。** 何が分かったのかを書かせ、`resolved_*` を
+   * 埋めるだけ。直す前の値と内訳には触らない。
+   */
+  async resolveReservedCountRepair(
+    actor: Actor,
+    repairId: string,
+    request: ReservedCountRepairResolveRequest,
+  ): Promise<ReservedCountRepairAdminView> {
+    if (this.repairs === null) {
+      throw new DomainErrorException('RESERVED_COUNT_REPAIR_UNAVAILABLE');
+    }
+    /*
+      ⚠️ **押した人が特定できないなら直させない。** 記録の `repaired_by` は
+         NULL を許さない列で、誰が押したか分からない修復の記録は記録として
+         意味がない。認可（`can`）が先に弾くはずだが、**断定（`!`）で
+         潰さない**——弾く条件が変わったときに、ここが静かに穴になる。
+    */
+    const actorAccountId = actor.accountId;
+    if (actorAccountId === null) {
+      throw new ForbiddenException();
+    }
+    const outcome = await this.repairs.resolve({
+      repairId,
+      note: request.note,
+      actorAccountId,
+      now: this.clock.now(),
+    });
+    if (!outcome.ok) {
+      if (outcome.refusal === 'not_found') {
+        throw new NotFoundException();
+      }
+      throw new DomainErrorException(RESOLVE_ERROR_CODES[outcome.refusal]);
+    }
+
+    await this.audit.record({
+      actorAccountId: actor.accountId,
+      action: 'operations.resolve_reserved_count_repair',
+      targetType: 'reserved_count_repair',
+      targetId: repairId,
+      summary: { artworkId: outcome.record.artworkId },
+    });
+
+    return toRepairView(outcome.record);
   }
 
   /**
@@ -330,3 +490,57 @@ function toDisputeView(row: DisputeListItem, now: Date, dueSoonBefore: Date): Di
     hasRefund: row.refundId !== null,
   };
 }
+
+/**
+ * 直した記録を画面の形へ。
+ *
+ * ⚠️ **読み取り専用の配列を可変へ移し替える。** 契約側（zod）は可変配列を
+ * 期待するので、そのままでは渡せない。
+ */
+function toRepairView(record: ReservedCountRepairRecord): ReservedCountRepairAdminView {
+  return {
+    id: record.id,
+    artworkId: record.artworkId,
+    artworkTitle: record.artworkTitle,
+    before: record.before,
+    after: record.after,
+    difference: record.difference,
+    direction: record.direction,
+    reason: record.reason,
+    causeState: record.causeState,
+    snapshot: record.snapshot.map((order) => ({
+      orderId: order.orderId,
+      orderNumber: order.orderNumber,
+      orderStatus: order.orderStatus,
+      heldQuantity: order.heldQuantity,
+      issuedCount: order.issuedCount,
+    })),
+    repairedByAccountId: record.repairedByAccountId,
+    repairedAt: record.repairedAt.toISOString(),
+    resolvedAt: record.resolvedAt?.toISOString() ?? null,
+    resolvedByAccountId: record.resolvedByAccountId,
+    resolutionNote: record.resolutionNote,
+  };
+}
+
+/**
+ * 断った理由を、画面へ返す符号へ。
+ *
+ * ⚠️ **1 つにまとめない。** 画面を開き直せばよいのか、そもそも直す話では
+ * ないのかで、運営の次の一手がまるきり変わる。
+ *
+ * ⚠️ **文字列を組み立てない。** 組み立てると語彙が増えたときに型が
+ * 気づかず、知らない符号がそのまま画面へ出る。
+ */
+const REPAIR_ERROR_CODES: Readonly<Record<ReservedCountRepairRefusal, DomainErrorCode>> = {
+  reason_required: 'RESERVED_COUNT_REPAIR_REASON_REQUIRED',
+  stale_view: 'RESERVED_COUNT_REPAIR_STALE_VIEW',
+  no_drift: 'RESERVED_COUNT_REPAIR_NO_DRIFT',
+  exceeds_max_supply: 'RESERVED_COUNT_REPAIR_EXCEEDS_MAX_SUPPLY',
+};
+
+const RESOLVE_ERROR_CODES: Readonly<Record<ReservedCountRepairResolveRefusal, DomainErrorCode>> = {
+  note_required: 'RESERVED_COUNT_REPAIR_NOTE_REQUIRED',
+  not_pending: 'RESERVED_COUNT_REPAIR_NOT_PENDING',
+  already_resolved: 'RESERVED_COUNT_REPAIR_ALREADY_RESOLVED',
+};

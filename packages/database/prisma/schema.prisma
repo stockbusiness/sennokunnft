@@ -142,6 +142,9 @@ model Account {
   verifiedEmailChanges         EmailChangeRequest[]         @relation("EmailChangeVerifier")
   settledEmailChanges          EmailChangeRequest[]         @relation("EmailChangeSettler")
   notifications                NotificationDelivery[]       @relation("NotificationRecipient")
+  /// 押さえのずれを直した記録（`ADMIN_OPERATIONS_GAP.md` §I）。⚠️ 消せない。
+  reservedCountRepairs         ReservedCountRepair[]        @relation("ReservedCountRepairActor")
+  resolvedReservedCountRepairs ReservedCountRepair[]        @relation("ReservedCountRepairResolver")
 
   @@unique([authProvider, authSubject])
   @@index([commonUserStatus, commonUserNextAttemptAt])
@@ -516,6 +519,7 @@ model Artwork {
   orderLines   OrderLine[]
   entitlements Entitlement[]
   reservations InventoryReservation[]
+  repairs      ReservedCountRepair[]
 
   @@index([status])
   /// 出品者が「自分の作品」を引くための索引。一覧のたびに全件走査させない。
@@ -936,6 +940,57 @@ model PaymentDispute {
   @@unique([provider, disputeRef], map: "payment_disputes_provider_ref_unique")
   @@index([orderId], map: "payment_disputes_order_idx")
   @@map("payment_disputes")
+}
+
+/// 押さえのずれを直した記録（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+///
+/// ⚠️ **「直した」の記録ではなく「直す前がどうだったか」の記録である。**
+/// 前後の値だけでは後から何ひとつ辿れない。どの注文が・いくつ押さえ・
+/// いくつ発行済みだったかを丸ごと焼き付けて初めて原因を追える。整合性
+/// チェックの「直さない。数えるだけ」を一部ひるがえす引き換えがこれ。
+///
+/// ⚠️ **`causeState = 'unknown'` の行は、閉じられるまで積み残しとして残る。**
+/// 修復すると整合性チェックは 0 件へ戻るが、この数は残る——**直したことで
+/// 赤が消えるのを許さない**ためにある。
+///
+/// ⚠️ **書き換えない。追記だけ。** 閉じるときも `resolved*` を埋めるだけで、
+/// `beforeCount` / `afterCount` / `snapshot` には触らない。
+///
+/// ⚠️ 部分索引 `reserved_count_repairs_pending_idx`
+/// （`WHERE cause_state = 'unknown' AND resolved_at IS NULL`）が積み残しの
+/// 一覧を軽く保つ。Prisma では条件付き索引を書けないため、
+/// **手書きのマイグレーション側にだけ存在する**。消さないこと。
+model ReservedCountRepair {
+  id                   String    @id @default(uuid()) @db.Uuid
+  artworkId            String    @map("artwork_id") @db.Uuid
+  /// 直した時点の作品名。⚠️ スナップショット原則。改題されても動かない。
+  artworkTitleSnapshot String    @map("artwork_title_snapshot")
+  beforeCount          Int       @map("before_count")
+  afterCount           Int       @map("after_count")
+  /// `beforeCount - afterCount`。⚠️ 符号を保つ。0 は CHECK 制約が拒む。
+  difference           Int
+  /// `over`（押さえが多かった）/ `under`（足りなかった）。
+  direction            String
+  /// 押した人が書いた理由。⚠️ 空では押せない（10 文字以上）。
+  reason               String
+  /// `identified` / `unknown`。⚠️ `unknown` は積み残しとして残る。
+  causeState           String    @map("cause_state")
+  /// 直す前の内訳。⚠️ 氏名・メール・住所を入れない（`UD-503`）。
+  snapshot             Json
+  repairedByAccountId  String    @map("repaired_by_account_id") @db.Uuid
+  repairedAt           DateTime  @default(now()) @map("repaired_at") @db.Timestamptz(6)
+  /// 原因を突き止めて閉じたとき。⚠️ 閉じるまでは NULL で積み残しに出る。
+  resolvedAt           DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedByAccountId  String?   @map("resolved_by_account_id") @db.Uuid
+  /// 何が分かったのか。⚠️ 書けないなら、まだ閉じるときではない。
+  resolutionNote       String?   @map("resolution_note")
+
+  artwork    Artwork  @relation(fields: [artworkId], references: [id], onDelete: Restrict)
+  repairedBy Account  @relation("ReservedCountRepairActor", fields: [repairedByAccountId], references: [id], onDelete: Restrict)
+  resolvedBy Account? @relation("ReservedCountRepairResolver", fields: [resolvedByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([artworkId, repairedAt(sort: Desc)], map: "reserved_count_repairs_artwork_idx")
+  @@map("reserved_count_repairs")
 }
 
 /// 在庫の仮引当（決済 Phase P0・P1・指示書 §5.3）。

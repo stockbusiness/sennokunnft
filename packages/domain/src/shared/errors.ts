@@ -415,6 +415,38 @@ export const DOMAIN_ERROR_CODES = [
    * 閉じない。同じ符号にすると、運営が「待てばよい」と読む。
    */
   'PAYOUT_DISPUTE_OPEN',
+  /*
+    押さえのずれを直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+
+    ⚠️ **断った理由を 1 つの符号にまとめない。** 画面を開き直せばよいのか、
+       そもそも直す話ではないのかで、運営の次の一手がまるきり変わる。
+  */
+  /** この配備では直す口が繋がっていない。 */
+  'RESERVED_COUNT_REPAIR_UNAVAILABLE',
+  /** 理由が書かれていない、または短すぎる／長すぎる。 */
+  'RESERVED_COUNT_REPAIR_REASON_REQUIRED',
+  /**
+   * 画面を開いてから押すまでに、押さえの数が動いた。
+   *
+   * ⚠️ **これは失敗ではなく、正しく止まった状態である。** 画面を開き
+   * 直せば直せる。文言も「開き直してください」にする。
+   */
+  'RESERVED_COUNT_REPAIR_STALE_VIEW',
+  /** もうずれていない。⚠️ 調べているあいだに直った。 */
+  'RESERVED_COUNT_REPAIR_NO_DRIFT',
+  /**
+   * 直すと在庫の上限を超える。
+   *
+   * ⚠️ **これはずれではなく、すでに売り越している。** ご注文を取り消すか
+   * 上限を上げるかの判断が要る事態で、この口で決めてよい話ではない。
+   */
+  'RESERVED_COUNT_REPAIR_EXCEEDS_MAX_SUPPLY',
+  /** 何が分かったのかが書かれていない。⚠️ 書けないなら閉じるときではない。 */
+  'RESERVED_COUNT_REPAIR_NOTE_REQUIRED',
+  /** 原因が分かったうえで直したもの。⚠️ はじめから積み残しではない。 */
+  'RESERVED_COUNT_REPAIR_NOT_PENDING',
+  /** すでに閉じている。⚠️ 前の人のメモを黙って上書きさせない。 */
+  'RESERVED_COUNT_REPAIR_ALREADY_RESOLVED',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

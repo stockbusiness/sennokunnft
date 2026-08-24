@@ -99,6 +99,8 @@ import {
   operationsDashboardResponseSchema,
   redeliverResponseSchema,
   retryIssuanceResponseSchema,
+  reservedCountRepairListResponseSchema,
+  reservedCountRepairSchema,
   attestationListResponseSchema,
   mailCheckResponseSchema,
   productionReadinessResponseSchema,
@@ -111,6 +113,10 @@ import {
   type CustomerSearchResponse,
   type EntitlementAdminDetailView,
   type DisputeAdminListResponse,
+  type ReservedCountRepairAdminView,
+  type ReservedCountRepairListResponse,
+  type ReservedCountRepairRequest,
+  type ReservedCountRepairResolveRequest,
   type ReservedCountDriftListResponse,
   type EntitlementAdminListResponse,
   type NotificationHistoryListResponse,
@@ -1000,6 +1006,44 @@ export function fetchEntitlement(id: string): Promise<AdminResult<EntitlementAdm
 }
 
 /** 発行をやり直す。⚠️ 何度押しても増えない。 */
+/**
+ * 押さえのずれを 1 件だけ直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24）。
+ *
+ * ⚠️ **一括の口を作らない。** 作品の識別子を 1 つしか受けない。
+ */
+export function repairReservedCount(
+  artworkId: string,
+  request: ReservedCountRepairRequest,
+): Promise<AdminResult<ReservedCountRepairAdminView>> {
+  return callAdmin(
+    `/api/v1/admin/operations/reserved-count-drift/${encodeURIComponent(artworkId)}/repair`,
+    reservedCountRepairSchema,
+    json(request, 'POST'),
+  );
+}
+
+/** 直した記録の一覧。⚠️ 既定は原因未特定の積み残しのみ。 */
+export function fetchReservedCountRepairs(
+  state: 'pending' | 'all' = 'pending',
+): Promise<AdminResult<ReservedCountRepairListResponse>> {
+  return callAdmin(
+    `/api/v1/admin/operations/reserved-count-repairs?state=${state}`,
+    reservedCountRepairListResponseSchema,
+  );
+}
+
+/** 原因未特定の積み残しを閉じる。⚠️ 消す操作ではない。 */
+export function resolveReservedCountRepair(
+  repairId: string,
+  request: ReservedCountRepairResolveRequest,
+): Promise<AdminResult<ReservedCountRepairAdminView>> {
+  return callAdmin(
+    `/api/v1/admin/operations/reserved-count-repairs/${encodeURIComponent(repairId)}/resolve`,
+    reservedCountRepairSchema,
+    json(request, 'POST'),
+  );
+}
+
 export function retryIssuance(orderId: string): Promise<AdminResult<RetryIssuanceResponse>> {
   return callAdmin(
     `/api/v1/admin/operations/orders/${encodeURIComponent(orderId)}/retry-issuance`,

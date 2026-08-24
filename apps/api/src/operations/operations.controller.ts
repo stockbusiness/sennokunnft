@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import type {
   ConsistencyResponse,
   DisputeAdminListResponse,
@@ -7,12 +7,17 @@ import type {
   OperationsDashboardResponse,
   RedeliverResponse,
   ReservedCountDriftListResponse,
+  ReservedCountRepairAdminView,
+  ReservedCountRepairListResponse,
   RetryIssuanceResponse,
 } from '@sengoku/contracts';
 import {
   disputeAdminQuerySchema,
   entitlementAdminQuerySchema,
   reservedCountDriftQuerySchema,
+  reservedCountRepairQuerySchema,
+  reservedCountRepairRequestSchema,
+  reservedCountRepairResolveRequestSchema,
 } from '@sengoku/contracts';
 import type { Actor } from '@sengoku/auth';
 import { CurrentActor, RequireAction } from '../auth/auth.guard';
@@ -54,18 +59,72 @@ export class OperationsController {
   /**
    * 押さえがずれた作品の一覧（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-23）。
    *
-   * ⚠️ **読むだけの口しか作らない。** 直す口をどう置くかは未決である。
-   * 食い違いの画面が「突き合わせて特定してください」としか言えなかった
-   * のを、数値と関わっている注文で補う。
-   *
-   * ⚠️ **閲覧者にも開く。** 数を動かす操作は無く、売り越しの芽が
-   * 残っていないかは監査の対象そのものである。
+   * ⚠️ **見るのと直すのを分けてある。** 一覧は閲覧者にも開くが、
+   * 直すのは `operations.retry` を持つ人だけ。売り越しの芽が残って
+   * いないかは監査の対象そのものなので、見る側を狭めない。
    */
   @Get('reserved-count-drift')
   @RequireAction('operations.view')
   listReservedCountDrift(@Query() query: unknown): Promise<ReservedCountDriftListResponse> {
     return this.operations.listReservedCountDrift(
       parseOrThrow(reservedCountDriftQuerySchema, query),
+    );
+  }
+
+  /**
+   * 押さえのずれを 1 件だけ直す（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24）。
+   *
+   * ⚠️ **オーナー限定にしていない。** 数を人が選べない（直す先は計算で
+   * 出る）ため、手数料率のような「上限の無い操作」ではない。オーナー限定は
+   * 一見安全だが、**気づいた人が動けず、待っているあいだ売り越しが続く。**
+   *
+   * ⚠️ **一括で直す口を作らない。** 作品の識別子を 1 つだけ受ける。
+   */
+  @Post('reserved-count-drift/:artworkId/repair')
+  @RequireAction('operations.retry')
+  repairReservedCount(
+    @CurrentActor() actor: Actor,
+    @Param('artworkId') artworkId: string,
+    @Body() body: unknown,
+  ): Promise<ReservedCountRepairAdminView> {
+    return this.operations.repairReservedCount(
+      actor,
+      artworkId,
+      parseOrThrow(reservedCountRepairRequestSchema, body),
+    );
+  }
+
+  /**
+   * 直した記録の一覧。⚠️ 既定は原因未特定の積み残しのみ。
+   *
+   * ⚠️ **閲覧者にも開く。** 「直したのに原因を調べていない」ことが
+   * 残っているかどうかは、監査の対象そのものである。
+   */
+  @Get('reserved-count-repairs')
+  @RequireAction('operations.view')
+  listReservedCountRepairs(@Query() query: unknown): Promise<ReservedCountRepairListResponse> {
+    return this.operations.listReservedCountRepairs(
+      parseOrThrow(reservedCountRepairQuerySchema, query),
+    );
+  }
+
+  /**
+   * 原因未特定の積み残しを閉じる。
+   *
+   * ⚠️ **消す操作ではない。** 何が分かったのかを書かせ、記録へ書き足す。
+   * 直す前の値と内訳には触らない。
+   */
+  @Post('reserved-count-repairs/:repairId/resolve')
+  @RequireAction('operations.retry')
+  resolveReservedCountRepair(
+    @CurrentActor() actor: Actor,
+    @Param('repairId') repairId: string,
+    @Body() body: unknown,
+  ): Promise<ReservedCountRepairAdminView> {
+    return this.operations.resolveReservedCountRepair(
+      actor,
+      repairId,
+      parseOrThrow(reservedCountRepairResolveRequestSchema, body),
     );
   }
 

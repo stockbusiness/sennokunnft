@@ -33,6 +33,7 @@ import type {
   EntitlementIssuanceRepository,
   RefundRepository,
   DisputePort,
+  ReservedCountRepairPort,
   RefundRequestPort,
   CreatorInquiryPort,
   CreatorReceivablePort,
@@ -427,6 +428,13 @@ export interface AppDependencies {
    * 配線したときに、取りこぼした知らせを追える形にしてある。
    */
   readonly disputes?: DisputePort | null | undefined;
+  /**
+   * 押さえのずれを直す口（`ADMIN_OPERATIONS_GAP.md` §I・2026-08-24 決定）。
+   *
+   * ⚠️ **繋がない配備では `null`。** 口は生やしたまま「この配備では
+   * 押せません」と断る。口ごと消すと、画面が配備ごとに変わる。
+   */
+  readonly reservedCountRepairs?: ReservedCountRepairPort | null | undefined;
   readonly refundRequests: {
     readonly requests: RefundRequestPort;
     readonly inquiries: CreatorInquiryPort;
@@ -1185,6 +1193,8 @@ export class AppModule implements NestModule {
               autoDelivery ?? null,
               // ⚠️ 争いを受けていない配備では `null`。空の一覧を返す。
               deps.disputes ?? null,
+              // ⚠️ 繋いでいない配備では `null`。押されたら断る。
+              deps.reservedCountRepairs ?? null,
             ),
         },
         {
